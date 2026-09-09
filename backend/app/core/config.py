@@ -85,3 +85,14 @@ def get_settings() -> Settings:
     테스트에서 값을 바꾸고 싶으면 `get_settings.cache_clear()` 후 환경 변수를 바꾸고 다시 부른다.
     """
     return Settings()
+
+
+def db_host_for_log() -> str:
+    """로그용 DB 호스트 (비밀번호 제외). 배포 환경에서 DATABASE_URL 이 전달됐는지 바로 확인하려는 용도."""
+    from urllib.parse import urlsplit
+
+    try:
+        u = urlsplit(get_settings().database_url)
+        return f"{u.hostname}:{u.port or 5432}/{u.path.lstrip('/')}"
+    except Exception:  # noqa: BLE001 — 로그용이라 어떤 오류도 삼킨다
+        return "(파싱 실패)"

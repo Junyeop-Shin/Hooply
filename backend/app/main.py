@@ -150,6 +150,9 @@ def create_app() -> FastAPI:
     )
     install_error_handlers(app)
     app.include_router(api_router, prefix=settings.api_prefix)
+    from app.core.config import db_host_for_log
+
+    print(f"[startup] DB → {db_host_for_log()} · docs={'on' if settings.docs_enabled else 'off'} · cors={settings.cors_origins}")
     from app.admin_ui import mount_admin
 
     mount_admin(app)  # S-18 관리자 콘솔: /admin (ADMIN 계정만)

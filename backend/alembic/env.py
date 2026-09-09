@@ -25,7 +25,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.core.config import get_settings
+from app.core.config import db_host_for_log, get_settings
 from app.models import Base  # noqa: F401 — 모든 모델을 metadata에 등록
 
 # Alembic이 alembic.ini를 파싱해 넘겨주는 설정 객체
@@ -37,6 +37,7 @@ if config.config_file_name is not None:
 
 # ini 파일의 빈 sqlalchemy.url을 앱 설정값으로 덮어쓴다 (모듈 docstring 1항)
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
+print(f"[alembic] DB → {db_host_for_log()}  (localhost 로 나오면 DATABASE_URL 환경 변수가 전달되지 않은 것)")
 # autogenerate가 비교 기준으로 삼는 "코드 쪽 스키마"
 target_metadata = Base.metadata
 
