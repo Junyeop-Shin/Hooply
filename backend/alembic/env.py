@@ -38,6 +38,10 @@ if config.config_file_name is not None:
 # ini 파일의 빈 sqlalchemy.url을 앱 설정값으로 덮어쓴다 (모듈 docstring 1항)
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 print(f"[alembic] DB → {db_host_for_log()}  (localhost 로 나오면 DATABASE_URL 환경 변수가 전달되지 않은 것)")
+import os  # noqa: E402
+
+_keys = sorted(k for k in os.environ if any(t in k.upper() for t in ("DATABASE", "NEON", "JWT", "CORS", "FRONTEND", "PG", "RENDER")))
+print(f"[alembic] 관련 환경 변수 이름: {_keys or '(없음)'}  · DATABASE_URL 존재={'DATABASE_URL' in os.environ}")
 # autogenerate가 비교 기준으로 삼는 "코드 쪽 스키마"
 target_metadata = Base.metadata
 
