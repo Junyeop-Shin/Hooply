@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
+import { SHARE_DONE, shareText } from '../lib/kakao'
 import { POSITIONS, type AttendanceView, type EventGuestInput, type EventView, type GuestPreset, type PlayerCard, type Position } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
@@ -240,10 +241,8 @@ function SurveyProgressCard({ eventId, responded, total, onMsg }: { eventId: num
   const share = useMutation({
     mutationFn: () => peerApi.shareMessage(eventId),
     onSuccess: async (m) => {
-      try {
-        if (navigator.share) { await navigator.share({ text: m.text }); setDone('공유 시트를 열었어요.') }
-        else { await navigator.clipboard.writeText(m.text); setDone('독려 메시지를 복사했어요. 카카오톡 단체방에 붙여 넣어 주세요.') }
-      } catch { /* 사용자가 공유를 취소 */ }
+      // 카카오톡 → OS 공유 시트 → 클립보드 순 (lib/kakao). 링크는 서버가 준 투표 주소
+      setDone(SHARE_DONE[await shareText(m.text.replace(m.link, '').trim(), m.link)])
     },
     onError: (e) => onMsg(errMsg(e, '메시지를 만들지 못했어요.')),
   })

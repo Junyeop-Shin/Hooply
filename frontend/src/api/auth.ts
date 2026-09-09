@@ -1,6 +1,8 @@
 import { api } from './client'
 import type { TeamMembershipView, TokenPair, UserDetail } from './types'
 
+export const KAKAO_CALLBACK = () => `${window.location.origin}/auth/kakao/callback`
+
 export interface SignupInput {
   email: string
   password: string
@@ -18,4 +20,10 @@ export const authApi = {
   updateMe: (patch: Partial<Pick<UserDetail, 'name' | 'nickname' | 'height_cm' | 'primary_team_id'>>) =>
     api<UserDetail>('/me', { method: 'PATCH', body: patch }),
   myTeams: () => api<{ items: TeamMembershipView[] }>('/me/teams'),
+  // 카카오 로그인 (11.5절): 인가 URL → 카카오 → /auth/kakao/callback?code&state → 백엔드 교환
+  kakaoLoginUrl: () => api<{ url: string; state: string }>(`/auth/kakao/login-url?redirect_uri=${encodeURIComponent(KAKAO_CALLBACK())}`, { auth: false }),
+  kakaoCallback: (code: string, state: string) =>
+    api<TokenPair & { is_new: boolean }>(`/auth/kakao/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&redirect_uri=${encodeURIComponent(KAKAO_CALLBACK())}`, { auth: false }),
+  kakaoLink: (code: string, state: string) =>
+    api<UserDetail>('/auth/kakao/link', { method: 'POST', body: { code, state, redirect_uri: KAKAO_CALLBACK() } }),
 }

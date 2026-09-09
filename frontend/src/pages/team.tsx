@@ -7,6 +7,7 @@ import { teamsApi } from '../api/teams'
 import { eventsApi } from '../api/events'
 import { EventRow, useMe } from './home'
 import { fmtEvent } from './events'
+import { SHARE_DONE, shareText } from '../lib/kakao'
 import { AdoptedSummary } from './assignment'
 import { surveyApi } from '../api/survey'
 import { localISODate, type PlayerCard, type PlayerCardDetailed } from '../api/types'
@@ -35,7 +36,7 @@ export function TeamCreatePage() {
           <p className="text-lg font-bold text-navy-900">{form.name}</p>
           <p className="text-sm text-stone-500">아래 코드를 팀원에게 공유하세요. 관리자 승인이 끝나고 5명이 모이면 일정을 만들 수 있어요.</p>
           <Alert kind="info">새 팀은 관리자 확인 후 승인돼요. 보통 하루 안에 처리되고, 그동안 팀원 모집은 계속할 수 있어요.</Alert>
-          <TeamCodeBox code={created.team_code} />
+          <TeamCodeBox code={created.team_code} teamName={form.name} />
         </Content>
         <BottomAction>
           <Button full onClick={() => nav(`/teams/${created.id}`, { replace: true })}>팀으로 이동</Button>
@@ -61,19 +62,27 @@ export function TeamCreatePage() {
   )
 }
 
-function TeamCodeBox({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false)
+/** 팀 코드 공유 문구 + 가입 링크 (S-06 이 ?code= 로 코드를 미리 채운다) */
+export const teamInviteText = (name: string, code: string) => ({
+  text: `[HOOPLY] ${name} 팀에 초대해요.\n팀 코드 ${code} 를 넣고 가입해 주세요.`,
+  url: `${window.location.origin}/teams/join?code=${code}`,
+})
+
+function TeamCodeBox({ code, teamName }: { code: string; teamName: string }) {
+  const [msg, setMsg] = useState<string | null>(null)
   const copy = async () => {
-    try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* 클립보드 미지원 */ }
+    try { await navigator.clipboard.writeText(code); setMsg('복사했어요.'); setTimeout(() => setMsg(null), 1500) } catch { /* 클립보드 미지원 */ }
   }
+  const share = async () => { const { text, url } = teamInviteText(teamName, code); setMsg(SHARE_DONE[await shareText(text, url)]) }
   return (
     <div className="mt-2 w-full rounded-2xl border-2 border-dashed border-court-300 bg-court-50 p-4">
       <p className="text-xs font-semibold text-court-700">팀 코드</p>
       <p className="my-1 font-mono text-3xl font-black tracking-[0.3em] text-navy-900">{code}</p>
       <div className="flex justify-center gap-2">
-        <Button variant="secondary" onClick={copy} className="min-h-10 text-sm">{copied ? '복사됨 ✓' : '복사'}</Button>
-        <Button variant="ghost" className="min-h-10 text-sm" onClick={() => alert('카카오톡 공유는 준비 중이에요. 코드를 복사해서 보내 주세요.')}>카카오톡 공유</Button>
+        <Button variant="secondary" onClick={copy} className="min-h-10 text-sm">복사</Button>
+        <button onClick={share} className="min-h-10 rounded-xl bg-[#FEE500] px-4 text-sm font-semibold text-[#191919] active:brightness-95">카카오톡 공유</button>
       </div>
+      {msg && <p className="mt-2 text-xs text-court-700">{msg}</p>}
     </div>
   )
 }
@@ -82,7 +91,7 @@ function TeamCodeBox({ code }: { code: string }) {
 export function TeamJoinPage() {
   const nav = useNavigate()
   const qc = useQueryClient()
-  const [code, setCode] = useState('')
+  const [code, setCode] = useState(() => (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().slice(0, 8))  // 초대 링크 ?code= 미리 채움
   const m = useMutation({
     mutationFn: () => teamsApi.join(code.trim().toUpperCase()),
     onSuccess: (team) => { qc.invalidateQueries({ queryKey: ['me', 'teams'] }); qc.invalidateQueries({ queryKey: ['profile'] }); nav(`/teams/${team.id}/self-rank`, { replace: true, state: { from: `/teams/${team.id}` } }) },
@@ -156,9 +165,12 @@ export function TeamDetailPage() {
             <p className="font-semibold">
               {t.approval_status === 'REJECTED' ? '관리자가 팀 승인을 거절했어요. 문의해 주세요.' : t.approval_status === 'PENDING' ? `관리자 승인을 기다리는 중이에요${need > 0 ? ` · ${need}명 더 필요` : ''}` : `${need}명 더 모이면 일정을 만들 수 있어요`}
             </p>
-            <div className="mt-2 flex items-center justify-between">
+            <div className="mt-2 flex items-center justify-between gap-2">
               <span className="font-mono text-lg font-black tracking-[0.25em]">{t.team_code}</span>
-              <button className="rounded-lg bg-court-500 px-3 py-1.5 text-xs font-semibold" onClick={() => navigator.clipboard?.writeText(t.team_code)}>코드 복사</button>
+              <span className="flex gap-1.5">
+                <button className="rounded-lg bg-court-500 px-3 py-1.5 text-xs font-semibold" onClick={() => navigator.clipboard?.writeText(t.team_code)}>코드 복사</button>
+                <button className="rounded-lg bg-[#FEE500] px-3 py-1.5 text-xs font-semibold text-[#191919]" onClick={async () => { const { text, url } = teamInviteText(t.name, t.team_code); const r = SHARE_DONE[await shareText(text, url)]; if (r) alert(r) }}>카카오톡 공유</button>
+              </span>
             </div>
           </div>
         )}

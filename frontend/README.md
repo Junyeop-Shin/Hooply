@@ -42,3 +42,5 @@ npm run dev        # http://localhost:5173  (/api → 8000 프록시)
 | 팀 리더보드 (참여율 · 출전 쿼터 · 잔차) | `pages/leaderboard.tsx` | API 연결 |
 
 `api/client.ts` 가 Bearer 토큰 첨부와 7.4절 오류 본문 변환, 401 시 refresh 재시도를 담당한다.
+
+환경 변수(`.env.local`, git 무시): `VITE_API_URL`(프론트·API 분리 배포 시 API 주소, 로컬은 비워 두고 Vite 프록시 사용), `VITE_KAKAO_JS_KEY`(카카오톡 공유용 JavaScript 키). 카카오 로그인은 `/auth/kakao/callback` 경로로 돌아오므로 카카오 콘솔 Redirect URI 에 각 출처의 그 경로를 등록한다.

@@ -12,6 +12,7 @@ import { useAuthStore } from '../store/auth'
 import { Avatar, Badge, Button, Card, EmptyState, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { fmtEvent } from './events'
+import { startKakao } from './auth'
 
 export function useMe() {
   return useQuery({ queryKey: ['me'], queryFn: authApi.me })
@@ -170,6 +171,9 @@ export function ProfilePage() {
                 <p className="truncate text-sm text-stone-500">{u.email ?? '이메일 없음 (카카오 계정)'}</p>
                 <div className="mt-1.5 flex gap-1.5">
                   {u.identities.map((i) => <Badge key={i.provider} tone={i.provider === 'KAKAO' ? 'warn' : 'navy'}>{i.provider === 'KAKAO' ? '카카오' : '이메일'}</Badge>)}
+                  {!u.identities.some((i) => i.provider === 'KAKAO') && (
+                    <button onClick={() => startKakao('link', (m) => alert(m))} className="rounded-full bg-[#FEE500] px-2.5 py-0.5 text-xs font-semibold text-[#191919]">카카오 연결</button>
+                  )}
                   {u.global_role === 'ADMIN' && <Badge tone="court">관리자</Badge>}
                   {u.height_cm && <Badge>{u.height_cm}cm</Badge>}
                 </div>

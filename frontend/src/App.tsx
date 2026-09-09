@@ -1,7 +1,7 @@
 /** 라우팅. 설계서 5.3절 흐름 A(온보딩) · B(모임 운영) · C(참여) 를 화면 ID 기준으로 연결한다. */
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { useIsLoggedIn } from './store/auth'
-import { LoginPage, SignupPage } from './pages/auth'
+import { KakaoCallbackPage, LoginPage, SignupPage } from './pages/auth'
 import { HomePage, ProfilePage } from './pages/home'
 import { MembersPage, TeamCreatePage, TeamDetailPage, TeamJoinPage } from './pages/team'
 import { QuartersPage } from './pages/quarters'
@@ -24,6 +24,7 @@ function GuestOnly() {
 export default function App() {
   return (
     <Routes>
+      <Route path="/auth/kakao/callback" element={<KakaoCallbackPage />} /> {/* 카카오 리다이렉트 (로그인 여부 무관) */}
       <Route element={<GuestOnly />}>
         <Route path="/login" element={<LoginPage />} />   {/* S-01 */}
         <Route path="/signup" element={<SignupPage />} /> {/* S-02 */}

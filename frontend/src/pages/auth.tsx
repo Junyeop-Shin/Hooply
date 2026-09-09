@@ -1,5 +1,5 @@
 /** S-01 로그인 · S-02 회원가입 (FR-01). 카카오 버튼은 백엔드 스켈레톤이라 안내만 띄운다. */
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { ApiError } from '../api/client'
@@ -20,19 +20,69 @@ function Brand() {
   )
 }
 
+/** 카카오 인가 URL 을 받아 이동. state 와 모드(login/link)는 sessionStorage 에 두었다가 콜백 화면에서 대조한다 */
+export async function startKakao(mode: 'login' | 'link', onError: (m: string) => void) {
+  try {
+    const { url, state } = await authApi.kakaoLoginUrl()
+    sessionStorage.setItem('kakao_state', state)
+    sessionStorage.setItem('kakao_mode', mode)
+    window.location.href = url
+  } catch (e) {
+    onError(e instanceof ApiError ? e.message : '카카오 로그인을 시작하지 못했어요.')
+  }
+}
+
 function KakaoButton() {
-  const [note, setNote] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   return (
     <div className="space-y-2">
       <button
         type="button"
-        onClick={() => setNote(true)}
-        className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#FEE500] font-semibold text-[#191919] active:brightness-95"
+        disabled={busy}
+        onClick={() => { setBusy(true); startKakao('login', (m) => { setErr(m); setBusy(false) }) }}
+        className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#FEE500] font-semibold text-[#191919] active:brightness-95 disabled:opacity-60"
       >
-        카카오로 시작하기
+        <span className="inline-block size-4 rounded-full bg-[#191919]" aria-hidden />카카오로 시작하기
       </button>
-      {note && <Alert kind="info">카카오 로그인은 준비 중이에요. 지금은 이메일로 이용해 주세요.</Alert>}
+      {err && <Alert>{err}</Alert>}
     </div>
+  )
+}
+
+/** /auth/kakao/callback — 카카오가 돌려보낸 code·state 를 백엔드에 넘겨 로그인(또는 계정 연결)을 끝낸다 */
+export function KakaoCallbackPage() {
+  const nav = useNavigate()
+  const login = useAuthStore((s) => s.login)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    const code = q.get('code'), state = q.get('state')
+    const saved = sessionStorage.getItem('kakao_state'), mode = sessionStorage.getItem('kakao_mode') ?? 'login'
+    sessionStorage.removeItem('kakao_state'); sessionStorage.removeItem('kakao_mode')
+    if (q.get('error')) { setErr(q.get('error_description') ?? '카카오 로그인이 취소됐어요.'); return }
+    if (!code || !state || state !== saved) { setErr('로그인 요청이 만료됐거나 올바르지 않아요. 다시 시도해 주세요.'); return }
+    ;(async () => {
+      try {
+        if (mode === 'link') { await authApi.kakaoLink(code, state); nav('/me', { replace: true }); return }
+        const pair = await authApi.kakaoCallback(code, state)
+        login(pair)
+        nav(pair.is_new ? '/survey' : '/', { replace: true })
+      } catch (e) { setErr(e instanceof ApiError ? e.message : '카카오 로그인에 실패했어요.') }
+    })()
+  }, [nav, login])
+  return (
+    <Screen className="px-6">
+      <Brand />
+      {err ? (
+        <div className="space-y-3">
+          <Alert>{err}</Alert>
+          <Button full variant="secondary" onClick={() => nav('/login', { replace: true })}>로그인 화면으로</Button>
+        </div>
+      ) : (
+        <p className="text-center text-sm text-stone-500">카카오 계정을 확인하고 있어요…</p>
+      )}
+    </Screen>
   )
 }
 

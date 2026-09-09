@@ -75,6 +75,7 @@ class KakaoLinkRequest(BaseModel):
 
     code: str = Field(description="카카오가 redirect_uri로 전달한 인가 코드")
     state: str = Field(description="login-url에서 받은 state. 불일치하면 401 KAKAO_AUTH_FAILED")
+    redirect_uri: str | None = Field(default=None, description="login-url 때 보낸 것과 같은 값")
 
 
 class RefreshRequest(BaseModel):

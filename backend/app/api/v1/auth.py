@@ -5,9 +5,9 @@
 엔드포인트
 - POST  /auth/signup            이메일 회원가입 (구현됨)
 - POST  /auth/login             이메일 로그인 (구현됨)
-- GET   /auth/kakao/login-url   카카오 인가 URL 생성 (스켈레톤)
-- GET   /auth/kakao/callback    카카오 콜백 → 가입/로그인 (스켈레톤)
-- POST  /auth/kakao/link        기존 계정에 카카오 연결 (스켈레톤)
+- GET   /auth/kakao/login-url   카카오 인가 URL 생성 (구현됨)
+- GET   /auth/kakao/callback    카카오 콜백 → 가입/로그인 (구현됨)
+- POST  /auth/kakao/link        기존 계정에 카카오 연결 (구현됨)
 - POST  /auth/refresh           토큰 갱신 (구현됨)
 - POST  /auth/password/forgot   비밀번호 재설정 요청 (구현됨 · 메일 발송은 TODO)
 - POST  /auth/password/reset    비밀번호 재설정 (스켈레톤)
@@ -41,7 +41,7 @@ from app.schemas.auth import (
     UserUpdate,
 )
 from app.schemas.common import ItemList
-from app.services import auth_service
+from app.services import auth_service, kakao_service
 
 router = APIRouter(tags=["인증 · 프로필"])
 
@@ -83,65 +83,66 @@ def login(db: DB, body: LoginRequest):
     return auth_service.login(db, body)
 
 
-@router.get(
-    "/auth/kakao/login-url", response_model=KakaoLoginUrl,
-    responses=NOT_IMPLEMENTED, summary="카카오 인가 URL 생성",
-)
-def kakao_login_url():
+@router.get("/auth/kakao/login-url", response_model=KakaoLoginUrl, responses=errors(_401="KAKAO_AUTH_FAILED"), summary="카카오 인가 URL 생성")
+def kakao_login_url(
+    redirect_uri: Annotated[str | None, Query(description="프론트 출처 기준 콜백 주소 (예: https://…/auth/kakao/callback). 생략 시 KAKAO_REDIRECT_URI. 허용 목록 밖이면 401")] = None,
+):
     """프론트가 이동할 카카오 인가 URL과 CSRF 방지용 `state`를 생성한다.
 
     - **권한:** 비회원 (인증 불필요).
-    - **처리 (예정):** 난수 `state`를 발급해 세션/캐시에 보관하고
-      `https://kauth.kakao.com/oauth/authorize?...&state=...` 형태의 URL을 돌려준다.
-      콜백에서 같은 `state`가 돌아오는지 대조해 CSRF를 막는다.
-    - **오류:** 없음 (스켈레톤 단계에서는 `501 NOT_IMPLEMENTED`).
-    - **상태:** `스켈레톤 (501 NOT_IMPLEMENTED)`.
+    - **처리:** `state` 는 서버가 서명한 10분짜리 토큰이라 별도 세션 저장 없이 콜백에서 검증한다.
+      프론트는 받은 `state` 를 sessionStorage 에 두었다가 콜백의 값과 한 번 더 대조한다.
+    - **오류:** `401 KAKAO_AUTH_FAILED` — 카카오 설정 없음 또는 허용되지 않은 redirect_uri.
+    - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증, 11.5절 카카오 로그인 흐름 1단계.
     """
-    raise E.NotImplementedYet()
+    url, state = kakao_service.login_url(redirect_uri)
+    return KakaoLoginUrl(url=url, state=state)
 
 
 @router.get(
     "/auth/kakao/callback", response_model=KakaoTokenPair,
-    responses=errors(_401="KAKAO_AUTH_FAILED") | NOT_IMPLEMENTED,
-    summary="카카오 콜백 (가입/로그인)",
+    responses=errors(_401="KAKAO_AUTH_FAILED"), summary="카카오 콜백 (가입/로그인)",
 )
 def kakao_callback(
+    db: DB,
     code: Annotated[str, Query(description="카카오가 redirect_uri로 전달한 인가 코드 (1회용)")],
-    state: Annotated[str, Query(description="login-url에서 발급한 CSRF 방지 난수. 불일치 시 401")],
+    state: Annotated[str, Query(description="login-url에서 발급한 state. 서명·만료 검증에 실패하면 401")],
+    redirect_uri: Annotated[str | None, Query(description="login-url 때 보낸 것과 같은 값 (토큰 교환에 필요)")] = None,
 ):
     """카카오가 돌려준 인가 코드를 받아 가입 또는 로그인을 완료한다.
 
-    - **권한:** 비회원 (카카오 리다이렉트로 호출).
-    - **처리 (예정):** `state` 대조 → 인가 코드를 카카오 토큰으로 교환
-      (`POST kauth.kakao.com/oauth/token`) → `GET kapi.kakao.com/v2/user/me`로 회원번호·닉네임·
-      프로필 사진 조회 → `auth_identities(provider=KAKAO)` 조회. 있으면 로그인, 없으면
-      `users` 생성(이메일은 없을 수 있으므로 NULL 허용) → 우리 서비스 JWT 발급.
-      응답의 `is_new`로 온보딩 설문 이동 여부를 판단한다.
-    - **오류:** `401 KAKAO_AUTH_FAILED` — 토큰 교환 실패·state 불일치.
-    - **상태:** `스켈레톤 (501 NOT_IMPLEMENTED)`.
-    - **설계서:** 7.3절 인증, 11.5절 카카오 로그인 흐름 2~6단계, 5.4절 "카카오 계정에 이메일 없음".
+    - **권한:** 비회원 (카카오 리다이렉트 후 프론트가 호출).
+    - **처리:** `state` 검증 → 인가 코드를 카카오 토큰으로 교환 → 회원번호·닉네임·프로필 사진 조회 →
+      `auth_identities(provider=KAKAO)` 조회. 있으면 로그인, 없으면 `users` 생성(이메일은 없을 수 있어 NULL) → JWT 발급.
+      `is_new` 가 true 면 프론트는 온보딩 설문(S-03)으로 보낸다.
+    - **오류:** `401 KAKAO_AUTH_FAILED` — state 불일치·만료, 토큰 교환 실패, 탈퇴 계정.
+    - **상태:** `구현됨`.
+    - **설계서:** 7.3절 인증, 11.5절 흐름 2~6단계, 5.4절 "카카오 계정에 이메일 없음".
     """
-    raise E.NotImplementedYet()
+    kakao_service.verify_state(state)
+    profile = kakao_service.fetch_profile(code, kakao_service.resolve_redirect_uri(redirect_uri))
+    pair, is_new = kakao_service.login_or_signup(db, profile)
+    return KakaoTokenPair(**pair.model_dump(), is_new=is_new)
 
 
 @router.post(
     "/auth/kakao/link", response_model=UserDetail,
-    responses=errors(_409="IDENTITY_ALREADY_LINKED") | NOT_IMPLEMENTED,
-    summary="기존 계정에 카카오 연결",
+    responses=errors(_401="KAKAO_AUTH_FAILED", _409="IDENTITY_ALREADY_LINKED"), summary="기존 계정에 카카오 연결",
 )
-def kakao_link(user: CurrentUser, body: KakaoLinkRequest):
+def kakao_link(db: DB, user: CurrentUser, body: KakaoLinkRequest):
     """이메일로 가입한 계정에 카카오 로그인 수단을 추가로 연결한다.
 
     - **권한:** 로그인 사용자.
-    - **처리 (예정):** 카카오 인가 코드를 교환해 회원번호를 얻고, 현재 계정의
-      `auth_identities`에 `KAKAO` 행을 추가한다. 이후 카카오·이메일 어느 쪽으로도 로그인 가능.
-    - **오류:** `409 IDENTITY_ALREADY_LINKED` — 그 카카오 계정이 이미 다른 계정에 연결됨.
-      `401 TOKEN_EXPIRED` — 로그인 필요.
-    - **상태:** `스켈레톤 (501 NOT_IMPLEMENTED)`.
+    - **처리:** 인가 코드를 교환해 회원번호를 얻고 현재 계정의 `auth_identities` 에 `KAKAO` 행을 추가한다.
+      이후 카카오·이메일 어느 쪽으로도 로그인 가능.
+    - **오류:** `409 IDENTITY_ALREADY_LINKED` — 그 카카오 계정이 이미 다른 계정에 연결됨. `401 KAKAO_AUTH_FAILED`.
+    - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증, 6.2절 `auth_identities` (users 1:N), 11.5절.
     """
-    raise E.NotImplementedYet()
+    kakao_service.verify_state(body.state)
+    profile = kakao_service.fetch_profile(body.code, kakao_service.resolve_redirect_uri(body.redirect_uri))
+    return kakao_service.link(db, user, profile)
 
 
 @router.post(

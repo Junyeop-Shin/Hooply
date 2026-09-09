@@ -153,7 +153,5 @@ def test_team_create_join_activate(client, signup):
 #       501 NOT_IMPLEMENTED로 응답한다. test_openapi가 "경로가 선언되어 있는가"를 보는 것과
 #       짝을 이루어, 스텁이 조용히 사라지거나 엉뚱한 코드로 바뀌지 않았는지 지킨다.
 def test_not_implemented_endpoints_return_501(client):
-    r = client.get("/api/v1/auth/kakao/login-url")
-    assert r.status_code == 501 and r.json()["code"] == "NOT_IMPLEMENTED"
-    r = client.get("/api/v1/auth/kakao/callback?code=x&state=y")
-    assert r.status_code in (501, 400)  # 카카오 콜백은 아직 스텁 (검증 순서에 따라 400 이 먼저일 수 있음)
+    r = client.post("/api/v1/auth/password/reset", json={"token": "x", "new_password": "password123"})
+    assert r.status_code == 501 and r.json()["code"] == "NOT_IMPLEMENTED"  # 비밀번호 재설정은 아직 스텁

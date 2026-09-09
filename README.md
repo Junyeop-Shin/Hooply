@@ -56,6 +56,7 @@ docker compose exec api python -m scripts.seed_demo          # 이미 있으면 
 # 운영 DB 에 테스트용 데모 데이터를 잠시 올릴 때:  DATABASE_URL=<Neon> python -m scripts.seed_demo --no-admin   /  지울 때: python -m scripts.remove_demo
 #   --reset 은 로컬 DB 에서만 동작 (운영 DB 전체 삭제 방지)
 # 의존성 변경 시: cd backend && uv add <pkg> && uv export --no-dev --no-hashes --no-emit-project -o requirements.txt  (Render·Docker 는 requirements.txt 로 설치)
+# 카카오: 백엔드 KAKAO_CLIENT_ID(REST API 키)·KAKAO_CLIENT_SECRET·KAKAO_REDIRECT_URI(<프론트>/auth/kakao/callback), 프론트 VITE_KAKAO_JS_KEY(JavaScript 키, 공개용)
 # 운영 배포 전 확인: JWT_SECRET_KEY 교체 · DOCS_ENABLED=false · ADMIN_COOKIE_SECURE=true · CORS_ORIGINS/FRONTEND_BASE_URL 을 실제 도메인으로 · seed_demo 는 운영 DB 에 절대 실행하지 않기
 # 매니저: manager@demo.com / demo1234   팀원: m01@demo.com ~ m19@demo.com / demo1234
 # 게스트 불러오기 확인: m07@demo.com(게스트 허훈), manager@demo.com(게스트 송교창)
@@ -82,12 +83,13 @@ cd backend && uv run pytest -q
 | 피어 투표 (종료 시각 자동 오픈, '다음에 같이 뛰고 싶은 사람' 같은 팀 2 + 상대 팀 2, 이유 태그, 함께 참석 대비 정규화 + 최근 가중 선호 점수, 매니저 독려 메시지) | 구현 |
 | 선수 통계 (`/players/{id}/stats`: 본인은 쿼터 기록·마진, 매니저는 실력 지표 근거까지) · 팀 리더보드 (참여율/출전 쿼터/잔차) | 구현 |
 | 관리자: SQLAdmin 콘솔 `/admin` (ADMIN 계정, 팀 승인/거절 액션) + 사용자 검색·팀 승인·원시 데이터·지표 보정(이력+감사 로그)·감사 로그 API | 구현 |
-| 카카오 로그인 · 비밀번호 재설정 메일 | 스텁 (501) — 로테이션 자동 제안(F17)은 범위에서 제외 |
+| 카카오 로그인 (인가 URL · 서명 state · 콜백 가입/로그인 · 기존 계정 연결) · 카카오톡 공유 (팀 초대 · 투표 독려, SDK 없으면 OS 공유 시트/클립보드) | 구현 |
+| 비밀번호 재설정 메일 | 스텁 (501) — 로테이션 자동 제안(F17)은 범위에서 제외 |
 | 프론트: 로그인·가입·설문·홈·팀·팀원 관리·일정/RSVP·게스트·프로필(메인 팀 · 내 기록)·실력 정렬·배정 실행/결과/확정 결과·쿼터 기록·피어 투표·매니저 실력 지표 화면 | API 연결됨 |
 
 501 `NOT_IMPLEMENTED`를 반환하는 엔드포인트는 `/docs`에서 요청·응답 스키마를 확인할 수 있고, 각 함수 docstring에 설계서의 해당 절과 구현 메모가 있습니다.
 
 ## 다음 작업 (9.8절 순서)
 
-1. 카카오 로그인 (11.5절) · 비밀번호 재설정 메일
+1. 비밀번호 재설정 메일 · CI(GitHub Actions) · 프론트 E2E 테스트
 2. 배치 RAPM(100쿼터 이후) · 앵커 재보정(150쿼터 이후)
