@@ -5,9 +5,9 @@ Revises: 0001
 Create Date: 2026-09-08
 
 무엇이 바뀌는가
-  1. guest-feature-spec 4절 — `event_attendances.team_lock_request_player_id` (FK → players) 추가.
+  1. 게스트 기능 설계 — `event_attendances.team_lock_request_player_id` (FK → players) 추가.
      게스트 등록자가 "나와 같은 팀으로" 를 표시한 요청. 강제 제약이 아니며 매니저가 배정 화면에서 승인한다.
-  2. survey-feature-spec 2절 — 설문 5개 테이블을 스펙의 컬럼 구조로 **드롭 후 재생성**한다.
+  2. 설문 설계 — 설문 5개 테이블을 스펙의 컬럼 구조로 **드롭 후 재생성**한다.
      (question_text / answer_type 6종 / display_order / prior_weight, option_order / score_value,
       responses UNIQUE(user_id) 1인 1회, answers 는 문항당 1행 + selected_option_ids JSONB)
      0001 시점에는 설문 응답이 존재할 수 없었으므로(엔드포인트가 501) 데이터 이관은 없다.

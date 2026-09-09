@@ -1,6 +1,6 @@
 """7.3절 경기 후 설문 · 통계 — 피어 투표(재설계), 잘 맞는 참여자, 개인 통계·리더보드 (F9, F10, F11).
 
-케미는 코트 마진으로 "측정"하지 않고 경기 후 투표로 "선언"받는다 (9.4절). peer-vote-spec 재설계:
+케미는 코트 마진으로 "측정"하지 않고 경기 후 투표로 "선언"받는다 (9.4절). 피어 투표 설계재설계:
 카테고리당 0~2명, 후보는 그날 참석자 전원(본인 제외) 한 리스트, PLAY_AGAIN 에 이유 태그(선택),
 일정 종료 시각이 지나면 자동 오픈, 독려는 매니저가 카카오톡에 수동 공유. "잘한 사람" 은 표시 전용.
 
@@ -52,7 +52,7 @@ _TARGET_DOC = """그날 참석자 전원(본인 제외, 게스트 포함)을 한
       각 후보에 `squad_no / squad_name / is_same_team` 을 붙인다. 이미 제출했으면 `already_submitted=true` 와 `my_votes`.
     - **오류:** `403 SURVEY_NOT_OPEN` — 종료 전. `403 NOT_ATTENDEE`, `404 NOT_FOUND`, `403 NOT_A_MEMBER`.
     - **상태:** `구현됨`.
-    - **설계서:** FR-29, F9, 9.4절, peer-vote-spec 3.1 ~ 3.3절, S-16.
+    - **설계서:** FR-29, F9, 9.4절, 피어 투표 설계, S-16.
     """
 
 
@@ -72,7 +72,7 @@ def vote_targets(db: DB, me: EventMember, event: Annotated[Event, Depends(get_ev
     responses=errors(_403=("SURVEY_NOT_OPEN", "NOT_ATTENDEE")), summary="피어 투표 후보 명단",
 )
 def vote_candidates(db: DB, me: EventMember, event: Annotated[Event, Depends(get_event_or_404)]):
-    """피어 투표 후보 명단 (peer-vote-spec 5절 경로).
+    """피어 투표 후보 명단 (피어 투표 설계).
 
     """ + _TARGET_DOC
     return peer_service.targets(db, event, me)
@@ -93,7 +93,7 @@ def submit_votes(db: DB, me: EventMember, event: Annotated[Event, Depends(get_ev
       에만 집계되고 실력 산출에는 절대 입력되지 않는다.
     - **오류:** `409 ALREADY_SUBMITTED`, `403 SURVEY_NOT_OPEN`, `403 NOT_ATTENDEE`, `400 SELF_VOTE_NOT_ALLOWED / VALIDATION_ERROR`.
     - **상태:** `구현됨`.
-    - **설계서:** FR-29 · FR-30, F9 · F10, 9.4절 채택 정책, peer-vote-spec 2 · 4 · 5절, S-16.
+    - **설계서:** FR-29 · FR-30, F9 · F10, 9.4절 채택 정책, 피어 투표 설계, S-16.
     """
     peer_service.submit(db, event, me, body)
     return peer_service.targets(db, event, me)
@@ -110,7 +110,7 @@ def share_message(db: DB, me: EventManager, event: Annotated[Event, Depends(get_
     - **처리:** 시스템은 자동 발송·리마인더를 하지 않는다 (스펙 3.3절). 매니저가 현황을 보고 필요할 때만 공유한다.
     - **오류:** `403 FORBIDDEN_ROLE`, `404 NOT_FOUND`.
     - **상태:** `구현됨`.
-    - **설계서:** peer-vote-spec 3.3절 · 6절, S-05 카카오 공유 패턴.
+    - **설계서:** 피어 투표 설계, S-05 카카오 공유 패턴.
     """
     return peer_service.share_message(db, event)
 

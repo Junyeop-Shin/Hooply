@@ -93,7 +93,7 @@ class RoleUpdate(BaseModel):
 
 
 class GuestCreate(BaseModel):
-    """게스트 등록 요청 — `POST /teams/{id}/guests` (팀원 누구나, S-11, FR-10~12 · guest-feature-spec).
+    """게스트 등록 요청 — `POST /teams/{id}/guests` (팀원 누구나, S-11, FR-10~12 · 게스트 기능 설계).
 
     계정 없는 사람을 이름만으로 `players(kind=GUEST)` 행으로 만든다. 동명이인 게스트가 이미 있으면
     201 대신 200 + `GuestSimilar` 를 돌려주고, 등록자가 기존 레코드를 고르거나 `force_new=true` 로

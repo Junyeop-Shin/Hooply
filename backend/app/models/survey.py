@@ -1,4 +1,4 @@
-"""온보딩 설문 (설계서 8장 · survey-feature-spec.md 2절): 템플릿 버전 관리 + 응답.
+"""온보딩 설문 (설계서 8장 · 설문 설계): 템플릿 버전 관리 + 응답.
 
 테이블 구조 (설계서 6.1절 "설문" 그룹)
   survey_templates  ─1:N─ survey_questions ─1:N─ survey_options   … 문항 정의 (버전별, 시드 데이터)

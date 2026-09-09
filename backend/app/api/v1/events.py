@@ -1,4 +1,4 @@
-"""7.3절 일정 · 참석 — 일정 CRUD, RSVP, 참석 현황, **회차별 게스트 등록** (F4 · F13 · guest-feature-spec 5절).
+"""7.3절 일정 · 참석 — 일정 CRUD, RSVP, 참석 현황, **회차별 게스트 등록** (F4 · F13 · 게스트 기능 설계).
 
 설계서: 7.3절 일정 · 참석, FR-08 · FR-09 · FR-15 · FR-34, 6.2절 `events` / `event_attendances`,
 스펙 FR-10 · FR-10a · FR-11 · FR-11a.
@@ -205,7 +205,7 @@ def list_attendances(
     return event_service.attendance_list(db, event, me, user, status)
 
 
-# --- 회차별 게스트 (guest-feature-spec 5절) ---
+# --- 회차별 게스트 (게스트 기능 설계) ---
 
 
 @router.post(

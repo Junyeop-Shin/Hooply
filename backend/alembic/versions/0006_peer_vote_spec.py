@@ -1,4 +1,4 @@
-"""피어 투표 재설계 (peer-vote-spec): reason_tag, target_side NULL 허용, chemistry_scores.together_events.
+"""피어 투표 재설계 (피어 투표 설계): reason_tag, target_side NULL 허용, chemistry_scores.together_events.
 
 Revision ID: 0006
 Revises: 0005

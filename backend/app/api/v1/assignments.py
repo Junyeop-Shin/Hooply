@@ -16,7 +16,7 @@ LOCK/SEPARATE/PIN 제약은 Union-Find 슈퍼노드로 축약해 어떤 전략�
 - PATCH /assignments/candidates/{candidate_id}          선수 교체 후 재계산 (구현됨)
 - POST  /assignments/candidates/{candidate_id}:adopt    후보안 확정 (구현됨)
 - GET   /events/{event_id}/assignment/adopted           확정 결과 (액터별 마스킹) (구현됨)
-- GET   /events/{event_id}/assignment/suggestions       게스트 묶기 제안 목록 (구현됨, guest-feature-spec)
+- GET   /events/{event_id}/assignment/suggestions       게스트 묶기 제안 목록 (구현됨, 게스트 기능 설계)
 """
 
 from typing import Annotated

@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     # 기본값은 Vite 개발 서버. 배포 시 Vercel 도메인을 추가한다.
     # 환경 변수로 줄 때는 JSON 배열 문자열: CORS_ORIGINS='["https://example.com"]'
     cors_origins: list[str] = ["http://localhost:5173"]
-    # 사용자에게 보여줄 프론트 주소 — 피어 투표 독려 메시지의 survey_link 등 (peer-vote-spec 3.3절)
+    # 사용자에게 보여줄 프론트 주소 — 피어 투표 독려 메시지의 survey_link 등 (피어 투표 설계)
     frontend_base_url: str = "http://localhost:5173"
     # 일정의 날짜·시간(event_date, end_time)은 이 시간대의 벽시계 값이다. 컨테이너 로컬(UTC)이 아니라 이걸로 해석한다
     timezone: str = "Asia/Seoul"

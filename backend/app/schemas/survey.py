@@ -1,5 +1,5 @@
 """온보딩 설문 · 포지션 스키마 — 7.3절 "온보딩 설문" 엔드포인트의 요청/응답 (F1, S-03, 8장,
-survey-feature-spec 7절).
+설문 설계).
 
 대상 엔드포인트: GET /surveys/onboarding (문항 조회), POST /surveys/onboarding/responses (제출),
 GET /me/profile, PUT /me/positions.

@@ -107,7 +107,7 @@ class AttendanceView(BaseModel):
     )
     registered_by_name: str | None = Field(default=None, description="registered_by 의 표시 이름")
     team_lock_request_player_id: int | None = Field(
-        default=None, description="게스트 행 전용. '이 player 와 같은 팀으로' 요청 (guest-feature-spec 4절)"
+        default=None, description="게스트 행 전용. '이 player 와 같은 팀으로' 요청 (게스트 기능 설계)"
     )
     team_lock_request_player_name: str | None = None
     can_edit: bool = Field(default=False, description="호출자가 이 게스트 등록을 수정·삭제할 수 있는지 (등록자 본인 또는 매니저)")
@@ -138,7 +138,7 @@ class AttendanceList(BaseModel):
     my_player_id: int | None = Field(default=None, description="호출자의 이 팀 players.id")
 
 
-# --- 회차별 게스트 등록 (guest-feature-spec 5절) ---
+# --- 회차별 게스트 등록 (게스트 기능 설계) ---
 
 
 class EventGuestCreate(BaseModel):

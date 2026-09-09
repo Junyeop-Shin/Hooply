@@ -74,7 +74,7 @@ class PostGameVote(Base):
     )
     target_player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False, index=True)  # 게스트 가능
     vote_type: Mapped[VoteType] = mapped_column(db_enum(VoteType, 15), nullable=False)  # BEST_PERFORMER / PLAY_AGAIN
-    # 같은 팀/상대 팀 — 확정 배정으로 서버가 계산한다. 배정이 없던 회차는 알 수 없어 NULL (peer-vote-spec 5절)
+    # 같은 팀/상대 팀 — 확정 배정으로 서버가 계산한다. 배정이 없던 회차는 알 수 없어 NULL (피어 투표 설계)
     target_side: Mapped[TargetSide | None] = mapped_column(db_enum(TargetSide, 10))
     # PLAY_AGAIN 을 고른 이유 (선택). BEST_PERFORMER 는 항상 NULL
     reason_tag: Mapped[ReasonTag | None] = mapped_column(db_enum(ReasonTag, 20))
@@ -111,7 +111,7 @@ class ChemistryScore(Base):
     player_b_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)  # 큰 id
     # 두 사람이 같은 팀으로 함께 코트에 있던 쿼터 수. F11 "함께 뛴 횟수" 와 synergy 노출 조건(≥ 20)에 사용
     together_quarters: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    # 함께 참석한 회차 수 — pref_score 의 분모 (peer-vote-spec 4.1절). together_quarters 와는 용도가 다르다
+    # 함께 참석한 회차 수 — pref_score 의 분모 (피어 투표 설계). together_quarters 와는 용도가 다르다
     together_events: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     # PLAY_AGAIN 투표를 함께 참석한 회차 수로 정규화하고 최근 회차에 가중(0.9^k)한 선호도 (양방향 평균). CHEMISTRY 전략(w_pref)의 주 입력. NULL = 투표 없음
     pref_score: Mapped[Decimal | None] = mapped_column(Numeric(3, 2))  # 0~1

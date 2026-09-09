@@ -131,9 +131,9 @@ ForbiddenRole = _error(403, "FORBIDDEN_ROLE", "이 작업을 수행할 권한이
 NotAMember = _error(403, "NOT_A_MEMBER", "소속되지 않은 팀입니다.")
 # 그 일정에 참석하지 않은 사람이 피어 설문 조회 — GET /events/{id}/post-game-survey
 NotAttendee = _error(403, "NOT_ATTENDEE", "이 일정의 참석자가 아닙니다.")
-# 남이 등록한 게스트를 등록자도 매니저도 아닌 플레이어가 수정·삭제 — guest-feature-spec 5절·7절
+# 남이 등록한 게스트를 등록자도 매니저도 아닌 플레이어가 수정·삭제 — 게스트 기능 설계
 ForbiddenNotOwner = _error(403, "FORBIDDEN_NOT_OWNER", "이 게스트를 등록한 사람만 수정할 수 있어요.")
-# 일정 종료 시각 전에 피어 투표 후보 조회·제출 — peer-vote-spec 3.3절 (종료 시각이 지나면 자동 오픈)
+# 일정 종료 시각 전에 피어 투표 후보 조회·제출 — 피어 투표 설계 (종료 시각이 지나면 자동 오픈)
 SurveyNotOpen = _error(403, "SURVEY_NOT_OPEN", "일정이 끝나면 투표할 수 있어요.")
 
 # ---------------------------------------------------------------------------

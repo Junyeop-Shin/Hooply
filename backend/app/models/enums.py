@@ -132,7 +132,7 @@ class RatingSource(StrEnum):
 
 
 class AnswerType(StrEnum):
-    """survey_questions.answer_type — 설문 척도 종류 (8.2절, survey-feature-spec 3절). 프론트 위젯 선택 기준.
+    """survey_questions.answer_type — 설문 척도 종류 (8.2절, 설문 설계). 프론트 위젯 선택 기준.
 
     이 6종 외의 척도(1~10 숫자, 직접 자기평가, 자유 텍스트)는 설계상 금지다.
     """
@@ -188,12 +188,12 @@ class Side(StrEnum):
 class VoteType(StrEnum):
     """post_game_votes.vote_type — 경기 후 피어 설문 항목 (F9)."""
 
-    BEST_PERFORMER = "BEST_PERFORMER"  # "오늘 잘한 사람" — 표시 전용. 실력 산출에는 절대 입력하지 않는다 (peer-vote-spec 4.2절)
+    BEST_PERFORMER = "BEST_PERFORMER"  # "오늘 잘한 사람" — 표시 전용. 실력 산출에는 절대 입력하지 않는다 (피어 투표 설계)
     PLAY_AGAIN = "PLAY_AGAIN"  # "다음에 같이 뛰고 싶은 사람" — 선호 조합(pref_score)의 원천
 
 
 class ReasonTag(StrEnum):
-    """post_game_votes.reason_tag — "또 뛰고 싶은 사람" 을 고른 이유 (peer-vote-spec 3.1절). PLAY_AGAIN 에만, 선택 사항."""
+    """post_game_votes.reason_tag — "또 뛰고 싶은 사람" 을 고른 이유 (피어 투표 설계). PLAY_AGAIN 에만, 선택 사항."""
 
     PASS = "PASS"  # 패스가 좋았어요
     DEFENSE_HELP = "DEFENSE_HELP"  # 수비를 잘 도와줬어요

@@ -1,4 +1,4 @@
-"""일정·참석: events / event_attendances (설계서 6.2절 + guest-feature-spec 4절).
+"""일정·참석: events / event_attendances (설계서 6.2절 + 게스트 기능 설계).
 
 게스트 참석은 매니저 또는 **게스트를 부른 플레이어** 가 대신 등록한다 (스펙으로 확장됨).
 
@@ -74,7 +74,7 @@ class EventAttendance(Base):
     note: Mapped[str | None] = mapped_column(Text)  # "늦게 감" 등 응답자 메모
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # NULL = PENDING(미응답)
     registered_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))  # 게스트 등록자 / 대리 응답한 매니저
-    # guest-feature-spec 4절: "이 게스트를 이 player 와 같은 팀으로 배정해 달라" 는 **요청**. 게스트 행에만 값이
+    # 게스트 기능 설계: "이 게스트를 이 player 와 같은 팀으로 배정해 달라" 는 **요청**. 게스트 행에만 값이
     # 들어가며 강제 제약이 아니다. 매니저가 S-12 배정 화면에서 "묶기 제안" 으로 보고 승인해야 LOCK 제약이 된다.
     team_lock_request_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
 
