@@ -92,7 +92,12 @@ def db_host_for_log() -> str:
     from urllib.parse import urlsplit
 
     try:
-        u = urlsplit(get_settings().database_url)
-        return f"{u.hostname}:{u.port or 5432}/{u.path.lstrip('/')}"
+        url = get_settings().database_url
+        u = urlsplit(url)
+        if not u.hostname or "@" in u.path:
+            # 호스트를 못 읽으면 형식 오류. 경로에 자격증명이 섞여 있을 수 있으니 절대 출력하지 않는다
+            return "(형식 오류 — 'postgresql+psycopg://' 처럼 스킴 뒤에 '://' 가 있는지 확인)"
+        db = u.path.lstrip("/").split("?")[0]
+        return f"{u.hostname}:{u.port or 5432}/{db}"
     except Exception:  # noqa: BLE001 — 로그용이라 어떤 오류도 삼킨다
         return "(파싱 실패)"
