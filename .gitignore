@@ -31,3 +31,4 @@ logs/
 
 # --- 로컬 도구 ---
 .claude/
+.neon
