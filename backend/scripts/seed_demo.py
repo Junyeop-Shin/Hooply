@@ -119,10 +119,22 @@ def reset_db() -> None:
     print("기존 데이터를 모두 지웠어요.")
 
 
+def _is_local_db() -> bool:
+    from urllib.parse import urlsplit
+
+    from app.core.config import get_settings
+
+    return (urlsplit(get_settings().database_url).hostname or "") in ("localhost", "127.0.0.1", "db")
+
+
 def main() -> None:
     import sys
 
+    no_admin = "--no-admin" in sys.argv  # 운영 DB 에 올릴 때: admin@demo.com(고정 비밀번호 관리자) 을 만들지 않는다
     if "--reset" in sys.argv:
+        if not _is_local_db() and "--i-really-mean-it" not in sys.argv:
+            print("--reset 은 로컬 DB 에서만 허용해요. 운영 DB 의 데모 데이터만 지우려면 scripts.remove_demo 를 쓰세요.")
+            sys.exit(2)
         reset_db()
     db = SessionLocal()
     try:
@@ -140,11 +152,13 @@ def main() -> None:
             survey_service.submit(db, user, SurveyResponseIn(template_id=tpl.id, answers=_answers(tpl, row)))
             users.append(user)
 
-        # 1-b) 관리자 계정 — SQLAdmin(/admin)·관리자 API 확인용. 팀에는 속하지 않는다
-        auth_service.signup(db, SignupRequest(email=ADMIN_EMAIL, password=SecretStr(PASSWORD), name="관리자"))
-        admin = db.scalar(select(User).where(User.email == ADMIN_EMAIL))
-        admin.global_role = GlobalRole.ADMIN
-        db.commit()
+        # 1-b) 관리자 계정 — SQLAdmin(/admin)·관리자 API 확인용. 팀에는 속하지 않는다 (--no-admin 이면 건너뜀)
+        admin = None
+        if not no_admin:
+            auth_service.signup(db, SignupRequest(email=ADMIN_EMAIL, password=SecretStr(PASSWORD), name="관리자"))
+            admin = db.scalar(select(User).where(User.email == ADMIN_EMAIL))
+            admin.global_role = GlobalRole.ADMIN
+            db.commit()
 
         # 2) 팀 + 가입 + 자기 위치
         manager = users[0]
@@ -286,7 +300,11 @@ def main() -> None:
         print(f"이번 주 일정: {sunday} 10:00 일요 정기전 · 참석 {ATTEND}명 + 게스트 2명 · 불참 {ABSENT}명 · 미응답 {len(ROSTER) - ATTEND - ABSENT}명")
         print(f"매니저 로그인: {MANAGER_EMAIL} / {PASSWORD}")
         print(f"팀원 로그인: m01@demo.com ~ m19@demo.com / {PASSWORD}")
-        print(f"관리자 콘솔: http://localhost:8000/admin  (로그인 {ADMIN_EMAIL} / {PASSWORD}) · 승인 대기 팀 '{team3.name}'(m08 생성) 에서 승인 액션 확인")
+        if admin:
+            print(f"관리자 콘솔: http://localhost:8000/admin  (로그인 {ADMIN_EMAIL} / {PASSWORD}) · 승인 대기 팀 '{team3.name}'(m08 생성) 에서 승인 액션 확인")
+        else:
+            print(f"관리자 계정은 만들지 않았어요 (--no-admin). 승인 대기 팀 '{team3.name}'(m08 생성) 은 기존 관리자 콘솔에서 승인해 보세요.")
+        print("데모 데이터를 지우려면: python -m scripts.remove_demo")
         print("게스트 초대 이력(불러오기 확인용):")
         print("  m04@demo.com 문경은  → 게스트 허웅(지난주+이번주), 게스트 이승현(이번주)")
         print("  m07@demo.com 김선형  → 게스트 허훈 (지난주만 → 이번 주 시트에서 불러오기 가능)")

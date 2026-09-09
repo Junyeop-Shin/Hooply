@@ -53,6 +53,8 @@ npm run dev
 ```bash
 docker compose exec api python -m scripts.seed_demo          # 이미 있으면 건너뜀. 다시 만들려면 --reset (전 데이터 삭제)
 # 관리자 콘솔: http://localhost:8000/admin  (admin@demo.com / demo1234)
+# 운영 DB 에 테스트용 데모 데이터를 잠시 올릴 때:  DATABASE_URL=<Neon> python -m scripts.seed_demo --no-admin   /  지울 때: python -m scripts.remove_demo
+#   --reset 은 로컬 DB 에서만 동작 (운영 DB 전체 삭제 방지)
 # 의존성 변경 시: cd backend && uv add <pkg> && uv export --no-dev --no-hashes --no-emit-project -o requirements.txt  (Render·Docker 는 requirements.txt 로 설치)
 # 운영 배포 전 확인: JWT_SECRET_KEY 교체 · DOCS_ENABLED=false · ADMIN_COOKIE_SECURE=true · CORS_ORIGINS/FRONTEND_BASE_URL 을 실제 도메인으로 · seed_demo 는 운영 DB 에 절대 실행하지 않기
 # 매니저: manager@demo.com / demo1234   팀원: m01@demo.com ~ m19@demo.com / demo1234
