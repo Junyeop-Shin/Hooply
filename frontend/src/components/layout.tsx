@@ -1,0 +1,111 @@
+/**
+ * 화면 뼈대. 모바일 폭(max 28rem)으로 가운데 정렬하고, 로그인 후 화면은 하단 탭바를 붙인다.
+ * 설계서 5.1절: 주요 액션은 하단 고정, 역할별 진입점은 홈 카드로 분리.
+ */
+import type { ReactNode } from 'react'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+
+export function Screen({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`mx-auto flex min-h-full w-full max-w-md flex-col ${className}`}>{children}</div>
+}
+
+/** 뒤로 가기 — SPA 안에서 이전 화면이 있으면 그리로(history), 새로고침·직접 진입이면 fallback 경로로 */
+export function useGoBack() {
+  const nav = useNavigate()
+  const loc = useLocation()
+  return (fallback: string) => {
+    // 앱 안에서 쌓인 히스토리가 있으면 진짜 뒤로 간다. from 을 push 하면 팀 ↔ 일정이 서로를 계속 쌓아 무한히 오가므로 쓰지 않는다.
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0
+    if (idx > 0) { nav(-1); return }
+    // 새로고침·딥링크(히스토리 없음): 진입 화면이 알려준 경로 → 없으면 기본 경로. replace 라 되돌아올 항목을 만들지 않는다
+    const from = (loc.state as { from?: string } | null)?.from
+    nav(from ?? fallback, { replace: true })
+  }
+}
+
+export function TopBar({
+  title,
+  back,
+  right,
+  tone = 'light',
+}: {
+  title: ReactNode
+  back?: boolean | string
+  right?: ReactNode
+  tone?: 'light' | 'navy'
+}) {
+  const nav = useNavigate()
+  const goBack = useGoBack()
+  const dark = tone === 'navy'
+  return (
+    <header
+      className={`sticky top-0 z-10 flex h-14 items-center gap-2 px-3 ${
+        dark ? 'bg-navy-800 text-white' : 'border-b border-stone-200 bg-white/90 text-navy-900 backdrop-blur'
+      }`}
+    >
+      {back ? (
+        <button
+          onClick={() => (typeof back === 'string' ? goBack(back) : nav(-1))}
+          className="flex size-10 items-center justify-center rounded-full text-xl active:bg-black/10"
+          aria-label="뒤로"
+        >
+          ‹
+        </button>
+      ) : (
+        <span className="w-2" />
+      )}
+      <h1 className="flex-1 truncate text-lg font-bold">{title}</h1>
+      {right}
+    </header>
+  )
+}
+
+export function Content({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <main className={`flex-1 space-y-4 px-4 py-4 ${className}`}>{children}</main>
+}
+
+/** 화면 하단 고정 액션 영역 (5.1절 한 손 조작) */
+export function BottomAction({ children }: { children: ReactNode }) {
+  return (
+    <div className="safe-bottom sticky bottom-0 border-t border-stone-200 bg-white/95 px-4 pt-3 backdrop-blur">
+      {children}
+    </div>
+  )
+}
+
+const tabs = [
+  { to: '/', label: '홈', icon: (
+    <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10.5V20h13v-9.5" /><path d="M10 20v-5h4v5" /></svg>
+  ) },
+  { to: '/me', label: '프로필', icon: (
+    <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
+  ) },
+]
+
+/** 하단 탭 — 홈 / 프로필. 활성 탭은 코트 오렌지, 위에 짧은 바 */
+export function TabBar() {
+  return (
+    <nav className="safe-bottom sticky bottom-0 z-10 grid grid-cols-2 border-t border-stone-200 bg-white">
+      {tabs.map((t) => (
+        <NavLink
+          key={t.to}
+          to={t.to}
+          end={t.to === '/'}
+          className={({ isActive }) =>
+            `relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${
+              isActive ? 'text-court-600' : 'text-stone-400'
+            }`
+          }
+        >
+          {({ isActive }) => (
+            <>
+              {isActive && <span className="absolute top-0 h-0.5 w-10 rounded-b-full bg-court-500" />}
+              {t.icon}
+              {t.label}
+            </>
+          )}
+        </NavLink>
+      ))}
+    </nav>
+  )
+}

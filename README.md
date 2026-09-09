@@ -1,0 +1,90 @@
+# 농구 동호회 팀 매칭 서비스
+
+설계서: [CLAUDE.md](CLAUDE.md) (v0.3). 이 저장소는 그 설계서의 **6장 데이터 모델**과 **7장 API 명세**를 코드로 옮긴 백엔드 뼈대와, 5장 화면 설계를 따른 프론트엔드 초안입니다.
+
+## 구성
+
+```
+docker-compose.yml          db(postgres:16) + api(FastAPI) + web(nginx)
+frontend/                   React + TS + Vite + Tailwind — 자세한 내용은 frontend/README.md
+backend/
+  alembic/versions/0001_initial_schema.py   6장 ERD 전체 (28 테이블)
+  alembic/versions/0002_*.py                게스트 묶기 요청 컬럼 + 설문 테이블(스펙 구조) + 설문 v1 시드
+  alembic/versions/0003_*.py                설문 v2(활성) · 팀별 자기 위치 컬럼 · users.birth_year 삭제
+  alembic/versions/0004_*.py                users.position_prefs (프로필 포지션 수정의 원본)
+  alembic/versions/0005_*.py                guest_invite_presets (이전 초대 게스트 불러오기)
+  scripts/seed_demo.py                      데모 데이터 (20명 동호회 · 지난 5회차 배정/쿼터 · 피어 투표 · 이번 주 일정 · 두 번째 팀)
+  app/db/survey_seed.py                     설문 문항·선택지 시드 데이터 (v1 이력 + v2 현재)
+  app/
+    core/      config · errors(7.4절 에러 코드) · security(bcrypt/JWT)
+    db/        Base · 세션
+    models/    account · team · profile · ranking · survey · event · assignment · game · peer · audit
+    schemas/   7.2절 공통 스키마 + 그룹별 요청/응답
+    api/v1/    7.3절 엔드포인트를 명세 순서대로 (auth → surveys → teams → guests → rankings → events → assignments → quarters → peer → admin)
+    services/  auth · team · player · survey · guest · event · ranking · assignment(배정 엔진) · quarter · rating(잔차 Elo)
+  tests/       명세 커버리지 검사 + 인증·팀 흐름
+```
+
+## 실행
+
+```bash
+# 1. DB
+docker compose up -d db
+
+# 2. 백엔드 (uv 사용)
+cd backend
+uv sync
+cp .env.example .env            # 필요 시 수정
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload
+# → http://localhost:8000/docs
+
+# 3. 프론트엔드
+cd frontend
+npm install
+npm run dev
+# → http://localhost:5173  (/api 요청은 8000으로 프록시)
+```
+
+전부 도커로 띄우려면 `docker compose up --build` 후 http://localhost:5173 으로 접속합니다.
+
+데모 데이터(20명 동호회 + 이번 주 일요일 일정 + 참석/게스트):
+
+```bash
+docker compose exec api python -m scripts.seed_demo          # 이미 있으면 건너뜀. 다시 만들려면 --reset (전 데이터 삭제)
+# 관리자 콘솔: http://localhost:8000/admin  (admin@demo.com / demo1234)
+# 운영 배포 전 확인: JWT_SECRET_KEY 교체 · DOCS_ENABLED=false · ADMIN_COOKIE_SECURE=true · CORS_ORIGINS/FRONTEND_BASE_URL 을 실제 도메인으로 · seed_demo 는 운영 DB 에 절대 실행하지 않기
+# 매니저: manager@demo.com / demo1234   팀원: m01@demo.com ~ m19@demo.com / demo1234
+# 게스트 불러오기 확인: m07@demo.com(게스트 허훈), manager@demo.com(게스트 송교창)
+```
+
+테스트 (docker의 Postgres를 그대로 사용하며 테이블을 비웁니다):
+
+```bash
+cd backend && uv run pytest -q
+```
+
+## 구현 상태
+
+| 구분 | 상태 |
+| --- | --- |
+| 스키마 / 마이그레이션 | 완료 (upgrade/downgrade 왕복 검증) |
+| 인증(이메일) · /me · 팀 생성(관리자 승인 후 활성화)/가입/활성화/정보 수정 · 팀원 목록/권한(팀장만 부여·회수, 팀장 자진 해제 시 승계)/제외(마지막 매니저 보호) | 구현 |
+| 온보딩 설문 v2 (11문항, 1인 1회, 팀 내 z-score → prior) + 팀 가입 후 "동호회 내 내 위치" — survey-feature-spec | 구현 |
+| 일정 등록·목록·상세·수정·취소·응답 미리 마감 · RSVP · 참석 현황/포지션 요약/경고 · 지난 기록 추가(과거 일정 + 참석 + 쿼터) | 구현 |
+| 게스트: 회차별 등록(팀원 누구나, 키 포함)·수정·삭제 권한·동명이인·재사용·묶기 요청·병합 후보·병합/되돌리기 — guest-feature-spec | 구현 |
+| 매니저 실력 정렬 (버전 관리, 설문 0.5 + 정렬 0.5 결합) | 구현 |
+| 팀 배정: 실현가능성 검사, Union-Find 묶음, 2팀 완전 탐색, 전략 3안, 설명, 교체, 확정, 플레이어 마스킹, 직전 회차 제약 | 구현 |
+| 쿼터 기록 · 잔차 기반 Elo 실력 갱신 (첫 2회 게이트, 삭제 롤백 = 팀 전체 재계산, 병합 게스트 합산) | 구현 |
+| 피어 투표 (종료 시각 자동 오픈, '다음에 같이 뛰고 싶은 사람' 같은 팀 2 + 상대 팀 2, 이유 태그, 함께 참석 대비 정규화 + 최근 가중 선호 점수, 매니저 독려 메시지) — peer-vote-spec | 구현 |
+| 선수 통계 (`/players/{id}/stats`: 본인은 쿼터 기록·마진, 매니저는 실력 지표 근거까지) · 팀 리더보드 (참여율/출전 쿼터/잔차) | 구현 |
+| 관리자: SQLAdmin 콘솔 `/admin` (ADMIN 계정, 팀 승인/거절 액션) + 사용자 검색·팀 승인·원시 데이터·지표 보정(이력+감사 로그)·감사 로그 API | 구현 |
+| 카카오 로그인 · 비밀번호 재설정 메일 | 스텁 (501) — 로테이션 자동 제안(F17)은 범위에서 제외 |
+| 프론트: 로그인·가입·설문·홈·팀·팀원 관리·일정/RSVP·게스트·프로필(메인 팀 · 내 기록)·실력 정렬·배정 실행/결과/확정 결과·쿼터 기록·피어 투표·매니저 실력 지표 화면 | API 연결됨 |
+
+501 `NOT_IMPLEMENTED`를 반환하는 엔드포인트는 `/docs`에서 요청·응답 스키마를 확인할 수 있고, 각 함수 docstring에 설계서의 해당 절과 구현 메모가 있습니다.
+
+## 다음 작업 (9.8절 순서)
+
+1. 카카오 로그인 (11.5절) · 비밀번호 재설정 메일
+2. 배치 RAPM(100쿼터 이후) · 앵커 재보정(150쿼터 이후)

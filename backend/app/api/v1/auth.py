@@ -1,0 +1,277 @@
+"""7.3절 인증 · 프로필 — 회원가입/로그인/토큰/카카오/비밀번호 재설정과 내 정보.
+
+설계서: 7.3절 인증 · 프로필, FR-01 · FR-02, 11.5절 인증 방식 결정.
+
+엔드포인트
+- POST  /auth/signup            이메일 회원가입 (구현됨)
+- POST  /auth/login             이메일 로그인 (구현됨)
+- GET   /auth/kakao/login-url   카카오 인가 URL 생성 (스켈레톤)
+- GET   /auth/kakao/callback    카카오 콜백 → 가입/로그인 (스켈레톤)
+- POST  /auth/kakao/link        기존 계정에 카카오 연결 (스켈레톤)
+- POST  /auth/refresh           토큰 갱신 (구현됨)
+- POST  /auth/password/forgot   비밀번호 재설정 요청 (구현됨 · 메일 발송은 TODO)
+- POST  /auth/password/reset    비밀번호 재설정 (스켈레톤)
+- GET   /me                     내 정보 조회 (구현됨)
+- PATCH /me                     내 프로필 수정 (구현됨)
+- GET   /me/teams               내 소속 팀 목록 (구현됨)
+"""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Query, status
+from sqlalchemy import func, select
+
+from app.api.deps import DB, CurrentUser
+from app.api.v1._docs import NOT_IMPLEMENTED, errors
+from app.core import errors as E
+from app.models import Player, Team
+from app.models.enums import PlayerKind, PlayerStatus
+from app.schemas.auth import (
+    ForgotPasswordRequest,
+    KakaoLinkRequest,
+    KakaoLoginUrl,
+    KakaoTokenPair,
+    LoginRequest,
+    RefreshRequest,
+    ResetPasswordRequest,
+    SignupRequest,
+    TeamMembershipView,
+    TokenPair,
+    UserDetail,
+    UserUpdate,
+)
+from app.schemas.common import ItemList
+from app.services import auth_service
+
+router = APIRouter(tags=["인증 · 프로필"])
+
+
+@router.post(
+    "/auth/signup", status_code=201, response_model=TokenPair,
+    responses=errors(_409="EMAIL_DUPLICATED"), summary="이메일 회원가입",
+)
+def signup(db: DB, body: SignupRequest):
+    """이메일/비밀번호로 계정을 만들고 즉시 로그인 토큰을 발급한다.
+
+    - **권한:** 비회원 (인증 불필요).
+    - **처리:** 이메일 중복을 확인한 뒤 `users` 행을 만들고, 비밀번호는 bcrypt 단방향 해시로만
+      저장한다. 동시에 `auth_identities`에 `LOCAL` 로그인 수단을 연결하고
+      access/refresh 토큰 쌍을 돌려준다. 온보딩 설문은 아직 미완료 상태다.
+    - **오류:** `409 EMAIL_DUPLICATED` — 이미 가입된 이메일. `400 VALIDATION_ERROR` — 형식 위반.
+    - **상태:** `구현됨`.
+    - **설계서:** 7.3절 인증, FR-01 · FR-02, 11.5절 (bcrypt 해시).
+    """
+    return auth_service.signup(db, body)
+
+
+@router.post(
+    "/auth/login", response_model=TokenPair,
+    responses=errors(_401="INVALID_CREDENTIALS"), summary="이메일 로그인",
+)
+def login(db: DB, body: LoginRequest):
+    """이메일/비밀번호를 검증하고 토큰 쌍을 발급한다.
+
+    - **권한:** 비회원 (인증 불필요).
+    - **처리:** 삭제되지 않은 계정을 이메일로 찾고, 입력한 비밀번호를 같은 방식으로 해시해
+      저장된 해시와 비교한다. 소셜 전용 계정(`password_hash` 없음)은 이 경로로 로그인할 수 없다.
+      성공하면 access 30분 / refresh 14일 JWT를 발급한다.
+    - **오류:** `401 INVALID_CREDENTIALS` — 이메일 또는 비밀번호 불일치 (어느 쪽이 틀렸는지
+      구분하지 않는다).
+    - **상태:** `구현됨`.
+    - **설계서:** 7.3절 인증, FR-01, 11.5절.
+    """
+    return auth_service.login(db, body)
+
+
+@router.get(
+    "/auth/kakao/login-url", response_model=KakaoLoginUrl,
+    responses=NOT_IMPLEMENTED, summary="카카오 인가 URL 생성",
+)
+def kakao_login_url():
+    """프론트가 이동할 카카오 인가 URL과 CSRF 방지용 `state`를 생성한다.
+
+    - **권한:** 비회원 (인증 불필요).
+    - **처리 (예정):** 난수 `state`를 발급해 세션/캐시에 보관하고
+      `https://kauth.kakao.com/oauth/authorize?...&state=...` 형태의 URL을 돌려준다.
+      콜백에서 같은 `state`가 돌아오는지 대조해 CSRF를 막는다.
+    - **오류:** 없음 (스켈레톤 단계에서는 `501 NOT_IMPLEMENTED`).
+    - **상태:** `스켈레톤 (501 NOT_IMPLEMENTED)`.
+    - **설계서:** 7.3절 인증, 11.5절 카카오 로그인 흐름 1단계.
+    """
+    raise E.NotImplementedYet()
+
+
+@router.get(
+    "/auth/kakao/callback", response_model=KakaoTokenPair,
+    responses=errors(_401="KAKAO_AUTH_FAILED") | NOT_IMPLEMENTED,
+    summary="카카오 콜백 (가입/로그인)",
+)
+def kakao_callback(
+    code: Annotated[str, Query(description="카카오가 redirect_uri로 전달한 인가 코드 (1회용)")],
+    state: Annotated[str, Query(description="login-url에서 발급한 CSRF 방지 난수. 불일치 시 401")],
+):
+    """카카오가 돌려준 인가 코드를 받아 가입 또는 로그인을 완료한다.
+
+    - **권한:** 비회원 (카카오 리다이렉트로 호출).
+    - **처리 (예정):** `state` 대조 → 인가 코드를 카카오 토큰으로 교환
+      (`POST kauth.kakao.com/oauth/token`) → `GET kapi.kakao.com/v2/user/me`로 회원번호·닉네임·
+      프로필 사진 조회 → `auth_identities(provider=KAKAO)` 조회. 있으면 로그인, 없으면
+      `users` 생성(이메일은 없을 수 있으므로 NULL 허용) → 우리 서비스 JWT 발급.
+      응답의 `is_new`로 온보딩 설문 이동 여부를 판단한다.
+    - **오류:** `401 KAKAO_AUTH_FAILED` — 토큰 교환 실패·state 불일치.
+    - **상태:** `스켈레톤 (501 NOT_IMPLEMENTED)`.
+    - **설계서:** 7.3절 인증, 11.5절 카카오 로그인 흐름 2~6단계, 5.4절 "카카오 계정에 이메일 없음".
+    """
+    raise E.NotImplementedYet()
+
+
+@router.post(
+    "/auth/kakao/link", response_model=UserDetail,
+    responses=errors(_409="IDENTITY_ALREADY_LINKED") | NOT_IMPLEMENTED,
+    summary="기존 계정에 카카오 연결",
+)
+def kakao_link(user: CurrentUser, body: KakaoLinkRequest):
+    """이메일로 가입한 계정에 카카오 로그인 수단을 추가로 연결한다.
+
+    - **권한:** 로그인 사용자.
+    - **처리 (예정):** 카카오 인가 코드를 교환해 회원번호를 얻고, 현재 계정의
+      `auth_identities`에 `KAKAO` 행을 추가한다. 이후 카카오·이메일 어느 쪽으로도 로그인 가능.
+    - **오류:** `409 IDENTITY_ALREADY_LINKED` — 그 카카오 계정이 이미 다른 계정에 연결됨.
+      `401 TOKEN_EXPIRED` — 로그인 필요.
+    - **상태:** `스켈레톤 (501 NOT_IMPLEMENTED)`.
+    - **설계서:** 7.3절 인증, 6.2절 `auth_identities` (users 1:N), 11.5절.
+    """
+    raise E.NotImplementedYet()
+
+
+@router.post(
+    "/auth/refresh", response_model=TokenPair,
+    responses=errors(_401="TOKEN_EXPIRED"), summary="토큰 갱신",
+)
+def refresh(db: DB, body: RefreshRequest):
+    """refresh 토큰으로 새 access/refresh 토큰 쌍을 발급한다.
+
+    - **권한:** 비회원 (본문의 refresh 토큰으로 인증).
+    - **처리:** 토큰의 `type`이 `refresh`인지와 서명·만료를 검증하고, 계정이 삭제되지 않았으면
+      새 토큰 쌍을 발급한다. 이전 refresh 토큰은 별도로 무효화하지 않는다 (만료까지 유효).
+    - **오류:** `401 TOKEN_EXPIRED` — 토큰 만료·위조·타입 불일치, 또는 삭제된 계정.
+    - **상태:** `구현됨`.
+    - **설계서:** 7.1절 공통 규약 (access 30분 / refresh 14일), 7.3절 인증.
+    """
+    return auth_service.refresh(db, body.refresh_token)
+
+
+@router.post(
+    "/auth/password/forgot", status_code=status.HTTP_202_ACCEPTED,
+    summary="비밀번호 재설정 요청",
+)
+def forgot_password(body: ForgotPasswordRequest):
+    """비밀번호 재설정 메일 발송을 요청한다. 가입 여부와 무관하게 항상 202를 돌려준다.
+
+    - **권한:** 비회원 (인증 불필요).
+    - **처리:** 현재는 요청을 접수(`{"accepted": true}`)만 한다. TODO — 계정이 있으면
+      `password_reset_tokens`에 토큰의 SHA-256 해시만 저장(30분 만료·1회 사용)하고 원문 토큰을
+      담은 메일을 발송한다. 응답이 계정 존재 여부에 따라 달라지면 계정 탐색 통로가 되므로
+      항상 202를 유지한다.
+    - **오류:** `400 VALIDATION_ERROR` — 이메일 형식 위반.
+    - **상태:** `구현됨` (접수 응답만; 토큰 발급·메일 발송은 TODO).
+    - **설계서:** 7.3절 인증 (항상 202), 7.4절 설계 원칙, 6.2절 `password_reset_tokens`, 11.5절.
+    """
+    return {"accepted": True}
+
+
+@router.post(
+    "/auth/password/reset",
+    responses=errors(_400="TOKEN_INVALID_OR_EXPIRED") | NOT_IMPLEMENTED,
+    summary="비밀번호 재설정",
+)
+def reset_password(body: ResetPasswordRequest):
+    """메일로 받은 토큰과 새 비밀번호로 비밀번호를 바꾼다.
+
+    - **권한:** 비회원 (본문의 재설정 토큰으로 인증).
+    - **처리 (예정):** 토큰을 SHA-256 해시해 `password_reset_tokens`에서 찾고, 만료 전이며
+      `used_at`이 비어 있으면 `users.password_hash`를 새 bcrypt 해시로 교체하고 토큰을 사용
+      처리한다.
+    - **오류:** `400 TOKEN_INVALID_OR_EXPIRED` — 토큰 없음·만료·이미 사용됨.
+    - **상태:** `스켈레톤 (501 NOT_IMPLEMENTED)`.
+    - **설계서:** 7.3절 인증, FR-02, 6.2절 `password_reset_tokens`, 11.5절.
+    """
+    raise E.NotImplementedYet()
+
+
+@router.get("/me", response_model=UserDetail, summary="내 정보 조회")
+def get_me(user: CurrentUser):
+    """로그인한 계정의 기본 정보, 연결된 로그인 수단, 온보딩 완료 여부를 돌려준다.
+
+    - **권한:** 로그인 사용자.
+    - **처리:** Bearer 토큰에서 얻은 `users` 행을 그대로 직렬화한다. `identities[]`에
+      카카오/이메일 연결 목록, `onboarding_completed`로 설문 이동 여부를 판단한다.
+      `global_role`이 `ADMIN`이면 관리자 계정이다.
+    - **오류:** `401 TOKEN_EXPIRED` — 토큰 없음·만료·삭제된 계정.
+    - **상태:** `구현됨`.
+    - **설계서:** 7.3절 인증 · 프로필 (`GET /me`), 6.2절 `users` · `auth_identities`.
+    """
+    return user
+
+
+@router.patch("/me", response_model=UserDetail, summary="내 프로필 수정")
+def update_me(db: DB, user: CurrentUser, body: UserUpdate):
+    """이름·닉네임·프로필 이미지·키·메인 팀을 부분 수정한다.
+
+    - **권한:** 로그인 사용자.
+    - **처리:** 본문에 포함된 필드만(`exclude_unset`) `users` 행에 덮어쓰고 커밋한다.
+      이메일·비밀번호·권한은 이 경로로 바꿀 수 없다. 팀별 `players.display_name`은 갱신하지
+      않는다 (가입 시점의 닉네임이 유지됨).
+    - **오류:** `400 VALIDATION_ERROR` — 범위 위반 (출생년도 1940~, 키 120~250cm 등).
+      `401 TOKEN_EXPIRED`.
+    - **상태:** `구현됨`.
+    - **설계서:** 7.3절 (`PATCH /me`), 6.2절 `users`, S-17 내 프로필.
+    """
+    data = body.model_dump(exclude_unset=True)
+    if data.get("primary_team_id") is not None:
+        from sqlalchemy import select
+
+        from app.models import Player
+        from app.models.enums import PlayerStatus
+
+        ok = db.scalar(select(Player.id).where(Player.user_id == user.id, Player.team_id == data["primary_team_id"], Player.status == PlayerStatus.ACTIVE))
+        if ok is None:
+            raise E.PlayerNotInTeam("내가 속한 팀만 메인 팀으로 설정할 수 있어요.")
+    for k, v in data.items():
+        setattr(user, k, v)
+    db.commit()
+    return user
+
+
+@router.get("/me/teams", response_model=ItemList[TeamMembershipView], summary="내 소속 팀 목록")
+def my_teams(db: DB, user: CurrentUser):
+    """내가 속한 팀 목록을 팀별 역할(MANAGER/PLAYER)과 함께 돌려준다.
+
+    - **권한:** 로그인 사용자.
+    - **처리:** `players`에서 내 `user_id`이고 `status=ACTIVE`인 행을 팀과 조인해 최근 가입순으로
+      나열한다. 각 항목에 이 팀에서의 `player_id`·`role`과, 팀 활성화 판단 기준인 활성 회원 수
+      (`member_count`, 게스트 제외)를 포함한다. 홈 화면(S-04)의 팀 카드 데이터다.
+    - **오류:** `401 TOKEN_EXPIRED`.
+    - **상태:** `구현됨`.
+    - **설계서:** 7.3절 (`GET /me/teams`), 3.1절 팀 단위 권한, 6.2절 `players`, S-04 홈.
+    """
+    rows = db.execute(
+        select(Team, Player)
+        .join(Player, Player.team_id == Team.id)
+        .where(Player.user_id == user.id, Player.status == PlayerStatus.ACTIVE)
+        .order_by(Player.joined_at.desc())
+    ).all()
+    items = []
+    for team, player in rows:
+        count = db.scalar(
+            select(func.count()).select_from(Player).where(
+                Player.team_id == team.id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE
+            )
+        )
+        items.append(
+            TeamMembershipView(
+                team_id=team.id, team_name=team.name, team_code=team.team_code, team_status=team.status, approval_status=team.approval_status,
+                player_id=player.id, role=player.role, member_count=count or 0,
+            )
+        )
+    return ItemList(items=items)

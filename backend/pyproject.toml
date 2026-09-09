@@ -1,0 +1,48 @@
+[project]
+name = "hoops-backend"
+version = "0.1.0"
+description = "농구 동호회 팀 매칭 서비스 백엔드 (FastAPI)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0.30",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
+    "pydantic[email]>=2.8",
+    "pydantic-settings>=2.4",
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
+    "bcrypt<4.1",
+    "httpx>=0.27",
+    "numpy>=2.0",
+    "sqladmin>=0.18",
+    "itsdangerous>=2.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = ["RUF012"]  # pydantic 모델의 list 기본값은 안전
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F811"]  # pytest 픽스처를 import 해 재사용하면 이름 가림 경고가 나지만 의도된 것
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

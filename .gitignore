@@ -1,0 +1,33 @@
+# --- 비밀·환경 설정 (절대 커밋 금지) ---
+backend/.env
+**/.env
+**/.env.*
+!**/.env.example
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Node / 프론트 빌드 ---
+node_modules/
+frontend/dist/
+frontend/build/
+frontend/dist-ssr/
+*.local
+
+# --- 로그·OS·에디터 ---
+*.log
+logs/
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- 로컬 도구 ---
+.claude/
