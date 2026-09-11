@@ -110,15 +110,20 @@ export function EventCreatePage() {
       <TopBar title="일정 등록" back={`/teams/${id}`} />
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); m.mutate() }} className="flex flex-1 flex-col">
         <Content>
-          {lastEvent && (
-            <Card className="flex items-center gap-3 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-navy-900">지난 일정과 같게 채우기</p>
-                <p className="truncate text-xs text-stone-500">
-                  {loadedFrom ? `${loadedFrom} 기준으로 채웠어요 · 날짜와 마감은 일주일 뒤` : `${lastEvent.title ?? '지난 일정'} · ${fmtEvent(lastEvent)}${lastEvent.venue ? ` · ${lastEvent.venue}` : ''}`}
-                </p>
+          {loadedFrom && <Alert kind="info">{loadedFrom} 일정으로 채웠어요. 날짜와 응답 마감은 일주일 뒤예요.</Alert>}
+          {lastEvent && !loadedFrom && (
+            <Card className="space-y-3 border-court-200 bg-court-50">
+              <div>
+                <p className="text-sm font-bold text-navy-900">지난 일정과 같게 채우기</p>
+                <p className="text-xs text-stone-500">날짜와 응답 마감은 일주일 뒤로 채워요. 채운 뒤 고칠 수 있어요.</p>
               </div>
-              <Button variant="ghost" className="min-h-10 shrink-0 text-sm" onClick={loadFromLast}>{loadedFrom ? '다시 채우기' : '채우기'}</Button>
+              <div className="space-y-1 rounded-xl bg-white px-3 py-2.5 text-sm">
+                {lastEvent.title && <p className="font-semibold text-navy-900">{lastEvent.title}</p>}
+                <p className="text-stone-600">{fmtEvent(lastEvent)}</p>
+                {lastEvent.venue && <p className="text-stone-600">{lastEvent.venue}</p>}
+                {lastEvent.memo && <p className="line-clamp-2 text-stone-500">{lastEvent.memo}</p>}
+              </div>
+              <Button variant="secondary" full className="min-h-10 text-sm" onClick={loadFromLast}>이 내용으로 채우기</Button>
             </Card>
           )}
           <Field label="제목 (선택)" value={f.title} onChange={set('title')} placeholder="모임 이름" hint="비워 두면 날짜로 보여요." />

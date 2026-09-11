@@ -1,5 +1,5 @@
 /**
- * S-09 일정 등록 — "지난 일정과 같게 채우기"는 입력만 채우고 저장하지 않는다(폼 제출 금지),
+ * S-09 일정 등록 — "최근 일정과 같게 채우기"는 입력만 채우고 저장하지 않는다(폼 제출 금지),
  * 날짜·마감은 +7일, 시작 시각을 바꾸면 종료가 +2시간 따라오되 직접 고친 뒤에는 유지된다.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -44,8 +44,10 @@ describe('EventCreatePage', () => {
   it('채우기는 값만 넣고 일정을 만들지 않는다 (날짜·마감은 일주일 뒤)', async () => {
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('button', { name: '채우기' }))
+    await user.click(await screen.findByRole('button', { name: '이 내용으로 채우기' }))
     expect(eventsApi.create).not.toHaveBeenCalled()  // 폼이 제출되면 안 된다
+    expect(screen.queryByRole('button', { name: '이 내용으로 채우기' })).not.toBeInTheDocument()  // 한 번 채우면 섹션이 사라진다
+    expect(screen.getByText(/일정으로 채웠어요/)).toBeInTheDocument()
     expect(input('제목 (선택)')).toHaveValue('일요 정기전')
     expect(input('날짜')).toHaveValue('2026-09-13')      // 9/6 + 7일
     expect(input('시작')).toHaveValue('10:00')
@@ -63,7 +65,7 @@ describe('EventCreatePage', () => {
   it('시작 시각을 바꾸면 종료가 2시간 뒤로 따라온다', async () => {
     const user = userEvent.setup()
     renderPage()
-    await screen.findByRole('button', { name: '채우기' })
+    await screen.findByRole('button', { name: '이 내용으로 채우기' })
     await user.clear(input('시작'))
     await user.type(input('시작'), '19:30')
     expect(input('종료')).toHaveValue('21:30')
@@ -72,7 +74,7 @@ describe('EventCreatePage', () => {
   it('종료를 직접 고치면 그 진행 시간이 이후 시작 변경에도 유지된다', async () => {
     const user = userEvent.setup()
     renderPage()
-    await screen.findByRole('button', { name: '채우기' })
+    await screen.findByRole('button', { name: '이 내용으로 채우기' })
     await user.clear(input('종료'))
     await user.type(input('종료'), '23:00')   // 20:00 시작 → 3시간짜리
     await user.clear(input('시작'))
@@ -83,7 +85,7 @@ describe('EventCreatePage', () => {
   it('지난 일정을 채운 뒤에도 시작을 바꾸면 그 일정의 길이만큼 종료가 따라온다', async () => {
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('button', { name: '채우기' }))
+    await user.click(await screen.findByRole('button', { name: '이 내용으로 채우기' }))
     expect(input('시작')).toHaveValue('10:00')
     expect(input('종료')).toHaveValue('12:00')
     await user.clear(input('시작'))
@@ -94,7 +96,7 @@ describe('EventCreatePage', () => {
   it('시작이 늦어 종료가 자정을 넘으면 23:59 에서 멈춘다', async () => {
     const user = userEvent.setup()
     renderPage()
-    await screen.findByRole('button', { name: '채우기' })
+    await screen.findByRole('button', { name: '이 내용으로 채우기' })
     await user.clear(input('시작'))
     await user.type(input('시작'), '23:00')
     expect(input('종료')).toHaveValue('23:59')
@@ -103,7 +105,7 @@ describe('EventCreatePage', () => {
   it('마감 날짜를 고르면 마감 시각이 밤 10시로 채워진다', async () => {
     const user = userEvent.setup()
     renderPage()
-    await screen.findByRole('button', { name: '채우기' })
+    await screen.findByRole('button', { name: '이 내용으로 채우기' })
     expect(input('마감 시각')).toBeDisabled()
     await user.type(input('응답 마감 (선택)'), '2026-09-19')
     expect(input('마감 시각')).toHaveValue('22:00')

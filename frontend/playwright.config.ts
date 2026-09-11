@@ -14,6 +14,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL ?? 'http://localhost:5173',
     ...devices['Pixel 7'],
+    locale: 'ko-KR',
+    timezoneId: 'Asia/Seoul',  // 날짜 계산이 러너 시간대(UTC)에 흔들리지 않게 실제 사용 환경으로 고정
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'mobile-chromium', use: { ...devices['Pixel 7'] } }],
