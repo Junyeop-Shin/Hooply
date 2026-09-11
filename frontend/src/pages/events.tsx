@@ -9,7 +9,7 @@ import { ApiError } from '../api/client'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
 import { SHARE_DONE, shareText } from '../lib/kakao'
-import { POSITIONS, type AttendanceView, type EventGuestInput, type EventView, type GuestPreset, type PlayerCard, type Position } from '../api/types'
+import { POSITIONS, localISODate, type AttendanceView, type EventGuestInput, type EventView, type GuestPreset, type PlayerCard, type Position } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 
@@ -30,6 +30,24 @@ export function EventCreatePage() {
   const qc = useQueryClient()
   const [f, setF] = useState({ title: '', event_date: '', start_time: '20:00', end_time: '22:00', venue: '', rsvp_deadline: '', memo: '' })
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
+  // 지난 일정 불러오기: 제목·시작/종료·장소·메모는 그대로, 날짜와 응답 마감은 그 일정 기준 +7일
+  const recent = useQuery({ queryKey: ['events', 'team', id, 'all', 50], queryFn: () => eventsApi.list(id, { size: 50 }) })
+  const lastEvent = (recent.data?.items ?? []).filter((e) => e.status !== 'CANCELED').sort((a, b) => b.event_date.localeCompare(a.event_date) || b.id - a.id)[0]
+  const [loadedFrom, setLoadedFrom] = useState<string | null>(null)
+  const loadFromLast = () => {
+    if (!lastEvent) return
+    const plus7 = (d: Date) => new Date(d.getTime() + 7 * 86_400_000)
+    const date = plus7(new Date(lastEvent.event_date + 'T00:00:00'))
+    const deadline = lastEvent.rsvp_deadline ? plus7(new Date(lastEvent.rsvp_deadline)) : null
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const local = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`  // datetime-local 은 로컬 시각
+    setF({
+      title: lastEvent.title ?? '', event_date: localISODate(date),
+      start_time: lastEvent.start_time?.slice(0, 5) ?? '', end_time: lastEvent.end_time?.slice(0, 5) ?? '',
+      venue: lastEvent.venue ?? '', rsvp_deadline: deadline ? local(deadline) : '', memo: lastEvent.memo ?? '',
+    })
+    setLoadedFrom(fmtEvent(lastEvent))
+  }
   const m = useMutation({
     mutationFn: () =>
       eventsApi.create(id, {
@@ -43,6 +61,15 @@ export function EventCreatePage() {
       <TopBar title="일정 등록" back={`/teams/${id}`} />
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); m.mutate() }} className="flex flex-1 flex-col">
         <Content>
+          {lastEvent && (
+            <Card className="flex items-center gap-3 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-navy-900">지난 일정 불러오기</p>
+                <p className="truncate text-xs text-stone-500">{loadedFrom ? `${loadedFrom} 기준으로 채웠어요 · 날짜와 응답 마감은 일주일 뒤` : `${lastEvent.title ?? '일정'} · ${fmtEvent(lastEvent)}${lastEvent.venue ? ` · ${lastEvent.venue}` : ''}`}</p>
+              </div>
+              <Button variant="ghost" className="min-h-10 shrink-0 text-sm" onClick={loadFromLast}>{loadedFrom ? '다시 불러오기' : '불러오기'}</Button>
+            </Card>
+          )}
           <Field label="제목 (선택)" value={f.title} onChange={set('title')} placeholder="화요 정기전" />
           <Field label="날짜" type="date" value={f.event_date} onChange={set('event_date')} required />
           <div className="grid grid-cols-2 gap-3">
