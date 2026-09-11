@@ -108,7 +108,7 @@ export function EventRow({ e, teamName, withDetail, past }: { e: EventView; team
   const nav = useNavigate()
   const my = e.my_attendance
   return (
-    <Card onClick={() => nav(`/events/${e.id}`, { state: { from: window.location.pathname } })} className={`flex items-center gap-3 ${withDetail ? 'rounded-b-none' : ''} ${past ? 'opacity-75' : ''}`}>
+    <Card onClick={() => nav(`/events/${e.id}`, { state: { from: window.location.pathname } })} label={`${e.title ?? fmtEvent(e)} 일정 열기`} className={`flex items-center gap-3 ${withDetail ? 'rounded-b-none' : ''} ${past ? 'opacity-75' : ''}`}>
       <div className={`flex size-12 flex-col items-center justify-center rounded-xl ${past ? 'bg-stone-100 text-stone-500' : 'bg-navy-50 text-navy-800'}`}>
         <span className="text-[10px] leading-none">{Number(e.event_date.slice(5, 7))}월</span>
         <span className="text-lg font-black leading-tight">{Number(e.event_date.slice(8, 10))}</span>
@@ -135,7 +135,7 @@ function TeamRow(t: { team_id: number; team_name: string; team_status: 'PENDING'
     onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
   })
   return (
-    <Card onClick={() => nav(`/teams/${t.team_id}`)} className="flex items-center gap-3">
+    <Card onClick={() => nav(`/teams/${t.team_id}`)} label={`${t.team_name} 팀 열기`} className="flex items-center gap-3">
       <span className="flex size-11 items-center justify-center rounded-xl bg-court-50 text-base font-black text-court-600">{t.team_name.slice(0, 1)}</span>
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate font-bold text-navy-900">{t.team_name}{t.primary && <Badge tone="court">기본</Badge>}</p>

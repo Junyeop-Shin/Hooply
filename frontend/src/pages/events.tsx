@@ -23,39 +23,72 @@ export function fmtEvent(e: EventView) {
 }
 
 /* ---------- S-09 일정 등록 ---------- */
+
+/** "20:00" 에 시간을 더한다. 자정을 넘으면 23:59 로 멈춘다 (일정은 하루 안에서 끝나는 것으로 다룬다) */
+function addHours(hhmm: string, hours: number): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  if (Number.isNaN(h) || Number.isNaN(m)) return hhmm
+  const total = h * 60 + m + hours * 60
+  if (total >= 24 * 60) return '23:59'
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+const EMPTY_EVENT = { title: '', event_date: '', start_time: '20:00', end_time: '22:00', venue: '', rsvp_date: '', rsvp_time: '', memo: '' }
+
 export function EventCreatePage() {
   const { teamId } = useParams()
   const id = Number(teamId)
   const nav = useNavigate()
   const qc = useQueryClient()
-  const [f, setF] = useState({ title: '', event_date: '', start_time: '20:00', end_time: '22:00', venue: '', rsvp_deadline: '', memo: '' })
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
-  // 지난 일정 불러오기: 제목·시작/종료·장소·메모는 그대로, 날짜와 응답 마감은 그 일정 기준 +7일
+  const [f, setF] = useState(EMPTY_EVENT)
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((prev) => ({ ...prev, [k]: e.target.value }))
+  // 종료 시각은 시작 시각 +2시간으로 따라오되, 한 번이라도 직접 고치면 그 뒤로는 건드리지 않는다
+  const [endEdited, setEndEdited] = useState(false)
+  const setStart = (e: { target: { value: string } }) => {
+    const v = e.target.value
+    setF((prev) => ({ ...prev, start_time: v, end_time: endEdited || !v ? prev.end_time : addHours(v, 2) }))
+  }
+  const setEnd = (e: { target: { value: string } }) => { setEndEdited(true); setF((prev) => ({ ...prev, end_time: e.target.value })) }
+  // 마감 날짜만 고르면 시각은 밤 10시로 채워 둔다 (비워 두면 마감이 안 걸린다)
+  const setRsvpDate = (e: { target: { value: string } }) => {
+    const v = e.target.value
+    setF((prev) => ({ ...prev, rsvp_date: v, rsvp_time: v && !prev.rsvp_time ? '22:00' : prev.rsvp_time }))
+  }
+
+  // 지난 일정 불러오기: 제목·시작/종료·장소·메모는 그대로, 날짜와 응답 마감은 그 일정 기준 +7일. 입력만 채우고 저장은 하지 않는다
   const recent = useQuery({ queryKey: ['events', 'team', id, 'all', 50], queryFn: () => eventsApi.list(id, { size: 50 }) })
   const lastEvent = (recent.data?.items ?? []).filter((e) => e.status !== 'CANCELED').sort((a, b) => b.event_date.localeCompare(a.event_date) || b.id - a.id)[0]
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null)
   const loadFromLast = () => {
     if (!lastEvent) return
     const plus7 = (d: Date) => new Date(d.getTime() + 7 * 86_400_000)
-    const date = plus7(new Date(lastEvent.event_date + 'T00:00:00'))
     const deadline = lastEvent.rsvp_deadline ? plus7(new Date(lastEvent.rsvp_deadline)) : null
     const pad = (n: number) => String(n).padStart(2, '0')
-    const local = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`  // datetime-local 은 로컬 시각
     setF({
-      title: lastEvent.title ?? '', event_date: localISODate(date),
-      start_time: lastEvent.start_time?.slice(0, 5) ?? '', end_time: lastEvent.end_time?.slice(0, 5) ?? '',
-      venue: lastEvent.venue ?? '', rsvp_deadline: deadline ? local(deadline) : '', memo: lastEvent.memo ?? '',
+      title: lastEvent.title ?? '',
+      event_date: localISODate(plus7(new Date(lastEvent.event_date + 'T00:00:00'))),
+      start_time: lastEvent.start_time?.slice(0, 5) ?? '',
+      end_time: lastEvent.end_time?.slice(0, 5) ?? '',
+      venue: lastEvent.venue ?? '',
+      rsvp_date: deadline ? localISODate(deadline) : '',
+      rsvp_time: deadline ? `${pad(deadline.getHours())}:${pad(deadline.getMinutes())}` : '',
+      memo: lastEvent.memo ?? '',
     })
+    setEndEdited(true)  // 불러온 종료 시각을 시작 시각 변경이 덮어쓰지 않게
     setLoadedFrom(fmtEvent(lastEvent))
   }
+
   const m = useMutation({
     mutationFn: () =>
       eventsApi.create(id, {
         title: f.title || undefined, event_date: f.event_date, start_time: f.start_time || undefined, end_time: f.end_time || undefined,
-        venue: f.venue || undefined, rsvp_deadline: f.rsvp_deadline ? new Date(f.rsvp_deadline).toISOString() : undefined, memo: f.memo || undefined,
+        venue: f.venue || undefined,
+        rsvp_deadline: f.rsvp_date ? new Date(`${f.rsvp_date}T${f.rsvp_time || '22:00'}`).toISOString() : undefined,
+        memo: f.memo || undefined,
       }),
     onSuccess: (ev) => { qc.invalidateQueries({ queryKey: ['events'] }); nav(`/events/${ev.id}`, { replace: true }) },
   })
+
   return (
     <Screen>
       <TopBar title="일정 등록" back={`/teams/${id}`} />
@@ -64,24 +97,30 @@ export function EventCreatePage() {
           {lastEvent && (
             <Card className="flex items-center gap-3 py-3">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-navy-900">지난 일정 불러오기</p>
-                <p className="truncate text-xs text-stone-500">{loadedFrom ? `${loadedFrom} 기준으로 채웠어요 · 날짜와 응답 마감은 일주일 뒤` : `${lastEvent.title ?? '일정'} · ${fmtEvent(lastEvent)}${lastEvent.venue ? ` · ${lastEvent.venue}` : ''}`}</p>
+                <p className="text-sm font-semibold text-navy-900">지난 일정과 같게 채우기</p>
+                <p className="truncate text-xs text-stone-500">
+                  {loadedFrom ? `${loadedFrom} 기준으로 채웠어요 · 날짜와 마감은 일주일 뒤` : `${lastEvent.title ?? '지난 일정'} · ${fmtEvent(lastEvent)}${lastEvent.venue ? ` · ${lastEvent.venue}` : ''}`}
+                </p>
               </div>
-              <Button variant="ghost" className="min-h-10 shrink-0 text-sm" onClick={loadFromLast}>{loadedFrom ? '다시 불러오기' : '불러오기'}</Button>
+              <Button variant="ghost" className="min-h-10 shrink-0 text-sm" onClick={loadFromLast}>{loadedFrom ? '다시 채우기' : '채우기'}</Button>
             </Card>
           )}
-          <Field label="제목 (선택)" value={f.title} onChange={set('title')} placeholder="화요 정기전" />
+          <Field label="제목 (선택)" value={f.title} onChange={set('title')} placeholder="모임 이름" hint="비워 두면 날짜로 보여요." />
           <Field label="날짜" type="date" value={f.event_date} onChange={set('event_date')} required />
           <div className="grid grid-cols-2 gap-3">
-            <Field label="시작" type="time" value={f.start_time} onChange={set('start_time')} />
-            <Field label="종료" type="time" value={f.end_time} onChange={set('end_time')} />
+            <Field label="시작" type="time" value={f.start_time} onChange={setStart} />
+            <Field label="종료" type="time" value={f.end_time} onChange={setEnd} />
           </div>
-          <Field label="장소" value={f.venue} onChange={set('venue')} placeholder="서초체육관" />
-          <Field label="응답 마감 (선택)" type="datetime-local" value={f.rsvp_deadline} onChange={set('rsvp_deadline')} hint="마감 후에는 본인이 응답을 바꿀 수 없어요. 매니저는 가능해요." />
-          <Field label="메모 (선택)" value={f.memo} onChange={set('memo')} placeholder="회비 5천원, 게스트 2명 예정" />
+          <Field label="장소" value={f.venue} onChange={set('venue')} placeholder="체육관 이름" />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="응답 마감 (선택)" type="date" value={f.rsvp_date} onChange={setRsvpDate} max={f.event_date || undefined} />
+            <Field label="마감 시각" type="time" value={f.rsvp_time} onChange={set('rsvp_time')} disabled={!f.rsvp_date} />
+          </div>
+          <p className="-mt-2 px-1 text-xs text-stone-500">마감 후에는 팀원이 응답을 바꿀 수 없어요. 매니저는 대신 바꿀 수 있어요.</p>
+          <Field label="메모 (선택)" value={f.memo} onChange={set('memo')} placeholder="회비, 준비물, 주차 안내 등" />
           {m.isError && <Alert>{errMsg(m.error, '일정을 만들지 못했어요.')}</Alert>}
         </Content>
-        <BottomAction><Button type="submit" full loading={m.isPending}>등록하고 응답 받기</Button></BottomAction>
+        <BottomAction><Button type="submit" full loading={m.isPending} disabled={!f.event_date}>등록하고 응답 받기</Button></BottomAction>
       </form>
     </Screen>
   )

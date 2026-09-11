@@ -5,6 +5,7 @@
  *   ghost                = 취소·뒤로 등 눈에 띄지 않아야 하는 액션
  * 터치 영역은 최소 44px (설계서 5.1절).
  */
+import { useId } from 'react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 import type { ApprovalStatus, SkillGrade, TeamRole, TeamStatus } from '../api/types'
 
@@ -24,10 +25,13 @@ export function Button({
   loading,
   className,
   children,
+  type = 'button',
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; full?: boolean; loading?: boolean }) {
+  // type 기본값이 'submit' 이면 form 안의 보조 버튼(불러오기 등)이 눌릴 때 폼이 제출된다. 제출 버튼만 type="submit" 을 명시한다
   return (
     <button
+      type={type}
       {...rest}
       disabled={rest.disabled || loading}
       className={cx(
@@ -48,38 +52,49 @@ export function Field({
   label,
   hint,
   error,
+  id,
   ...input
 }: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string; error?: string }) {
+  // 라벨은 htmlFor 로, 힌트·오류는 aria-describedby 로 연결한다. 라벨로 감싸면 힌트까지 이름에 섞여
+  // 스크린리더가 "제목 (선택) 비워 두면 날짜로 보여요" 를 한 덩어리로 읽는다
+  const auto = useId()
+  const inputId = id ?? auto
+  const descId = `${inputId}-desc`
+  const desc = error ?? hint
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-navy-800">{label}</span>
+    <div className="block">
+      <label htmlFor={inputId} className="mb-1.5 block text-sm font-medium text-navy-800">{label}</label>
       <input
         {...input}
+        id={inputId}
+        aria-describedby={desc ? descId : undefined}
+        aria-invalid={error ? true : undefined}
         className={cx(
           'block w-full rounded-xl border bg-white px-3.5 py-3 text-[15px] outline-none transition',
-          'placeholder:text-stone-400 focus:ring-2',
+          'placeholder:text-stone-400 focus:ring-2 disabled:bg-stone-50 disabled:text-stone-400',
           error
             ? 'border-rose-300 focus:border-rose-400 focus:ring-rose-100'
             : 'border-stone-200 focus:border-court-400 focus:ring-court-100',
           input.className,
         )}
       />
-      {error ? (
-        <span className="mt-1 block text-xs text-rose-600">{error}</span>
-      ) : hint ? (
-        <span className="mt-1 block text-xs text-stone-500">{hint}</span>
-      ) : null}
-    </label>
+      {desc && <p id={descId} className={cx('mt-1 text-xs', error ? 'text-rose-600' : 'text-stone-500')}>{desc}</p>}
+    </div>
   )
 }
 
-export function Card({ className, children, onClick }: { className?: string; children: ReactNode; onClick?: () => void }) {
+export function Card({ className, children, onClick, label }: { className?: string; children: ReactNode; onClick?: () => void; label?: string }) {
+  // 누를 수 있는 카드는 role·tabIndex·Enter/Space 를 붙여 키보드와 스크린리더로도 쓸 수 있게 한다
   return (
     <div
       onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      aria-label={onClick ? label : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
       className={cx(
         'rounded-2xl border border-stone-200 bg-white p-4 shadow-[0_1px_2px_rgba(20,33,61,0.04)]',
-        onClick && 'cursor-pointer active:bg-stone-50',
+        onClick && 'cursor-pointer active:bg-stone-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-court-500',
         className,
       )}
     >

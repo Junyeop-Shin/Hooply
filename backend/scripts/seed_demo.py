@@ -5,7 +5,7 @@
   docker compose exec api python -m scripts.seed_demo       # 도커
 
 만드는 것
-  - 팀 "일요 코트메이트" (회원 20명, 전원 설문 v2 + 팀 내 자기 위치 응답 완료 → 실력 등급 계산됨)
+  - 팀 "일요 코트메이트" (ROSTER 20명 + 게스트 기록 확인용 m20, 전원 설문 v2 + 팀 내 자기 위치 응답 완료 → 실력 등급 계산됨)
   - 매니저 1명: manager@demo.com / demo1234  (이름 허재)
   - 팀원 19명: m01@demo.com ~ m19@demo.com / demo1234
   - 지난주 일요일 일정 1건 (종료됨): 회원 12명 참석 + 게스트 3명, 배정 확정까지 완료
@@ -299,7 +299,7 @@ def main() -> None:
 
         db.refresh(team)
         print("=== 데모 데이터 생성 완료 ===")
-        print(f"팀: {TEAM_NAME} (코드 {team.team_code}) · 회원 20명 · 상태 {team.status}")
+        print(f"팀: {TEAM_NAME} (코드 {team.team_code}) · 회원 {team_service.member_count(db, team.id)}명 · 상태 {team.status}")
         print(f"지난 회차 5개: {sunday - timedelta(days=35)} ~ {sunday - timedelta(days=7)} (배정 확정 · 쿼터 8·8·8·8·6개) · 3회차부터 실력 지표 반영")
         print("지난주 일정: 게스트 3명 · 피어 투표 8/12명 응답 (m07·m09·m10·m11 미응답)")
         print(f"두 번째 팀: {TEAM2_NAME} (코드 {team2.team_code}) · 매니저 m02 이상민 · 허재·m01·m03~m06 이 두 팀 소속 → 홈에서 '기본 팀으로 설정하기' 확인")
