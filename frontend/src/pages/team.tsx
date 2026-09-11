@@ -244,7 +244,7 @@ function PlayerRow({ p, isMe, right, ownerRow }: { p: PlayerCard | PlayerCardDet
   const detailed = 'skill_overall' in p ? p : null  // 매니저 응답(PlayerCardDetailed)에만 등급·수치가 있다
   return (
     <Card className="flex items-center gap-3 py-3">
-      <Avatar name={p.display_name} />
+      <Avatar name={p.display_name} src={p.profile_image_url} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate font-semibold text-navy-900">
           {p.display_name}

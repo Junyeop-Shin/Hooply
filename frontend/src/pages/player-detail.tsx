@@ -36,7 +36,7 @@ export function PlayerDetailPage() {
       <TopBar tone="navy" title="실력 지표" back={`/teams/${teamId}/members`} />
       <div className="bg-navy-800 px-4 pb-4 text-white">
         <div className="flex items-center gap-3">
-          <Avatar name={p.display_name} size="lg" />
+          <Avatar name={p.display_name} src={p.profile_image_url} size="lg" />
           <div className="min-w-0 flex-1">
             <p className="text-lg font-bold">{p.display_name} {p.kind === 'GUEST' && <Badge>게스트</Badge>}</p>
             <p className="text-xs text-navy-200">{p.playable_positions.length ? p.playable_positions.join(' · ') : '포지션 미입력'} · 참석 {s.events_attended}회 · 출전 {s.quarters_played}쿼터</p>

@@ -96,7 +96,7 @@ function AttendeeStep({ teamId, eventId, onDone }: { teamId: number; eventId: nu
                 return (
                   <label key={p.id} className="flex min-h-12 items-center gap-3 px-4 py-2">
                     <input type="checkbox" checked={on} onChange={() => toggle.mutate({ pid: p.id, on: !on })} className="size-5 accent-court-500" />
-                    <Avatar name={p.display_name} size="sm" />
+                    <Avatar name={p.display_name} src={p.profile_image_url} size="sm" />
                     <span className="flex-1 text-sm font-semibold text-navy-900">{p.display_name}</span>
                     <span className="text-xs text-stone-400">{p.primary_position ?? ''}</span>
                   </label>
@@ -124,7 +124,7 @@ function AttendeeStep({ teamId, eventId, onDone }: { teamId: number; eventId: nu
                 <p className="text-sm text-navy-900">같은 이름의 게스트가 있어요. 같은 사람이면 골라 주세요. 기록이 이어져요.</p>
                 {similar.map((p) => (
                   <button key={p.id} onClick={() => addGuest.mutate({ existing_player_id: p.id })} className="flex w-full items-center gap-3 rounded-xl border border-stone-200 px-3 py-2 text-left active:bg-stone-50">
-                    <Avatar name={p.display_name} size="sm" />
+                    <Avatar name={p.display_name} src={p.profile_image_url} size="sm" />
                     <span className="flex-1 text-sm font-semibold text-navy-900">{p.display_name}</span>
                     <Badge>{p.playable_positions.join(' · ') || '포지션 없음'}</Badge>
                     <span className="text-xs font-semibold text-court-600">같은 사람</span>

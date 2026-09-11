@@ -1,14 +1,16 @@
 /** S-04 홈 (역할별) · S-17 내 프로필 · 내 팀 목록. */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
+import { ApiError } from '../api/client'
+import { toAvatarDataUrl } from '../lib/image'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
 import { teamsApi } from '../api/teams'
 import { MarginTrend, QuarterList } from './player-detail'
 import { surveyApi } from '../api/survey'
-import { POSITIONS, SELF_RANK_LABEL, localISODate, type EventView, type Position } from '../api/types'
+import { POSITIONS, SELF_RANK_LABEL, localISODate, type EventView, type Position, type UserDetail } from '../api/types'
 import { useAuthStore } from '../store/auth'
 import { Avatar, Badge, Button, Card, EmptyState, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
@@ -168,7 +170,7 @@ export function ProfilePage() {
         {!u ? <Spinner /> : (
           <>
             <Card className="flex items-center gap-4">
-              <Avatar name={u.nickname ?? u.name} size="lg" />
+              <AvatarEditor user={u} />
               <div className="min-w-0 flex-1">
                 <p className="text-lg font-bold text-navy-900">{u.nickname ?? u.name}</p>
                 <p className="truncate text-sm text-stone-500">{u.email ?? '이메일 없음 (카카오 계정)'}</p>
@@ -348,6 +350,51 @@ export function GuestClaimCards({ teamId }: { teamId?: number } = {}) {
           </div>
         </Card>
       ))}
+    </div>
+  )
+}
+
+/** 프로필 사진 — 눌러서 고르고, 256px 로 줄여 올린다. 사진이 있으면 길게 누르지 않아도 바로 지울 수 있게 X 를 띄운다 */
+function AvatarEditor({ user }: { user: UserDetail }) {
+  const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const done = () => { qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['team'] }) }
+  const upload = useMutation({
+    mutationFn: async (file: File) => authApi.setAvatar(await toAvatarDataUrl(file)),
+    onSuccess: () => { setErr(null); done() },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : e instanceof Error ? e.message : '사진을 올리지 못했어요.'),
+  })
+  const remove = useMutation({ mutationFn: authApi.deleteAvatar, onSuccess: done })
+  const busy = upload.isPending || remove.isPending
+  return (
+    <div className="shrink-0">
+      <div className="relative">
+        <button
+          type="button" onClick={() => fileRef.current?.click()} disabled={busy}
+          aria-label={user.profile_image_url ? '프로필 사진 바꾸기' : '프로필 사진 추가하기'}
+          className="relative block rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-court-500 disabled:opacity-50"
+        >
+          <Avatar name={user.nickname ?? user.name} src={user.profile_image_url} size="xl" />
+          <span className="absolute -bottom-0.5 -right-0.5 flex size-7 items-center justify-center rounded-full border-2 border-white bg-court-500 text-xs font-bold text-white">
+            {busy ? '…' : user.profile_image_url ? '✎' : '+'}
+          </span>
+        </button>
+        {user.profile_image_url && !busy && (
+          <button
+            type="button" onClick={() => confirm('프로필 사진을 지울까요?') && remove.mutate()}
+            aria-label="프로필 사진 삭제"
+            className="absolute -right-1 -top-1 flex size-6 items-center justify-center rounded-full border border-stone-200 bg-white text-xs text-stone-500 shadow-sm"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      <input
+        ref={fileRef} type="file" accept="image/*" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload.mutate(f) }}
+      />
+      {err && <p className="mt-1 w-20 text-[11px] leading-tight text-rose-600">{err}</p>}
     </div>
   )
 }

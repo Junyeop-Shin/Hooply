@@ -105,6 +105,12 @@ class ResetPasswordRequest(BaseModel):
     new_password: SecretStr = Field(min_length=8, max_length=72, description="새 비밀번호. 제약은 SignupRequest.password와 동일")
 
 
+class AvatarIn(BaseModel):
+    """`POST /me/avatar` 요청. 프론트가 사진을 256px 정사각으로 줄여 데이터 URL 로 보낸다."""
+
+    data_url: str = Field(description="`data:image/jpeg;base64,...` 형식. JPG · PNG · WEBP, 512KB 이하")
+
+
 class IdentityView(ORMModel):
     """계정에 연결된 로그인 수단 하나 (`auth_identities` 행). `UserDetail.identities` 원소."""
 

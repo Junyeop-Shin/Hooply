@@ -106,6 +106,7 @@ def to_card(player: Player, *, include_grade: bool = False) -> PlayerCard:
         kind=player.kind,
         display_name=player.display_name,
         role=player.role,
+        profile_image_url=player.user.profile_image_url if player.user else None,
         height_cm=player.height_cm if player.kind == PlayerKind.GUEST else (player.user.height_cm if player.user else None),
         skill_grade=skill_grade_of(skill) if include_grade else None,  # 등급은 매니저/ADMIN 에게만 (사용자 결정)
         primary_position=primary,

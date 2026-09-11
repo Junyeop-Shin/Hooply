@@ -74,7 +74,7 @@ export function RankingPage() {
                   className="flex min-w-0 flex-1 cursor-grab items-center gap-2 active:cursor-grabbing"
                 >
                   <span className="w-6 text-center text-sm font-black text-court-600">{i + 1}</span>
-                  <Avatar name={p.display_name} size="sm" />
+                  <Avatar name={p.display_name} src={p.profile_image_url} size="sm" />
                   <span className="truncate font-semibold text-navy-900">{p.display_name}</span>
                   {p.kind === 'GUEST' && <Badge>게스트</Badge>}
                   <span className="ml-auto text-[11px] text-stone-400">{p.primary_position ?? ''}</span>

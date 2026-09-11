@@ -19,6 +19,8 @@ export const authApi = {
   forgotPassword: (email: string) => api<{ accepted: boolean }>('/auth/password/forgot', { method: 'POST', body: { email }, auth: false }),
   resetPassword: (token: string, new_password: string) => api<{ ok: boolean }>('/auth/password/reset', { method: 'POST', body: { token, new_password }, auth: false }),
   me: () => api<UserDetail>('/me'),
+  setAvatar: (data_url: string) => api<UserDetail>('/me/avatar', { method: 'POST', body: { data_url } }),
+  deleteAvatar: () => api<UserDetail>('/me/avatar', { method: 'DELETE' }),
   updateMe: (patch: Partial<Pick<UserDetail, 'name' | 'nickname' | 'height_cm' | 'primary_team_id'>>) =>
     api<UserDetail>('/me', { method: 'PATCH', body: patch }),
   myTeams: () => api<{ items: TeamMembershipView[] }>('/me/teams'),

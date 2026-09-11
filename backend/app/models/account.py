@@ -19,10 +19,12 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    LargeBinary,
     SmallInteger,
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -112,3 +114,20 @@ class PasswordResetToken(Base):
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)  # SHA-256 hex(64자)만 저장
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)  # 발급 후 30분
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # NULL = 아직 미사용
+
+
+class UserAvatar(Base):
+    """프로필 사진 원본 바이트. users 1:1 (없으면 이니셜 아바타로 표시).
+
+    `cache_key` 는 사진을 바꿀 때마다 새로 만드는 짧은 난수다. 두 가지 일을 한다.
+    ① 주소(`?v=키`)가 바뀌므로 브라우저 캐시가 저절로 갱신된다 ② 키를 모르면 남의 사진을 볼 수 없어
+    순번 id 로 훑는 것을 막는다 (이미지 태그는 Authorization 헤더를 보낼 수 없어 토큰 인증을 쓸 수 없다).
+    """
+
+    __tablename__ = "user_avatars"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    cache_key: Mapped[str] = mapped_column(String(16), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

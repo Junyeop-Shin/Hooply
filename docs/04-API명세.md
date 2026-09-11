@@ -45,7 +45,7 @@
 | VoteTargets, VoteCandidate, VoteIn, PostGameSurveyIn, ShareMessage, PlayerStats, MarginPoint, QuarterRecord, RatingChange, LeaderboardEntry | 투표·통계 |
 | AdminUserRow, PlayerRawData, RatingAdjust, AuditLogView | 관리자 |
 
-## 4. 엔드포인트 요약 (78개)
+## 4. 엔드포인트 요약 (81개)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -63,6 +63,9 @@
 | POST | `/auth/password/reset` | 비밀번호 재설정 | 200 · 400 · 501 |
 | GET | `/me` | 내 정보 조회 | 200 |
 | PATCH | `/me` | 내 프로필 수정 | 200 |
+| POST | `/me/avatar` | 프로필 사진 등록 · 교체 | 200 · 400 |
+| DELETE | `/me/avatar` | 프로필 사진 삭제 | 200 |
+| GET | `/users/{user_id}/avatar` | 프로필 사진 이미지 (주소의 키로 확인) | 200 · 404 |
 | GET | `/me/teams` | 내 소속 팀 목록 | 200 |
 
 ### 온보딩 설문
@@ -189,6 +192,7 @@
 | S-01/02/24 인증 | POST /auth/signup, POST /auth/login, POST /auth/refresh, GET /auth/kakao/login-url, GET /auth/kakao/callback, POST /auth/kakao/link |
 | S-03 설문 · S-23 내 위치 | GET /surveys/onboarding, POST /surveys/onboarding/responses, PUT /teams/{id}/self-rank |
 | S-04 홈 · S-17 프로필 | GET /me, PATCH /me, GET /me/teams, GET /me/profile, PUT /me/positions, GET /players/{id}/stats |
+| S-17 프로필 사진 | POST /me/avatar, DELETE /me/avatar, GET /users/{id}/avatar |
 | S-04/S-07 게스트 기록 확인 | GET /me/guest-claims, POST /players/{id}:claim |
 | S-05/06/07 팀 | POST /teams, POST /teams/join, GET /teams/{id}, GET /teams/{id}/players, GET /teams/{id}/events, GET /events/{id}/assignment/adopted |
 | S-08 팀 관리 · S-19 정렬 · S-20 지표 · S-21 리더보드 | PATCH /teams/{id}, POST …/code:regenerate, PATCH …/players/{pid}/role, DELETE …/players/{pid}, GET …/guests/merge-candidates, POST /players/{id}:merge, GET/POST /teams/{id}/rankings, GET /players/{id}/stats, GET /teams/{id}/stats/leaderboard |

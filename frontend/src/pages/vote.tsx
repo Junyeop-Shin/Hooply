@@ -86,7 +86,7 @@ export function VotePage() {
                   const c = byId.get(v.target_player_id)
                   return (
                     <Card key={v.target_player_id} className="flex items-center gap-3 py-3">
-                      <Avatar name={c?.player.display_name ?? '?'} />
+                      <Avatar name={c?.player.display_name ?? '?'} src={c?.player.profile_image_url} />
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-navy-900">{c?.player.display_name ?? '참가자'}</p>
                         {v.reason_tag && <p className="text-xs text-court-600">{reasonLabel(v.reason_tag, c?.is_same_team ?? null)}</p>}
@@ -201,7 +201,7 @@ function CandidateRow({ c, on, disabled, onClick }: { c: VoteCandidate; on: bool
   const p = c.player
   return (
     <button onClick={onClick} disabled={disabled} className={`flex min-h-14 w-full items-center gap-3 rounded-2xl border-2 bg-white px-3 py-2 text-left transition disabled:opacity-40 ${on ? 'border-court-500 bg-court-50' : 'border-stone-200'}`}>
-      <Avatar name={p.display_name} />
+      <Avatar name={p.display_name} src={p.profile_image_url} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-navy-900">{p.display_name}{p.kind === 'GUEST' && <span className="ml-1.5 text-[11px] text-stone-500">게스트</span>}</p>
         <p className="truncate text-xs text-stone-500">{p.primary_position ?? p.playable_positions[0] ?? '포지션 미입력'}</p>

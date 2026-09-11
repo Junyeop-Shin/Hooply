@@ -354,7 +354,7 @@ function AttendeeRow({ a, isMe, onEdit, onRemove, onSetStatus, showGrade }: { a:
   const guest = p.kind === 'GUEST'
   return (
     <Card className="flex items-center gap-3 py-3">
-      <Avatar name={p.display_name} />
+      <Avatar name={p.display_name} src={p.profile_image_url} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate font-semibold text-navy-900">
           {p.display_name}
@@ -443,7 +443,7 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
             <Alert kind="info">같은 이름의 게스트가 이미 있어요. 지난번에 온 분이면 골라 주세요.</Alert>
             {similar.map((p) => (
               <Card key={p.id} onClick={() => create.mutate({ existing_player_id: p.id })} className="flex items-center gap-3 py-3">
-                <Avatar name={p.display_name} />
+                <Avatar name={p.display_name} src={p.profile_image_url} />
                 <div className="flex-1"><p className="font-semibold text-navy-900">{p.display_name}</p><p className="text-xs text-stone-500">{p.playable_positions.join(' · ') || '포지션 미입력'}</p></div>
                 {showGrade && <GradeDot grade={p.skill_grade} />}
               </Card>

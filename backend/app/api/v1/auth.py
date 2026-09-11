@@ -13,12 +13,15 @@
 - POST  /auth/password/reset    비밀번호 재설정 (구현됨)
 - GET   /me                     내 정보 조회 (구현됨)
 - PATCH /me                     내 프로필 수정 (구현됨)
+- POST  /me/avatar              프로필 사진 등록·교체 (구현됨)
+- DELETE /me/avatar             프로필 사진 삭제 (구현됨)
+- GET   /users/{id}/avatar      프로필 사진 이미지 (구현됨, 주소의 키로 확인)
 - GET   /me/teams               내 소속 팀 목록 (구현됨)
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Response, status
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser
@@ -27,6 +30,7 @@ from app.core import errors as E
 from app.models import Player, Team
 from app.models.enums import PlayerKind, PlayerStatus
 from app.schemas.auth import (
+    AvatarIn,
     ForgotPasswordRequest,
     KakaoLinkRequest,
     KakaoLoginUrl,
@@ -41,7 +45,7 @@ from app.schemas.auth import (
     UserUpdate,
 )
 from app.schemas.common import ItemList
-from app.services import auth_service, kakao_service
+from app.services import auth_service, avatar_service, kakao_service
 
 router = APIRouter(tags=["인증 · 프로필"])
 
@@ -243,6 +247,46 @@ def update_me(db: DB, user: CurrentUser, body: UserUpdate):
         setattr(user, k, v)
     db.commit()
     return user
+
+
+@router.post("/me/avatar", response_model=UserDetail, responses=errors(_400="VALIDATION_ERROR"), summary="프로필 사진 등록 · 교체")
+def set_my_avatar(db: DB, user: CurrentUser, body: AvatarIn):
+    """프로필 사진을 올리거나 바꾼다. 팀원 목록·참석자·배정 결과의 동그란 아바타에 그대로 쓰인다.
+
+    - **권한:** 로그인 사용자 (본인 사진만).
+    - **처리:** 데이터 URL 을 디코드해 종류(JPG·PNG·WEBP)와 크기(512KB)를 확인하고 `user_avatars` 에 저장한 뒤,
+      `users.profile_image_url` 을 `/api/v1/users/{id}/avatar?v={키}` 로 갱신한다. 키가 매번 바뀌므로 브라우저가
+      옛 사진을 계속 보여 주는 일이 없다.
+    - **오류:** `400 VALIDATION_ERROR` — 형식·종류·크기 위반.
+    - **상태:** `구현됨`.
+    - **설계서:** 7.3절 (`PATCH /me`), 6.2절 `users.profile_image_url`, S-17 내 프로필.
+    """
+    return avatar_service.set_avatar(db, user, body.data_url)
+
+
+@router.delete("/me/avatar", response_model=UserDetail, summary="프로필 사진 삭제")
+def delete_my_avatar(db: DB, user: CurrentUser):
+    """프로필 사진을 지운다. 이후에는 이름 첫 글자 아바타로 보인다.
+
+    - **권한:** 로그인 사용자. **상태:** `구현됨`.
+    """
+    return avatar_service.clear_avatar(db, user)
+
+
+@router.get(
+    "/users/{user_id}/avatar", response_class=Response, responses={200: {"content": {"image/jpeg": {}}}, 404: {}},
+    summary="프로필 사진 이미지",
+)
+def get_avatar(db: DB, user_id: int, v: Annotated[str | None, Query(description="사진 주소에 붙는 키. 틀리면 404")] = None):
+    """프로필 사진 원본을 돌려준다. `<img src>` 는 토큰을 실을 수 없어 주소의 키로 확인한다.
+
+    - **권한:** 주소(키)를 아는 사람. 키는 사진을 바꿀 때마다 새로 발급된다.
+    - **처리:** 키가 맞으면 이미지 바이트와 1년짜리 캐시 헤더를 준다 (주소가 바뀌면 새로 받는다).
+    - **오류:** `404 NOT_FOUND` — 사진 없음 또는 키 불일치.
+    - **상태:** `구현됨`.
+    """
+    row = avatar_service.get_avatar(db, user_id, v)
+    return Response(content=row.data, media_type=row.content_type, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @router.get("/me/teams", response_model=ItemList[TeamMembershipView], summary="내 소속 팀 목록")

@@ -98,7 +98,7 @@ cd backend && uv run pytest -q
 
 | 종류 | 명령 | 내용 |
 | --- | --- | --- |
-| 백엔드 | `cd backend && uv run pytest -q` | 44개 — 권한·팀 승인·배정 제약·쿼터 롤백·투표·카카오·비밀번호 재설정 (개발 DB 를 비우고 돌리므로 끝나면 `seed_demo --reset`) |
+| 백엔드 | `cd backend && uv run pytest -q` | 47개 — 권한·팀 승인·배정 제약·쿼터 롤백·투표·카카오·비밀번호 재설정 (개발 DB 를 비우고 돌리므로 끝나면 `seed_demo --reset`) |
 | 프론트 단위·컴포넌트 | `cd frontend && npm test` | Vitest + Testing Library — 날짜/이유 문구 헬퍼, 로그인 시 캐시 초기화, 투표 화면(2명 제한·자동 접힘·종료 전 안내) |
 | E2E | `docker compose up -d && cd frontend && npm run test:e2e` | Playwright(모바일 Chromium) — 로그인·홈, 팀 배정 실행→확정, 쿼터 기록 화면, 플레이어 프로필 기록 (데모 데이터 필요) |
 | CI | `.github/workflows/ci.yml` | 푸시·PR 마다 위 세 가지를 GitHub Actions 에서 실행 (PostgreSQL 서비스 컨테이너 + 마이그레이션 + 데모 시드) |

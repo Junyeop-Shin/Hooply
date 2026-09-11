@@ -5,8 +5,9 @@
  *   ghost                = 취소·뒤로 등 눈에 띄지 않아야 하는 액션
  * 터치 영역은 최소 44px (설계서 5.1절).
  */
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
+import { API_ORIGIN } from '../api/client'
 import type { ApprovalStatus, SkillGrade, TeamRole, TeamStatus } from '../api/types'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
@@ -159,11 +160,17 @@ export function GradeDot({ grade }: { grade: SkillGrade | null }) {
   )
 }
 
-export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
-  const s = { sm: 'size-8 text-xs', md: 'size-10 text-sm', lg: 'size-14 text-lg' }[size]
+/** 프로필 사진이 있으면 보여 주고, 없거나 불러오지 못하면 이름 첫 글자로 돌아간다 (카카오 CDN 주소는 만료될 수 있다) */
+export function Avatar({ name, src, size = 'md' }: { name: string; src?: string | null; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
+  const s = { sm: 'size-8 text-xs', md: 'size-10 text-sm', lg: 'size-14 text-lg', xl: 'size-20 text-2xl' }[size]
+  const [failed, setFailed] = useState(false)
+  // 서버가 주는 주소는 `/api/v1/users/…` 상대경로다. 프론트와 API 도메인이 다르면 API 쪽으로 붙여 준다
+  const url = src && !failed ? (src.startsWith('/') ? `${API_ORIGIN}${src}` : src) : null
   return (
-    <span className={cx('inline-flex shrink-0 items-center justify-center rounded-full bg-navy-100 font-bold text-navy-700', s)}>
-      {name.slice(0, 1)}
+    <span className={cx('inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-navy-100 font-bold text-navy-700', s)}>
+      {url
+        ? <img src={url} alt="" className="size-full object-cover" loading="lazy" onError={() => setFailed(true)} />
+        : name.slice(0, 1)}
     </span>
   )
 }

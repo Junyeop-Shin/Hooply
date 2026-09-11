@@ -5,7 +5,8 @@ import { useAuthStore } from '../store/auth'
 import type { ErrorResponse, TokenPair } from './types'
 
 // 같은 도메인에 nginx 프록시가 있으면 비워 두고(기본), 프론트와 API 를 따로 배포하면 VITE_API_URL=https://api.example.com 으로 지정
-const BASE = `${(import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''}/api/v1`
+export const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const BASE = `${API_ORIGIN}/api/v1`
 
 export class ApiError extends Error {
   status: number

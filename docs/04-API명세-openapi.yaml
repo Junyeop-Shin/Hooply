@@ -242,6 +242,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserDetail'
+  /me/avatar:
+    post:
+      summary: 프로필 사진 등록 · 교체
+      tags:
+      - 인증 · 프로필
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AvatarIn'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: 프로필 사진 삭제
+      tags:
+      - 인증 · 프로필
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+  /users/{user_id}/avatar:
+    get:
+      summary: 프로필 사진 이미지
+      tags:
+      - 인증 · 프로필
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: v
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: 성공
+        '404':
+          description: Not Found
   /me/teams:
     get:
       summary: 내 소속 팀 목록
@@ -2273,6 +2330,13 @@ components:
       - after
       - reason
       - created_at
+    AvatarIn:
+      properties:
+        data_url:
+          type: string
+      type: object
+      required:
+      - data_url
     CandidateView:
       properties:
         id:

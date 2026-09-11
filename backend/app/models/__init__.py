@@ -24,7 +24,7 @@ import 하는 것만으로 설계서 6장 ERD 의 28개 테이블이 전부 등�
 """
 
 from app.db.base import Base
-from app.models.account import AuthIdentity, PasswordResetToken, User
+from app.models.account import AuthIdentity, PasswordResetToken, User, UserAvatar
 from app.models.assignment import (
     AssignmentCandidate,
     AssignmentConstraint,
@@ -80,4 +80,5 @@ __all__ = [
     "SurveyTemplate",
     "Team",
     "User",
+    "UserAvatar",
 ]

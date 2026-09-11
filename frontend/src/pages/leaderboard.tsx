@@ -48,7 +48,7 @@ export function LeaderboardPage() {
               return (
                 <div key={e.player.id} className="flex items-center gap-3 px-4 py-2.5">
                   <span className={`w-6 text-center text-sm font-black ${e.rank <= 3 ? 'text-court-600' : 'text-stone-400'}`}>{e.rank}</span>
-                  <Avatar name={e.player.display_name} size="sm" />
+                  <Avatar name={e.player.display_name} src={e.player.profile_image_url} size="sm" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-navy-900">{e.player.display_name}</p>
                     <p className="text-[11px] text-stone-500">{e.detail}</p>

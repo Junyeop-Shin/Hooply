@@ -475,7 +475,7 @@ export function AdoptedPage() {
 }
 
 export function AvatarRow({ p }: { p: PlayerCard }) {
-  return <span className="inline-flex items-center gap-1"><Avatar name={p.display_name} size="sm" />{p.display_name}</span>
+  return <span className="inline-flex items-center gap-1"><Avatar name={p.display_name} src={p.profile_image_url} size="sm" />{p.display_name}</span>
 }
 
 
