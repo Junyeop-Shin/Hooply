@@ -24,14 +24,21 @@ export function fmtEvent(e: EventView) {
 
 /* ---------- S-09 일정 등록 ---------- */
 
-/** "20:00" 에 시간을 더한다. 자정을 넘으면 23:59 로 멈춘다 (일정은 하루 안에서 끝나는 것으로 다룬다) */
-function addHours(hhmm: string, hours: number): string {
-  const [h, m] = hhmm.split(':').map(Number)
-  if (Number.isNaN(h) || Number.isNaN(m)) return hhmm
-  const total = h * 60 + m + hours * 60
-  if (total >= 24 * 60) return '23:59'
+/** "20:00" → 1200(분). 값이 없거나 형식이 다르면 null */
+function toMinutes(hhmm: string): number | null {
+  const [h, m] = (hhmm ?? '').split(':').map(Number)
+  return Number.isNaN(h) || Number.isNaN(m) ? null : h * 60 + m
+}
+
+/** "20:00" 에 분을 더한다. 자정을 넘으면 23:59 로 멈춘다 (일정은 하루 안에서 끝나는 것으로 다룬다) */
+function addMinutes(hhmm: string, minutes: number): string {
+  const base = toMinutes(hhmm)
+  if (base === null) return hhmm
+  const total = Math.min(base + minutes, 24 * 60 - 1)
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
+
+const DEFAULT_DURATION_MIN = 120
 
 const EMPTY_EVENT = { title: '', event_date: '', start_time: '20:00', end_time: '22:00', venue: '', rsvp_date: '', rsvp_time: '', memo: '' }
 
@@ -42,13 +49,19 @@ export function EventCreatePage() {
   const qc = useQueryClient()
   const [f, setF] = useState(EMPTY_EVENT)
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((prev) => ({ ...prev, [k]: e.target.value }))
-  // 종료 시각은 시작 시각 +2시간으로 따라오되, 한 번이라도 직접 고치면 그 뒤로는 건드리지 않는다
-  const [endEdited, setEndEdited] = useState(false)
+  // 시작 시각을 바꾸면 종료도 같은 간격만큼 따라온다. 기본 2시간이고, 종료를 직접 고치거나 지난 일정을 채우면
+  // 그 길이를 기억해 이후 시작 변경에도 유지한다 (3시간짜리 모임이 2시간으로 줄어들지 않게)
+  const [durationMin, setDurationMin] = useState(DEFAULT_DURATION_MIN)
   const setStart = (e: { target: { value: string } }) => {
     const v = e.target.value
-    setF((prev) => ({ ...prev, start_time: v, end_time: endEdited || !v ? prev.end_time : addHours(v, 2) }))
+    setF((prev) => ({ ...prev, start_time: v, end_time: v ? addMinutes(v, durationMin) : prev.end_time }))
   }
-  const setEnd = (e: { target: { value: string } }) => { setEndEdited(true); setF((prev) => ({ ...prev, end_time: e.target.value })) }
+  const setEnd = (e: { target: { value: string } }) => {
+    const v = e.target.value
+    const gap = toMinutes(v) !== null && toMinutes(f.start_time) !== null ? toMinutes(v)! - toMinutes(f.start_time)! : null
+    if (gap !== null && gap > 0) setDurationMin(gap)
+    setF((prev) => ({ ...prev, end_time: v }))
+  }
   // 마감 날짜만 고르면 시각은 밤 10시로 채워 둔다 (비워 두면 마감이 안 걸린다)
   const setRsvpDate = (e: { target: { value: string } }) => {
     const v = e.target.value
@@ -64,17 +77,20 @@ export function EventCreatePage() {
     const plus7 = (d: Date) => new Date(d.getTime() + 7 * 86_400_000)
     const deadline = lastEvent.rsvp_deadline ? plus7(new Date(lastEvent.rsvp_deadline)) : null
     const pad = (n: number) => String(n).padStart(2, '0')
+    const start = lastEvent.start_time?.slice(0, 5) ?? ''
+    const end = lastEvent.end_time?.slice(0, 5) ?? ''
     setF({
       title: lastEvent.title ?? '',
       event_date: localISODate(plus7(new Date(lastEvent.event_date + 'T00:00:00'))),
-      start_time: lastEvent.start_time?.slice(0, 5) ?? '',
-      end_time: lastEvent.end_time?.slice(0, 5) ?? '',
+      start_time: start,
+      end_time: end,
       venue: lastEvent.venue ?? '',
       rsvp_date: deadline ? localISODate(deadline) : '',
       rsvp_time: deadline ? `${pad(deadline.getHours())}:${pad(deadline.getMinutes())}` : '',
       memo: lastEvent.memo ?? '',
     })
-    setEndEdited(true)  // 불러온 종료 시각을 시작 시각 변경이 덮어쓰지 않게
+    const gap = start && end ? (toMinutes(end)! - toMinutes(start)!) : null
+    setDurationMin(gap && gap > 0 ? gap : DEFAULT_DURATION_MIN)  // 불러온 일정의 진행 시간을 유지한다
     setLoadedFrom(fmtEvent(lastEvent))
   }
 

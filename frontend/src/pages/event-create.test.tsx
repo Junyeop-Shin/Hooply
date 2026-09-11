@@ -60,19 +60,44 @@ describe('EventCreatePage', () => {
     expect(eventsApi.create).toHaveBeenCalledWith(1, expect.objectContaining({ title: '번개 모임', event_date: '2026-09-13' }))
   })
 
-  it('시작 시각을 바꾸면 종료가 2시간 뒤로 따라오고, 종료를 직접 고치면 그대로 둔다', async () => {
+  it('시작 시각을 바꾸면 종료가 2시간 뒤로 따라온다', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByRole('button', { name: '채우기' })
     await user.clear(input('시작'))
     await user.type(input('시작'), '19:30')
     expect(input('종료')).toHaveValue('21:30')
-    // 직접 3시간짜리로 바꾸면, 이후 시작을 바꿔도 종료는 유지된다
+  })
+
+  it('종료를 직접 고치면 그 진행 시간이 이후 시작 변경에도 유지된다', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('button', { name: '채우기' })
     await user.clear(input('종료'))
-    await user.type(input('종료'), '22:30')
+    await user.type(input('종료'), '23:00')   // 20:00 시작 → 3시간짜리
     await user.clear(input('시작'))
-    await user.type(input('시작'), '20:00')
-    expect(input('종료')).toHaveValue('22:30')
+    await user.type(input('시작'), '19:00')
+    expect(input('종료')).toHaveValue('22:00')  // 2시간이 아니라 3시간 유지
+  })
+
+  it('지난 일정을 채운 뒤에도 시작을 바꾸면 그 일정의 길이만큼 종료가 따라온다', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: '채우기' }))
+    expect(input('시작')).toHaveValue('10:00')
+    expect(input('종료')).toHaveValue('12:00')
+    await user.clear(input('시작'))
+    await user.type(input('시작'), '19:00')
+    expect(input('종료')).toHaveValue('21:00')  // 채우기 후에도 따라온다
+  })
+
+  it('시작이 늦어 종료가 자정을 넘으면 23:59 에서 멈춘다', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('button', { name: '채우기' })
+    await user.clear(input('시작'))
+    await user.type(input('시작'), '23:00')
+    expect(input('종료')).toHaveValue('23:59')
   })
 
   it('마감 날짜를 고르면 마감 시각이 밤 10시로 채워진다', async () => {
