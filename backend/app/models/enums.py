@@ -43,6 +43,13 @@ class ApprovalStatus(StrEnum):
     REJECTED = "REJECTED"  # 거절. 팀은 남지만 활성화되지 않는다
 
 
+class ClaimStatus(StrEnum):
+    """guest_claims.status — 회원의 게스트 기록 확인 결과."""
+
+    CONFIRMED = "CONFIRMED"  # 내 기록이 맞다 → 병합됨
+    DECLINED = "DECLINED"  # 내가 아니다 → 다시 묻지 않는다
+
+
 class GlobalRole(StrEnum):
     """users.global_role — 전역 권한 (3.1절). 팀 단위 권한은 TeamRole 이 따로 담당한다."""
 

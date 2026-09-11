@@ -11,7 +11,7 @@
 모두 `players` 행이다. 그래서 게스트 관련 응답도 회원과 같은 `PlayerCard` 로 내려간다.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -191,3 +191,21 @@ class RankingView(BaseModel):
     ranked_by: int = Field(description="정렬한 매니저의 users.id")
     is_active: bool = Field(description="현재 사전값 계산에 쓰이는 버전인지. 팀당 하나만 true")
     entries: list[RankingEntryView] = Field(description="rank_no 오름차순")
+
+
+class GuestClaimView(BaseModel):
+    """`GET /me/guest-claims` 의 items 원소 — "이전 모임에 게스트로 온 기록이 있어요. 본인이 맞나요?" 카드."""
+
+    guest: PlayerCard
+    team_id: int
+    team_name: str
+    member_player_id: int = Field(description="확인하면 기록이 합쳐질 내 players.id")
+    events_attended: int
+    quarters_played: int
+    last_event_date: date | None = None
+
+
+class GuestClaimIn(BaseModel):
+    """`POST /players/{guest_player_id}:claim` 요청. accept=false 면 거절로 기록하고 다시 묻지 않는다."""
+
+    accept: bool

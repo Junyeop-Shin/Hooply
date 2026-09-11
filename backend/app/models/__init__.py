@@ -45,7 +45,7 @@ from app.models.survey import (
     SurveyResponse,
     SurveyTemplate,
 )
-from app.models.team import GuestInvitePreset, Player, Team
+from app.models.team import GuestClaim, GuestInvitePreset, Player, Team
 
 # 외부에 공개하는 이름 목록. `from app.models import *` 와 정적 분석 도구가 참조한다.
 __all__ = [
@@ -60,6 +60,7 @@ __all__ = [
     "ChemistryScore",
     "Event",
     "EventAttendance",
+    "GuestClaim",
     "GuestInvitePreset",
     "ManagerRanking",
     "ManagerRankingEntry",

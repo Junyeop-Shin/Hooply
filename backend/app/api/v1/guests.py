@@ -15,6 +15,8 @@
 - PATCH /players/{player_id}                      게스트 이름·등급·포지션 수정 (구현됨)
 - POST  /players/{guest_player_id}:merge          게스트 → 회원 병합 (구현됨, MANAGER)
 - POST  /players/{player_id}:unmerge              병합 되돌리기 (구현됨, MANAGER)
+- GET   /me/guest-claims                          같은 이름의 게스트 기록 중 내가 아직 확인 안 한 것 (구현됨)
+- POST  /players/{guest_player_id}:claim          본인 확인 → 병합 / 거절 (구현됨)
 """
 
 from typing import Annotated
@@ -27,7 +29,15 @@ from app.api.v1._docs import errors
 from app.core import errors as E
 from app.models import Team
 from app.schemas.common import ItemList, PlayerCard
-from app.schemas.team import GuestCreate, GuestSimilar, MergeCandidate, MergeRequest, PlayerUpdate
+from app.schemas.team import (
+    GuestClaimIn,
+    GuestClaimView,
+    GuestCreate,
+    GuestSimilar,
+    MergeCandidate,
+    MergeRequest,
+    PlayerUpdate,
+)
 from app.services import guest_service
 from app.services.player_service import to_card as _to_card
 
@@ -176,3 +186,35 @@ def unmerge_guest(db: DB, user: CurrentUser, player_id: int):
     guest_service.unmerge(db, guest)
     db.refresh(guest)
     return to_card(guest)
+
+
+@router.get("/me/guest-claims", response_model=ItemList[GuestClaimView], summary="내 것일 수 있는 게스트 기록")
+def my_guest_claims(db: DB, user: CurrentUser):
+    """내가 속한 팀에서 내 이름(이름·닉네임, "게스트 " 접두어 무시)과 같은 미병합 게스트 중 아직 확인·거절하지 않은 것.
+
+    - **권한:** 로그인 사용자.
+    - **처리:** 참석 회차 수·출전 쿼터 수·마지막 참석일을 함께 준다. 홈 화면이 이 목록으로 "본인이 맞나요?" 카드를 띄운다.
+    - **상태:** `구현됨`.
+    """
+    items = []
+    for g, me, summary in guest_service.pending_claims(db, user):
+        team = db.get(Team, g.team_id)
+        items.append(GuestClaimView(guest=to_card(g), team_id=g.team_id, team_name=team.name if team else "", member_player_id=me.id, **summary))
+    return ItemList(items=items)
+
+
+@router.post(
+    "/players/{guest_player_id}:claim", response_model=ItemList[GuestClaimView],
+    responses=errors(_403=("FORBIDDEN_ROLE", "NOT_A_MEMBER"), _409="ALREADY_MERGED"), summary="게스트 기록 본인 확인 (병합 / 거절)",
+)
+def claim_guest(db: DB, user: CurrentUser, guest_player_id: int, body: GuestClaimIn):
+    """게스트 기록이 내 것이면 내 계정(그 팀의 players 행)으로 병합하고, 아니면 거절로 기록해 다시 묻지 않는다.
+
+    - **권한:** 그 팀에 속한 회원 본인. 이름이 같은 게스트만 가능 (다르면 매니저 병합 경로).
+    - **처리:** 확인 시 `merged_into_player_id` 로 병합(매니저 병합과 동일)하고 팀 실력 지표를 재계산한다. 되돌리기는 매니저의 `:unmerge`.
+    - **오류:** `403 NOT_A_MEMBER / FORBIDDEN_ROLE`, `409 ALREADY_MERGED`, `404 NOT_FOUND`.
+    - **상태:** `구현됨`. 응답은 남은 확인 목록.
+    """
+    guest = guest_service.require_guest(db, guest_player_id)
+    guest_service.claim(db, user, guest, body.accept)
+    return my_guest_claims(db, user)

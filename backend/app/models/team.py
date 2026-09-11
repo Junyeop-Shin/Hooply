@@ -30,7 +30,15 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, BigPK, CreatedAtMixin, TimestampMixin
-from app.models.enums import ApprovalStatus, PlayerKind, PlayerStatus, TeamRole, TeamStatus, db_enum
+from app.models.enums import (
+    ApprovalStatus,
+    ClaimStatus,
+    PlayerKind,
+    PlayerStatus,
+    TeamRole,
+    TeamStatus,
+    db_enum,
+)
 
 
 class Team(TimestampMixin, Base):
@@ -160,3 +168,22 @@ class GuestInvitePreset(CreatedAtMixin, Base):
     last_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"))  # 마지막 게스트 레코드
     use_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class GuestClaim(CreatedAtMixin, Base):
+    """회원이 같은 이름의 게스트 기록을 "내 것" 으로 확인하거나 거절한 이력 (사용자 요청 기능).
+
+    가입 직후 홈에 "이전 모임 기록이 있어요. 본인이 맞나요?" 카드가 뜨고, 확인하면 `players.merged_into_player_id`
+    로 병합(매니저 병합과 같은 처리), 거절하면 그 게스트는 이 사용자에게 다시 묻지 않는다.
+    """
+
+    __tablename__ = "guest_claims"
+    __table_args__ = (
+        UniqueConstraint("guest_player_id", "user_id", name="uq_guest_claims_guest_user"),
+        CheckConstraint("status IN ('CONFIRMED','DECLINED')", name="ck_guest_claims_status"),
+    )
+
+    id: Mapped[BigPK]
+    guest_player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[ClaimStatus] = mapped_column(db_enum(ClaimStatus, 10), nullable=False)

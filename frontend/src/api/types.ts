@@ -530,3 +530,14 @@ export interface LeaderboardEntry {
 
 /** 오늘 날짜 YYYY-MM-DD (기기 로컬 기준). toISOString 은 UTC 라 새벽에는 하루 전 날짜가 나오므로 쓰지 않는다 */
 export const localISODate = (d: Date = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+// --- 게스트 기록 본인 확인 (GET /me/guest-claims, POST /players/{id}:claim) ---
+export interface GuestClaimView {
+  guest: PlayerCard
+  team_id: number
+  team_name: string
+  member_player_id: number
+  events_attended: number
+  quarters_played: number
+  last_event_date: string | null
+}

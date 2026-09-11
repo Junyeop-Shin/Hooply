@@ -45,7 +45,7 @@
 | VoteTargets, VoteCandidate, VoteIn, PostGameSurveyIn, ShareMessage, PlayerStats, MarginPoint, QuarterRecord, RatingChange, LeaderboardEntry | 투표·통계 |
 | AdminUserRow, PlayerRawData, RatingAdjust, AuditLogView | 관리자 |
 
-## 4. 엔드포인트 요약 (76개)
+## 4. 엔드포인트 요약 (78개)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -97,6 +97,8 @@
 | GET | `/teams/{team_id}/guests/merge-candidates` | 게스트–회원 병합 후보 | 200 · 403 |
 | PATCH | `/players/{player_id}` | 게스트 정보 수정 | 200 · 403 |
 | POST | `/players/{guest_player_id}:merge` | 게스트를 회원 계정에 병합 | 200 · 403 · 409 |
+| GET | `/me/guest-claims` | 내 것일 수 있는 게스트 기록 | 200 |
+| POST | `/players/{guest_player_id}:claim` | 게스트 기록 본인 확인 (병합 / 거절) | 200 · 403 · 409 |
 | POST | `/players/{player_id}:unmerge` | 게스트 병합 되돌리기 | 200 · 403 · 404 |
 
 ### 매니저 실력 정렬
@@ -187,6 +189,7 @@
 | S-01/02/24 인증 | POST /auth/signup, POST /auth/login, POST /auth/refresh, GET /auth/kakao/login-url, GET /auth/kakao/callback, POST /auth/kakao/link |
 | S-03 설문 · S-23 내 위치 | GET /surveys/onboarding, POST /surveys/onboarding/responses, PUT /teams/{id}/self-rank |
 | S-04 홈 · S-17 프로필 | GET /me, PATCH /me, GET /me/teams, GET /me/profile, PUT /me/positions, GET /players/{id}/stats |
+| S-04/S-07 게스트 기록 확인 | GET /me/guest-claims, POST /players/{id}:claim |
 | S-05/06/07 팀 | POST /teams, POST /teams/join, GET /teams/{id}, GET /teams/{id}/players, GET /teams/{id}/events, GET /events/{id}/assignment/adopted |
 | S-08 팀 관리 · S-19 정렬 · S-20 지표 · S-21 리더보드 | PATCH /teams/{id}, POST …/code:regenerate, PATCH …/players/{pid}/role, DELETE …/players/{pid}, GET …/guests/merge-candidates, POST /players/{id}:merge, GET/POST /teams/{id}/rankings, GET /players/{id}/stats, GET /teams/{id}/stats/leaderboard |
 | S-09/10/11 일정·참석·게스트 | POST /teams/{id}/events, GET/PATCH/DELETE /events/{id}, POST /events/{id}/rsvp:close, PUT /events/{id}/attendance, PUT /events/{id}/attendances/{pid}, GET /events/{id}/attendances, POST/PATCH/DELETE /events/{id}/guests…, GET /events/{id}/guests/presets |

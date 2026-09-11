@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
+import { teamsApi } from '../api/teams'
 import { MarginTrend, QuarterList } from './player-detail'
 import { surveyApi } from '../api/survey'
 import { POSITIONS, SELF_RANK_LABEL, localISODate, type EventView, type Position } from '../api/types'
@@ -67,6 +68,8 @@ export function HomePage() {
             </Link>
           ) : null}
         </div>
+
+        <GuestClaimCards />
 
         <section>
           <SectionTitle>다가오는 일정</SectionTitle>
@@ -308,4 +311,43 @@ function RecordsSection({ teamName, playerId, many }: { teamName: string; player
 function dday(date: string) {
   const diff = Math.round((new Date(date + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime()) / 86_400_000)
   return diff <= 0 ? 'D-DAY' : `D-${diff}`
+}
+
+/**
+ * "이전 모임에 게스트로 온 기록이 있어요. 본인이 맞나요?" — 같은 이름의 미병합 게스트가 있을 때만 보인다.
+ * 확인하면 그 팀의 내 계정으로 기록이 합쳐지고(매니저 병합과 같은 처리), 거절하면 다시 묻지 않는다.
+ */
+export function GuestClaimCards({ teamId }: { teamId?: number } = {}) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['me', 'guest-claims'], queryFn: teamsApi.myGuestClaims })
+  const [busy, setBusy] = useState<number | null>(null)
+  const decide = useMutation({
+    mutationFn: ({ gid, accept }: { gid: number; accept: boolean }) => teamsApi.claimGuest(gid, accept),
+    onMutate: ({ gid }) => setBusy(gid),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] }); qc.invalidateQueries({ queryKey: ['team'] })
+      if (v.accept) alert('기록을 가져왔어요. 프로필의 기록에서 확인할 수 있어요.')
+    },
+    onSettled: () => setBusy(null),
+  })
+  const items = (q.data?.items ?? []).filter((c) => teamId === undefined || c.team_id === teamId)
+  if (items.length === 0) return null
+  return (
+    <div className="space-y-2">
+      {items.map((c) => (
+        <Card key={c.guest.id} className="border-court-300 bg-court-50">
+          <p className="text-sm font-bold text-navy-900">이전 모임 기록이 있어요. 본인이 맞나요?</p>
+          <p className="mt-1 text-sm text-stone-700">
+            <b>{c.team_name}</b>에 게스트 <b>{c.guest.display_name}</b>(으)로 참석 {c.events_attended}회 · 출전 {c.quarters_played}쿼터
+            {c.last_event_date ? ` · 마지막 ${c.last_event_date.slice(5).replace('-', '/')}` : ''}
+          </p>
+          <p className="mt-1 text-xs text-stone-500">맞다고 하면 그 기록이 내 계정으로 합쳐지고, 아니라고 하면 다시 묻지 않아요. 잘못 합쳤을 땐 매니저가 되돌릴 수 있어요.</p>
+          <div className="mt-3 flex gap-2">
+            <Button variant="ghost" className="min-h-10 text-sm" disabled={busy === c.guest.id} onClick={() => decide.mutate({ gid: c.guest.id, accept: false })}>아니에요</Button>
+            <Button full className="min-h-10 text-sm" loading={busy === c.guest.id} onClick={() => confirm(`게스트 ${c.guest.display_name}의 기록을 내 계정으로 가져올까요?`) && decide.mutate({ gid: c.guest.id, accept: true })}>내 기록이에요</Button>
+          </div>
+        </Card>
+      ))}
+    </div>
+  )
 }

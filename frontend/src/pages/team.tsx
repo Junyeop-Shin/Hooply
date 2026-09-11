@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { teamsApi } from '../api/teams'
 import { eventsApi } from '../api/events'
-import { EventRow, useMe } from './home'
+import { EventRow, GuestClaimCards, useMe } from './home'
 import { fmtEvent } from './events'
 import { SHARE_DONE, shareText } from '../lib/kakao'
 import { AdoptedSummary } from './assignment'
@@ -185,6 +185,7 @@ export function TeamDetailPage() {
       </div>
 
       <Content>
+        <GuestClaimCards teamId={id} />
         {myTeamProfile && myTeamProfile.self_rank_level === null && (
           <button onClick={() => nav(`/teams/${id}/self-rank`)} className="flex w-full items-center justify-between rounded-2xl bg-court-500 px-4 py-3 text-left text-sm font-semibold text-white">
             <span>이 동호회에서 내 실력 위치를 알려주세요<br /><span className="text-[11px] font-normal text-court-100">팀 배정 정확도에 가장 큰 영향을 주는 한 문항이에요</span></span>

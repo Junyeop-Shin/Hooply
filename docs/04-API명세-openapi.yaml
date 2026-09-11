@@ -213,12 +213,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501':
-          description: NOT_IMPLEMENTED (스켈레톤)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
   /me:
     get:
       summary: 내 정보 조회
@@ -614,7 +608,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlayerCard'
         '200':
-          description: 동명이인 후보 존재 — 확인 요청
+          description: 성공
           content:
             application/json:
               schema:
@@ -764,6 +758,54 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /me/guest-claims:
+    get:
+      summary: 내 것일 수 있는 게스트 기록
+      tags:
+      - 게스트 관리
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList_GuestClaimView_'
+  /players/{guest_player_id}:claim:
+    post:
+      summary: 게스트 기록 본인 확인 (병합 / 거절)
+      tags:
+      - 게스트 관리
+      parameters:
+      - name: guest_player_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestClaimIn'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList_GuestClaimView_'
+        '403':
+          description: FORBIDDEN_ROLE / NOT_A_MEMBER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: ALREADY_MERGED
           content:
             application/json:
               schema:
@@ -1116,7 +1158,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AttendanceView'
         '200':
-          description: 동명이인 후보 존재 — existing_player_id 또는 force_new 로 재요청
+          description: 성공
           content:
             application/json:
               schema:
@@ -2559,6 +2601,39 @@ components:
       type: object
       required:
       - email
+    GuestClaimIn:
+      properties:
+        accept:
+          type: boolean
+      type: object
+      required:
+      - accept
+    GuestClaimView:
+      properties:
+        guest:
+          $ref: '#/components/schemas/PlayerCard'
+        team_id:
+          type: integer
+        team_name:
+          type: string
+        member_player_id:
+          type: integer
+        events_attended:
+          type: integer
+        quarters_played:
+          type: integer
+        last_event_date:
+          type: string
+          format: date
+          nullable: true
+      type: object
+      required:
+      - guest
+      - team_id
+      - team_name
+      - member_player_id
+      - events_attended
+      - quarters_played
     GuestCreate:
       properties:
         display_name:
@@ -2653,6 +2728,15 @@ components:
         items:
           items:
             $ref: '#/components/schemas/CompatiblePlayer'
+          type: array
+      type: object
+      required:
+      - items
+    ItemList_GuestClaimView_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/GuestClaimView'
           type: array
       type: object
       required:

@@ -276,6 +276,12 @@ def main() -> None:
         event_service.register_guest(db, event, inviter_player, inviter_user, EventGuestCreate(display_name="게스트 허웅", skill_grade=4, preferred_position=Position.SF, playable_positions=[Position.SF, Position.PF], team_lock_request=True, existing_player_id=last_guest_ids["게스트 허웅"]))
         event_service.register_guest(db, event, inviter_player, inviter_user, EventGuestCreate(display_name="게스트 이승현", preferred_position=Position.SG, playable_positions=[Position.SG], team_lock_request=False))
 
+        # 5-b) 게스트였던 사람이 가입한 상황 — m20 "허웅" 은 지난주 "게스트 허웅" 과 이름이 같아 홈에 "본인이 맞나요?" 카드가 뜬다
+        auth_service.signup(db, SignupRequest(email="m20@demo.com", password=SecretStr(PASSWORD), name="허웅", height_cm=186))
+        hw = db.scalar(select(User).where(User.email == "m20@demo.com"))
+        survey_service.submit(db, hw, SurveyResponseIn(template_id=tpl.id, answers=_answers(tpl, ROSTER[5])))
+        team_service.join_team(db, hw, team.team_code)
+
         # 6) 두 번째 팀 "수요 픽업" — 매니저·m01~m06 이 두 팀에 동시에 속한다 (메인 팀 설정 · 프로필 팀 선택 확인용)
         team2 = team_service.create_team(db, users[2], TeamCreate(name=TEAM2_NAME, description="수요일 저녁 픽업 게임", home_court="잠실 학생체육관"))
         team_service.set_approval(db, team2, admin, True)
@@ -300,6 +306,7 @@ def main() -> None:
         print(f"이번 주 일정: {sunday} 10:00 일요 정기전 · 참석 {ATTEND}명 + 게스트 2명 · 불참 {ABSENT}명 · 미응답 {len(ROSTER) - ATTEND - ABSENT}명")
         print(f"매니저 로그인: {MANAGER_EMAIL} / {PASSWORD}")
         print(f"팀원 로그인: m01@demo.com ~ m19@demo.com / {PASSWORD}")
+        print("게스트 기록 본인 확인: m20@demo.com (허웅) 로 로그인하면 홈에 '게스트 허웅' 기록 확인 카드 → 내 기록이에요 / 아니에요")
         if admin:
             print(f"관리자 콘솔: http://localhost:8000/admin  (로그인 {ADMIN_EMAIL} / {PASSWORD}) · 승인 대기 팀 '{team3.name}'(m08 생성) 에서 승인 액션 확인")
         else:

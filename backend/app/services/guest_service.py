@@ -282,3 +282,81 @@ def merge_candidates(db: Session, team_id: int) -> list[tuple[Player, Player]]:
         for m in by_name.get(g.display_name.strip().lower(), []):
             pairs.append((g, m))
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# 본인 확인 병합 (사용자 요청 기능) — 가입한 회원이 같은 이름의 게스트 기록을 직접 가져간다
+# ---------------------------------------------------------------------------
+
+
+def _norm_name(name: str | None) -> str:
+    """이름 비교용 정규화: 공백 제거, 소문자, 앞의 '게스트' 접두어 제거 ("게스트 허웅" ≒ "허웅")."""
+    if not name:
+        return ""
+    n = "".join(name.split()).lower()
+    return n.removeprefix("게스트")
+
+
+def pending_claims(db: Session, user: User) -> list[tuple[Player, Player, dict]]:
+    """이 사용자가 속한 팀마다, 이름이 같은 미병합 게스트 중 아직 확인/거절하지 않은 것. 반환 (게스트, 내 player, 요약)."""
+    from app.models import Event, EventAttendance, GuestClaim, QuarterLineup
+    from app.models.enums import AttendanceStatus, EventStatus
+
+    my_names = {_norm_name(user.name), _norm_name(user.nickname)} - {""}
+    if not my_names:
+        return []
+    mine = db.scalars(
+        select(Player).where(Player.user_id == user.id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE)
+    ).all()
+    decided = {gid for (gid,) in db.execute(select(GuestClaim.guest_player_id).where(GuestClaim.user_id == user.id)).all()}
+    out = []
+    for me in mine:
+        guests = db.scalars(
+            select(Player).where(
+                Player.team_id == me.team_id, Player.kind == PlayerKind.GUEST, Player.status == PlayerStatus.ACTIVE,
+                Player.merged_into_player_id.is_(None),
+            ).options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+        ).all()
+        for g in guests:
+            if g.id in decided or _norm_name(g.display_name) not in my_names:
+                continue
+            rows = db.execute(
+                select(Event.event_date).join(EventAttendance, EventAttendance.event_id == Event.id)
+                .where(EventAttendance.player_id == g.id, EventAttendance.status == AttendanceStatus.ATTEND, Event.status != EventStatus.CANCELED)
+                .order_by(Event.event_date.desc())
+            ).all()
+            quarters = db.scalar(select(func.count()).select_from(QuarterLineup).where(QuarterLineup.player_id == g.id)) or 0
+            out.append((g, me, {"events_attended": len(rows), "quarters_played": quarters, "last_event_date": rows[0][0] if rows else None}))
+    return out
+
+
+def claim(db: Session, user: User, guest: Player, accept: bool) -> Player | None:
+    """확인이면 내 player 로 병합(매니저 병합과 동일), 거절이면 기록만 남겨 다시 묻지 않는다. 반환: 병합된 내 player 또는 None."""
+    from app.models import GuestClaim
+    from app.models.enums import ClaimStatus
+
+    if guest.kind != PlayerKind.GUEST or guest.merged_into_player_id is not None:
+        raise errors.AlreadyMerged()
+    me = db.scalar(
+        select(Player).where(Player.user_id == user.id, Player.team_id == guest.team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE)
+    )
+    if me is None:
+        raise errors.NotAMember("이 팀에 속해 있어야 기록을 가져올 수 있어요.")
+    if _norm_name(guest.display_name) not in {_norm_name(user.name), _norm_name(user.nickname)}:
+        raise errors.ForbiddenRole("이름이 같은 게스트 기록만 가져올 수 있어요. 다른 이름이면 매니저에게 병합을 요청해 주세요.")
+    existing = db.scalar(select(GuestClaim).where(GuestClaim.guest_player_id == guest.id, GuestClaim.user_id == user.id))
+    if existing is None:
+        existing = GuestClaim(guest_player_id=guest.id, user_id=user.id, status=ClaimStatus.DECLINED)
+        db.add(existing)
+    existing.status = ClaimStatus.CONFIRMED if accept else ClaimStatus.DECLINED
+    if accept:
+        merge(db, guest, me.id)
+        db.flush()
+        from app.services import rating_service
+
+        rating_service.recompute_team(db, guest.team_id)
+        db.commit()
+        db.refresh(me)
+        return me
+    db.commit()
+    return None
