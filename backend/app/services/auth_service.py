@@ -123,3 +123,53 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
     if user is None or user.deleted_at is not None:
         raise errors.TokenExpired()
     return _issue_tokens(user)
+
+
+# ---------------------------------------------------------------------------
+# 비밀번호 재설정 (FR-02, 6.2절 password_reset_tokens)
+# ---------------------------------------------------------------------------
+
+
+def forgot_password(db: Session, email: str) -> None:
+    """계정이 있으면 30분짜리 토큰(해시만 저장)을 만들고 링크를 메일로 보낸다. 없으면 아무것도 하지 않는다.
+
+    응답은 호출부가 항상 202 로 고정한다 (계정 존재 여부를 노출하지 않기 위해). 카카오로만 가입해 비밀번호가 없는
+    계정도 이 경로로 비밀번호를 만들 수 있다 (reset 이 LOCAL 로그인 수단을 함께 붙인다).
+    """
+    from datetime import timedelta
+
+    from app.core.config import get_settings
+    from app.core.security import generate_reset_token
+    from app.models import PasswordResetToken
+    from app.services import mail_service
+
+    user = db.scalar(select(User).where(User.email == email, User.deleted_at.is_(None)))
+    if user is None:
+        return
+    raw, digest = generate_reset_token()
+    s = get_settings()
+    db.add(PasswordResetToken(user_id=user.id, token_hash=digest, expires_at=datetime.now(UTC) + timedelta(minutes=s.password_reset_minutes)))
+    db.commit()
+    link = f"{s.frontend_base_url.rstrip('/')}/password/reset?token={raw}"
+    mail_service.send_password_reset(user.email, link)
+
+
+def reset_password(db: Session, raw_token: str, new_password: str) -> None:
+    """토큰 검증(해시 조회 · 만료 · 1회 사용) 후 비밀번호 교체. 이메일 로그인 수단이 없던 계정에는 LOCAL 을 붙인다."""
+    import hashlib
+
+    from app.models import PasswordResetToken
+
+    digest = hashlib.sha256(raw_token.encode()).hexdigest()
+    row = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == digest))
+    now = datetime.now(UTC)
+    if row is None or row.used_at is not None or row.expires_at < now:
+        raise errors.TokenInvalidOrExpired()
+    user = db.get(User, row.user_id)
+    if user is None or user.deleted_at is not None or not user.email:
+        raise errors.TokenInvalidOrExpired()
+    user.password_hash = hash_password(new_password)
+    if not any(i.provider == AuthProvider.LOCAL for i in user.identities):
+        user.identities.append(AuthIdentity(provider=AuthProvider.LOCAL, provider_uid=user.email, linked_at=now))
+    row.used_at = now
+    db.commit()

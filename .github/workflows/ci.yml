@@ -1,0 +1,138 @@
+# CI — 푸시·PR 마다 백엔드(ruff + pytest), 프론트(타입 검사 + Vitest + 빌드), E2E(Playwright) 를 돌린다.
+# 백엔드 테스트는 실제 PostgreSQL 위에서 Alembic 마이그레이션을 적용한 뒤 실행한다 (로컬과 동일한 방식).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  backend:
+    name: 백엔드 (ruff · pytest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hoops
+          POSTGRES_PASSWORD: hoops
+          POSTGRES_DB: hoops
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hoops" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://hoops:hoops@localhost:5432/hoops
+      JWT_SECRET_KEY: ci-only-secret
+      TEAM_APPROVAL_REQUIRED: "false"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt ruff pytest
+      - run: ruff check app tests scripts
+      - run: alembic upgrade head
+      - run: pytest -q -p no:warnings
+
+  frontend:
+    name: 프론트 (tsc · Vitest · build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npx vitest run
+      - run: npx vite build
+
+  e2e:
+    name: E2E (Playwright, 실제 백엔드 + 데모 데이터)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hoops
+          POSTGRES_PASSWORD: hoops
+          POSTGRES_DB: hoops
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hoops" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://hoops:hoops@localhost:5432/hoops
+      JWT_SECRET_KEY: ci-only-secret
+      CORS_ORIGINS: '["http://localhost:4173"]'
+      FRONTEND_BASE_URL: http://localhost:4173
+      DOCS_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 백엔드 준비 (설치 · 마이그레이션 · 데모 데이터 · 서버 실행)
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          alembic upgrade head
+          python -m scripts.seed_demo
+          nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
+      - name: 프론트 빌드 · preview 서버
+        working-directory: frontend
+        env:
+          VITE_API_URL: http://localhost:8000
+        run: |
+          npm ci
+          npx vite build
+          nohup npx vite preview --port 4173 --strictPort > /tmp/web.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:4173/ > /dev/null && break; sleep 1; done
+      - name: Playwright
+        working-directory: frontend
+        env:
+          BASE_URL: http://localhost:4173
+          CI: "true"
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - name: 실패 시 서버 로그
+        if: failure()
+        run: |
+          echo "== api =="; tail -n 80 /tmp/api.log || true
+          echo "== web =="; tail -n 40 /tmp/web.log || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          retention-days: 7

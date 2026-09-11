@@ -122,7 +122,7 @@ export function LoginPage() {
         <Button type="submit" full loading={loading}>로그인</Button>
       </form>
       <div className="mt-6 flex justify-center gap-4 text-sm text-stone-500">
-        <button type="button" className="hover:text-navy-700">비밀번호 찾기</button>
+        <Link to="/password/forgot" className="hover:text-navy-700">비밀번호 찾기</Link>
         <span className="text-stone-300">|</span>
         <Link to="/signup" className="font-semibold text-court-600">회원가입</Link>
       </div>

@@ -1,0 +1,46 @@
+import { expect, test } from '@playwright/test'
+import { login, openEvent, PLAYER } from './helpers'
+
+test.describe('핵심 흐름', () => {
+  test('로그인 → 홈에 팀과 다가오는 일정이 보인다', async ({ page }) => {
+    await login(page)
+    await expect(page.getByText('다가오는 일정')).toBeVisible()
+    await expect(page.getByText('일요 정기전').first()).toBeVisible()
+  })
+
+  test('매니저: 팀 배정 실행 → 후보안 3개 → 확정', async ({ page }) => {
+    page.on('dialog', (d) => d.accept())
+    await login(page)
+    await openEvent(page, 0)
+    await page.getByRole('button', { name: /팀 배정하러 가기|재배정하기/ }).click()
+    await expect(page.getByText('대기 칸')).toBeVisible()
+    const run = page.getByRole('button', { name: '3가지 안으로 팀 짜기' })
+    await expect(run).toBeEnabled()
+    await run.click()
+    await expect(page.getByRole('button', { name: /실력 우선/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /친화도 우선/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^종합/ })).toBeVisible()
+    await expect(page.getByText('이렇게 나눈 이유')).toBeVisible()
+    await page.getByRole('button', { name: '이 안으로 확정' }).click()
+    await expect(page.getByRole('heading', { name: '팀 배정 결과' })).toBeVisible()
+    await expect(page.getByText(/팀 블랙/).first()).toBeVisible()
+  })
+
+  test('매니저: 지난 회차 경기 기록 화면에 쿼터가 보인다', async ({ page }) => {
+    await login(page)
+    await openEvent(page, 1)
+    await page.getByRole('button', { name: /경기 기록 \d+쿼터/ }).click()
+    await expect(page.getByRole('heading', { name: '쿼터 기록' })).toBeVisible()
+    await expect(page.getByText('1쿼터', { exact: false }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /기록 수정 저장/ })).toBeVisible()
+  })
+
+  test('플레이어: 배정 결과에는 실력 수치가 없고 내 프로필에 기록이 보인다', async ({ page }) => {
+    await login(page, PLAYER)
+    await page.goto('/me')
+    await page.getByRole('button', { name: '일요 코트메이트' }).click()  // 두 팀 소속 → 기록이 있는 팀 선택
+    await expect(page.getByText('출전 쿼터', { exact: true })).toBeVisible()  // 프로필·기록 로딩 후
+    await expect(page.getByRole('heading', { name: /^기록/ })).toBeVisible()
+    await expect(page.getByText(/^실력 /)).toHaveCount(0)
+  })
+})

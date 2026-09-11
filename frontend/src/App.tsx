@@ -2,6 +2,7 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { useIsLoggedIn } from './store/auth'
 import { KakaoCallbackPage, LoginPage, SignupPage } from './pages/auth'
+import { ForgotPasswordPage, ResetPasswordPage } from './pages/password'
 import { HomePage, ProfilePage } from './pages/home'
 import { MembersPage, TeamCreatePage, TeamDetailPage, TeamJoinPage } from './pages/team'
 import { QuartersPage } from './pages/quarters'
@@ -25,6 +26,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/auth/kakao/callback" element={<KakaoCallbackPage />} /> {/* 카카오 리다이렉트 (로그인 여부 무관) */}
+      <Route path="/password/forgot" element={<ForgotPasswordPage />} />
+      <Route path="/password/reset" element={<ResetPasswordPage />} />   {/* 메일 링크 */}
       <Route element={<GuestOnly />}>
         <Route path="/login" element={<LoginPage />} />   {/* S-01 */}
         <Route path="/signup" element={<SignupPage />} /> {/* S-02 */}

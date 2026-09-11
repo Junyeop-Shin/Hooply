@@ -32,3 +32,7 @@ logs/
 # --- 로컬 도구 ---
 .claude/
 .neon
+
+# --- 테스트 산출물 ---
+frontend/test-results/
+frontend/playwright-report/

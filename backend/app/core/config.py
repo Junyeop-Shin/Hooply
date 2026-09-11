@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     # 사용자에게 보여줄 프론트 주소 — 피어 투표 독려 메시지의 survey_link 등 (피어 투표 설계)
     frontend_base_url: str = "http://localhost:5173"
+    # --- 메일 (비밀번호 재설정) --- 키가 없으면 링크를 서버 로그에만 찍는다 (로컬·테스트)
+    resend_api_key: str = ""
+    mail_from: str = "HOOPLY <onboarding@resend.dev>"
+    password_reset_minutes: int = 30
     # 일정의 날짜·시간(event_date, end_time)은 이 시간대의 벽시계 값이다. 컨테이너 로컬(UTC)이 아니라 이걸로 해석한다
     timezone: str = "Asia/Seoul"
     # 팀 생성 후 관리자 승인이 있어야 활성화되는지. 테스트에서는 끈다 (conftest)

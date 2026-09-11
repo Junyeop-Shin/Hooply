@@ -9,8 +9,8 @@
 - GET   /auth/kakao/callback    카카오 콜백 → 가입/로그인 (구현됨)
 - POST  /auth/kakao/link        기존 계정에 카카오 연결 (구현됨)
 - POST  /auth/refresh           토큰 갱신 (구현됨)
-- POST  /auth/password/forgot   비밀번호 재설정 요청 (구현됨 · 메일 발송은 TODO)
-- POST  /auth/password/reset    비밀번호 재설정 (스켈레톤)
+- POST  /auth/password/forgot   비밀번호 재설정 요청 (구현됨 · 메일 발송)
+- POST  /auth/password/reset    비밀번호 재설정 (구현됨)
 - GET   /me                     내 정보 조회 (구현됨)
 - PATCH /me                     내 프로필 수정 (구현됨)
 - GET   /me/teams               내 소속 팀 목록 (구현됨)
@@ -22,7 +22,7 @@ from fastapi import APIRouter, Query, status
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser
-from app.api.v1._docs import NOT_IMPLEMENTED, errors
+from app.api.v1._docs import errors
 from app.core import errors as E
 from app.models import Player, Team
 from app.models.enums import PlayerKind, PlayerStatus
@@ -166,38 +166,39 @@ def refresh(db: DB, body: RefreshRequest):
     "/auth/password/forgot", status_code=status.HTTP_202_ACCEPTED,
     summary="비밀번호 재설정 요청",
 )
-def forgot_password(body: ForgotPasswordRequest):
+def forgot_password(db: DB, body: ForgotPasswordRequest):
     """비밀번호 재설정 메일 발송을 요청한다. 가입 여부와 무관하게 항상 202를 돌려준다.
 
     - **권한:** 비회원 (인증 불필요).
-    - **처리:** 현재는 요청을 접수(`{"accepted": true}`)만 한다. TODO — 계정이 있으면
-      `password_reset_tokens`에 토큰의 SHA-256 해시만 저장(30분 만료·1회 사용)하고 원문 토큰을
-      담은 메일을 발송한다. 응답이 계정 존재 여부에 따라 달라지면 계정 탐색 통로가 되므로
-      항상 202를 유지한다.
+    - **처리:** 계정이 있으면 `password_reset_tokens` 에 토큰의 SHA-256 해시만 저장(30분 만료·1회 사용)하고
+      원문 토큰을 담은 링크(`FRONTEND_BASE_URL/password/reset?token=…`)를 메일로 보낸다(Resend, 키가 없으면 서버 로그).
+      계정이 없으면 아무것도 하지 않는다. 응답이 계정 존재 여부에 따라 달라지면 계정 탐색 통로가 되므로 항상 202.
     - **오류:** `400 VALIDATION_ERROR` — 이메일 형식 위반.
-    - **상태:** `구현됨` (접수 응답만; 토큰 발급·메일 발송은 TODO).
+    - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증 (항상 202), 7.4절 설계 원칙, 6.2절 `password_reset_tokens`, 11.5절.
     """
+    auth_service.forgot_password(db, body.email)
     return {"accepted": True}
 
 
 @router.post(
     "/auth/password/reset",
-    responses=errors(_400="TOKEN_INVALID_OR_EXPIRED") | NOT_IMPLEMENTED,
+    responses=errors(_400="TOKEN_INVALID_OR_EXPIRED"),
     summary="비밀번호 재설정",
 )
-def reset_password(body: ResetPasswordRequest):
+def reset_password(db: DB, body: ResetPasswordRequest):
     """메일로 받은 토큰과 새 비밀번호로 비밀번호를 바꾼다.
 
     - **권한:** 비회원 (본문의 재설정 토큰으로 인증).
-    - **처리 (예정):** 토큰을 SHA-256 해시해 `password_reset_tokens`에서 찾고, 만료 전이며
-      `used_at`이 비어 있으면 `users.password_hash`를 새 bcrypt 해시로 교체하고 토큰을 사용
-      처리한다.
+    - **처리:** 토큰을 SHA-256 해시해 `password_reset_tokens` 에서 찾고, 만료 전이며 `used_at` 이 비어 있으면
+      `users.password_hash` 를 새 bcrypt 해시로 교체하고 토큰을 사용 처리한다. 카카오 전용 계정이면 이메일 로그인
+      수단(LOCAL)을 함께 추가한다.
     - **오류:** `400 TOKEN_INVALID_OR_EXPIRED` — 토큰 없음·만료·이미 사용됨.
-    - **상태:** `스켈레톤 (501 NOT_IMPLEMENTED)`.
+    - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증, FR-02, 6.2절 `password_reset_tokens`, 11.5절.
     """
-    raise E.NotImplementedYet()
+    auth_service.reset_password(db, body.token, body.new_password.get_secret_value())
+    return {"ok": True}
 
 
 @router.get("/me", response_model=UserDetail, summary="내 정보 조회")

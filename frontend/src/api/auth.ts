@@ -16,6 +16,8 @@ export const authApi = {
     api<TokenPair>('/auth/signup', { method: 'POST', body: input, auth: false }),
   login: (email: string, password: string) =>
     api<TokenPair>('/auth/login', { method: 'POST', body: { email, password }, auth: false }),
+  forgotPassword: (email: string) => api<{ accepted: boolean }>('/auth/password/forgot', { method: 'POST', body: { email }, auth: false }),
+  resetPassword: (token: string, new_password: string) => api<{ ok: boolean }>('/auth/password/reset', { method: 'POST', body: { token, new_password }, auth: false }),
   me: () => api<UserDetail>('/me'),
   updateMe: (patch: Partial<Pick<UserDetail, 'name' | 'nickname' | 'height_cm' | 'primary_team_id'>>) =>
     api<UserDetail>('/me', { method: 'PATCH', body: patch }),
