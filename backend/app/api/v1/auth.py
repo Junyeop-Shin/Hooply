@@ -307,13 +307,18 @@ def my_teams(db: DB, user: CurrentUser):
         .where(Player.user_id == user.id, Player.status == PlayerStatus.ACTIVE)
         .order_by(Player.joined_at.desc())
     ).all()
+    # 팀별 회원 수는 팀마다 세지 않고 한 번에 세어 온다 (팀이 늘어도 쿼리는 그대로)
+    team_ids = [t.id for t, _ in rows]
+    counts = dict(
+        db.execute(
+            select(Player.team_id, func.count())
+            .where(Player.team_id.in_(team_ids), Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE)
+            .group_by(Player.team_id)
+        ).all()
+    ) if team_ids else {}
     items = []
     for team, player in rows:
-        count = db.scalar(
-            select(func.count()).select_from(Player).where(
-                Player.team_id == team.id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE
-            )
-        )
+        count = counts.get(team.id, 0)
         items.append(
             TeamMembershipView(
                 team_id=team.id, team_name=team.name, team_code=team.team_code, team_status=team.status, approval_status=team.approval_status,

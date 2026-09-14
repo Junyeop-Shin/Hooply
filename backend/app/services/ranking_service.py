@@ -55,7 +55,7 @@ def history(db: Session, team: Team) -> list[RankingView]:
 def create(db: Session, team: Team, by: User, player_ids: list[int]) -> RankingView:
     """새 정렬 버전 저장. 중복 id 나 이 팀의 활성 참가자가 아닌 id 가 있으면 422 PLAYER_NOT_IN_TEAM."""
     if len(set(player_ids)) != len(player_ids):
-        raise errors.ValidationError("같은 참가자가 두 번 들어 있습니다.")
+        raise errors.ValidationError("같은 사람이 두 번 들어 있어요.")
     valid = set(
         db.scalars(
             select(Player.id).where(Player.team_id == team.id, Player.status == PlayerStatus.ACTIVE, Player.id.in_(player_ids))
@@ -63,7 +63,7 @@ def create(db: Session, team: Team, by: User, player_ids: list[int]) -> RankingV
     )
     bad = [pid for pid in player_ids if pid not in valid]
     if bad:
-        raise errors.PlayerNotInTeam(details=[ErrorDetail(field="player_ids", reason=f"팀에 없는 참가자: {bad}")])
+        raise errors.PlayerNotInTeam(details=[ErrorDetail(field="player_ids", reason=f"이 팀에 없는 사람이 {len(bad)}명 있어요.")])
     for old in db.scalars(select(ManagerRanking).where(ManagerRanking.team_id == team.id, ManagerRanking.is_active.is_(True))).all():
         old.is_active = False
     ranking = ManagerRanking(team_id=team.id, ranked_by=by.id, is_active=True)

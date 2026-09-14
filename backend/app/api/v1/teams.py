@@ -217,9 +217,9 @@ def update_role(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_
     """
     target = db.get(Player, player_id)
     if target is None or target.team_id != team.id:
-        raise E.NotFound("팀원을 찾을 수 없습니다.")
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
     if target.kind == PlayerKind.GUEST:
-        raise E.ValidationError("게스트에게는 매니저 권한을 줄 수 없습니다.")
+        raise E.ValidationError("게스트에게는 매니저 권한을 줄 수 없어요.")
     # 권한 부여·회수는 팀장(팀을 만든 사람, teams.owner_user_id)만. 위임받은 매니저는 다른 사람의 역할을 바꿀 수 없다
     if me.user_id != team.owner_user_id and (me.id is not None):  # id 가 None 이면 비소속 ADMIN 의 가상 매니저
         raise E.ForbiddenRole("팀장(팀을 만든 매니저)만 매니저 권한을 바꿀 수 있어요.")
@@ -258,7 +258,7 @@ def remove_player(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_tea
     """
     target = db.get(Player, player_id)
     if target is None or target.team_id != team.id:
-        raise E.NotFound("팀원을 찾을 수 없습니다.")
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
     if target.role == TeamRole.MANAGER and target.status == PlayerStatus.ACTIVE:
         other = db.scalar(
             select(Player.id).where(

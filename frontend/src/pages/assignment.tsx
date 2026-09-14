@@ -19,7 +19,7 @@ import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
 const STRATEGY_LABEL: Record<Strategy, string> = { SKILL: '실력 우선', CHEMISTRY: '친화도 우선', BALANCED: '종합' }
-const LOCK_COLORS = ['border-court-500 ring-court-200', 'border-navy-500 ring-navy-200', 'border-emerald-500 ring-emerald-200', 'border-amber-500 ring-amber-200']
+const LOCK_COLORS = ['border-court-500 ring-brand-line', 'border-navy-500 ring-navy-200', 'border-emerald-500 ring-emerald-200', 'border-amber-500 ring-amber-200']
 
 /* ============================ S-12 배정 실행 ============================ */
 export function AssignPage() {
@@ -48,7 +48,7 @@ export function AssignPage() {
   const run = useMutation({
     mutationFn: () => assignmentsApi.run(id, body),
     onSuccess: (r) => nav(`/assignments/runs/${r.id}`),
-    onError: (e) => setMsg(errMsg(e, '배정을 실행하지 못했어요.')),
+    onError: (e) => setMsg(errMsg(e, '팀을 나누지 못했어요.')),
   })
   const qc = useQueryClient()
   const closeRsvp = useMutation({
@@ -63,9 +63,9 @@ export function AssignPage() {
       setLocks(c.lock_groups.map((g) => g.filter((p) => ids.has(p))).filter((g) => g.length >= 2))
       setSeps(c.separate_groups.map((g) => g.filter((p) => ids.has(p))).filter((g) => g.length >= 2))
       setPins(Object.fromEntries(c.pins.filter((p) => ids.has(p.player_id)).map((p) => [p.player_id, p.squad_no as 1 | 2])))
-      setMsg('직전 회차 제약을 불러왔어요. 이번 회차 불참자는 제외했어요.')
+      setMsg('지난 일정의 조건을 불러왔어요. 이번에 불참인 사람은 뺐어요.')
     },
-    onError: (e) => setMsg(errMsg(e, '직전 회차 기록이 없어요.')),
+    onError: (e) => setMsg(errMsg(e, '지난 일정의 배정 기록이 없어요.')),
   })
 
   useEffect(() => { setSelected((s) => s.filter((pid) => byId.has(pid))) }, [byId])
@@ -91,19 +91,19 @@ export function AssignPage() {
 
   return (
     <Screen>
-      <TopBar title="팀 배정" back={`/events/${id}`} right={<button className="mr-1 text-xs font-semibold text-court-600" onClick={() => loadLast.mutate()}>직전 회차 제약</button>} />
+      <TopBar title="팀 배정" back={`/events/${id}`} right={<button className="mr-1 text-xs font-semibold text-brand-ink" onClick={() => loadLast.mutate()}>지난 조건 불러오기</button>} />
       <Content>
         {msg && <Alert kind="info">{msg}</Alert>}
         {ev.data.rsvp_open && (
           <Card className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-navy-900">아직 참석 응답을 받고 있어요</p>
-              <p className="text-xs text-stone-500">지금 마감하면 인원이 확정되고 팀원은 응답을 바꿀 수 없어요.</p>
+              <p className="text-sm font-semibold text-ink">아직 참석 응답을 받고 있어요</p>
+              <p className="text-xs text-muted">지금 마감하면 인원이 확정되고 팀원은 응답을 바꿀 수 없어요.</p>
             </div>
             <Button variant="secondary" className="min-h-10 text-sm" loading={closeRsvp.isPending} onClick={() => confirm('참석 응답을 지금 마감할까요?') && closeRsvp.mutate()}>응답 마감</Button>
           </Card>
         )}
-        {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 짠 안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
+        {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 짠 배정안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
 
         {suggestions.length > 0 && (
           <section>
@@ -113,15 +113,15 @@ export function AssignPage() {
                 const off = dismissed.includes(s.guest.id)
                 return (
                   <Card key={s.guest.id} className={`flex items-center gap-3 py-3 ${off ? 'opacity-60' : ''}`}>
-                    <p className="min-w-0 flex-1 text-sm text-navy-900">
+                    <p className="min-w-0 flex-1 text-sm text-ink">
                       <b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님과 같은 팀으로 묶을까요?
                     </p>
                     {off ? (
-                      <button className="text-xs font-semibold text-court-600" onClick={() => setDismissed((d) => d.filter((x) => x !== s.guest.id))}>무시 취소</button>
+                      <button className="text-xs font-semibold text-brand-ink" onClick={() => setDismissed((d) => d.filter((x) => x !== s.guest.id))}>무시 취소</button>
                     ) : (
                       <>
                         <Button className="min-h-9 text-xs" onClick={() => addLock([s.guest.id, s.target.id])}>승인</Button>
-                        <button className="text-xs text-stone-400" onClick={() => setDismissed((d) => [...d, s.guest.id])}>무시</button>
+                        <button className="text-xs text-faint" onClick={() => setDismissed((d) => [...d, s.guest.id])}>무시</button>
                       </>
                     )}
                   </Card>
@@ -134,9 +134,9 @@ export function AssignPage() {
         <section>
           <SectionTitle action={
             <span className="flex gap-3">
-              {selected.length > 0 && <button className="text-xs text-stone-500" onClick={() => setSelected([])}>선택 해제</button>}
+              {selected.length > 0 && <button className="text-xs text-muted" onClick={() => setSelected([])}>선택 해제</button>}
               {(locks.length > 0 || seps.length > 0 || Object.keys(pins).length > 0) && (
-                <button className="text-xs font-semibold text-rose-500" onClick={() => confirm('묶기·갈라놓기·사전 배치를 모두 초기화할까요?') && (setLocks([]), setSeps([]), setPins({}), setSelected([]))}>설정 초기화</button>
+                <button className="text-xs font-semibold text-danger-ink" onClick={() => confirm('묶기·갈라놓기·미리 배치를 모두 지울까요?') && (setLocks([]), setSeps([]), setPins({}), setSelected([]))}>설정 초기화</button>
               )}
             </span>
           }>
@@ -153,17 +153,17 @@ export function AssignPage() {
                   <button
                     key={p.id}
                     onClick={() => toggle(p.id)}
-                    className={`relative flex min-h-10 items-center gap-1.5 rounded-full border-2 bg-white pl-1 pr-3 text-sm font-semibold ${on ? 'border-court-500 bg-court-50 ring-2 ring-court-200' : li >= 0 ? LOCK_COLORS[li % LOCK_COLORS.length] + ' ring-2' : si >= 0 ? 'border-dashed border-rose-400' : 'border-stone-200'}`}
+                    className={`relative flex min-h-10 items-center gap-1.5 rounded-full border-2 bg-surface pl-1 pr-3 text-sm font-semibold ${on ? 'border-court-500 bg-brand-soft ring-2 ring-brand-line' : li >= 0 ? LOCK_COLORS[li % LOCK_COLORS.length] + ' ring-2' : si >= 0 ? 'border-dashed border-danger-line' : 'border-line'}`}
                   >
                     <GradeDot grade={p.skill_grade} />
                     {p.display_name}
-                    <span className="text-[10px] text-stone-400">{p.primary_position ?? '?'}</span>
-                    {p.kind === 'GUEST' && <span className="text-[10px] text-stone-400">G</span>}
+                    <span className="text-[10px] text-faint">{p.primary_position ?? '?'}</span>
+                    {p.kind === 'GUEST' && <span className="text-[10px] text-faint">G</span>}
                     {a.team_lock_request_player_id && li < 0 && <span className="absolute -right-1 -top-1.5 rounded-full bg-court-500 px-1.5 text-[9px] text-white">제안</span>}
                   </button>
                 )
               })}
-              {pool.length === 0 && <p className="text-sm text-stone-500">참석 확정자가 없어요.</p>}
+              {pool.length === 0 && <p className="text-sm text-muted">참석 확정자가 없어요.</p>}
             </div>
             {selected.length >= 2 && (
               <div className="mt-3 flex flex-wrap gap-2">
@@ -173,14 +173,14 @@ export function AssignPage() {
             )}
             {selected.length >= 1 && (
               <div className="mt-2 flex gap-2">
-                <button onClick={() => pinTo(1)} className="min-h-10 flex-1 rounded-xl bg-team-black text-sm font-semibold text-white">블랙에 배치</button>
-                <button onClick={() => pinTo(2)} className="min-h-10 flex-1 rounded-xl border border-stone-300 bg-team-white text-sm font-semibold text-navy-900">화이트에 배치</button>
+                <button onClick={() => pinTo(1)} className="min-h-10 flex-1 rounded-xl bg-team-black text-sm font-semibold text-team-black-ink">블랙에 배치</button>
+                <button onClick={() => pinTo(2)} className="min-h-10 flex-1 rounded-xl border border-line-strong bg-team-white text-sm font-semibold text-team-white-ink">화이트에 배치</button>
               </div>
             )}
             {(locks.length > 0 || seps.length > 0) && (
-              <div className="mt-3 space-y-1 text-xs text-stone-600">
-                {locks.map((g, i) => <p key={`l${i}`}><span className={`mr-1 inline-block size-2 rounded-full ${['bg-court-500', 'bg-navy-500', 'bg-emerald-500', 'bg-amber-500'][i % 4]}`} />묶음: {g.map((p) => byId.get(p)?.display_name).join(' · ')} <button className="text-court-600" onClick={() => setLocks((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
-                {seps.map((g, i) => <p key={`s${i}`}>갈라놓기: {g.map((p) => byId.get(p)?.display_name).join(' ↔ ')} <button className="text-court-600" onClick={() => setSeps((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
+              <div className="mt-3 space-y-1 text-xs text-muted">
+                {locks.map((g, i) => <p key={`l${i}`}><span className={`mr-1 inline-block size-2 rounded-full ${['bg-court-500', 'bg-navy-500', 'bg-emerald-500', 'bg-amber-500'][i % 4]}`} />묶음: {g.map((p) => byId.get(p)?.display_name).join(' · ')} <button className="text-brand-ink" onClick={() => setLocks((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
+                {seps.map((g, i) => <p key={`s${i}`}>갈라놓기: {g.map((p) => byId.get(p)?.display_name).join(' ↔ ')} <button className="text-brand-ink" onClick={() => setSeps((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
               </div>
             )}
           </Card>
@@ -191,9 +191,9 @@ export function AssignPage() {
             const list = attendees.filter((a) => pins[a.player.id] === sq)
             const dark = sq === 1
             return (
-              <div key={sq} className={`min-h-24 rounded-2xl border-2 p-3 ${dark ? 'border-team-black bg-team-black text-white' : 'border-stone-300 bg-team-white text-navy-900'}`}>
+              <div key={sq} className={`min-h-24 rounded-2xl border-2 p-3 ${dark ? 'border-team-black bg-team-black text-team-black-ink' : 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]'}`}>
                 <p className="text-sm font-bold">{dark ? '블랙' : '화이트'} 사전 배치 ({list.length}/{Math.ceil(attendees.length / 2)})</p>
-                {list.length === 0 ? <p className={`mt-3 text-center text-xs ${dark ? 'text-stone-400' : 'text-stone-400'}`}>칩을 고른 뒤 "배치"</p> : (
+                {list.length === 0 ? <p className={`mt-3 text-center text-xs ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>이름을 고른 뒤 배치하세요</p> : (
                   <ul className="mt-2 space-y-1 text-sm">
                     {list.map((a) => (
                       <li key={a.player.id} className="flex items-center justify-between gap-2">
@@ -219,7 +219,7 @@ export function AssignPage() {
         )}
       </Content>
       <BottomAction>
-        <Button full loading={run.isPending} disabled={!feasible} onClick={() => run.mutate()}>3가지 안으로 팀 짜기</Button>
+        <Button full loading={run.isPending} disabled={!feasible} onClick={() => run.mutate()}>3가지 배정안 만들기</Button>
       </BottomAction>
     </Screen>
   )
@@ -246,7 +246,7 @@ export function RunResultPage() {
   const reset = useMutation({
     mutationFn: (cid: number) => assignmentsApi.reset(cid),
     onSuccess: () => { setPick(noPick); setMsg(null); refresh() },
-    onError: (e) => setMsg(errMsg(e, '초기화하지 못했어요.')),
+    onError: (e) => setMsg(errMsg(e, '되돌리지 못했어요.')),
   })
   const adopt = useMutation({
     mutationFn: (cid: number) => assignmentsApi.adopt(cid),
@@ -289,9 +289,9 @@ export function RunResultPage() {
   return (
     <Screen>
       <TopBar title="배정 결과" back={`/events/${r.event_id}/assign`} />
-      <div className="grid grid-cols-3 border-b border-stone-200 bg-white">
+      <div className="grid grid-cols-3 border-b border-line bg-surface">
         {r.candidates.map((c, i) => (
-          <button key={c.id} onClick={() => { setTab(i); setPick(noPick) }} className={`min-h-11 text-sm font-semibold ${tab === i ? 'border-b-2 border-court-500 text-court-600' : 'text-stone-400'}`}>
+          <button key={c.id} onClick={() => { setTab(i); setPick(noPick) }} className={`min-h-11 text-sm font-semibold ${tab === i ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
             {STRATEGY_LABEL[c.strategy]}{c.is_adopted ? ' ✓' : ''}
           </button>
         ))}
@@ -299,17 +299,17 @@ export function RunResultPage() {
       <Content>
         {r.warnings.map((w, i) => <Alert key={i} kind="warn">{w}</Alert>)}
         {msg && <Alert>{msg}</Alert>}
-        <div className="rounded-xl bg-white px-3 py-2 text-xs text-stone-500">
+        <div className="rounded-xl bg-surface px-3 py-2 text-xs text-muted">
           <div className="flex items-center justify-between">
-            <span>예상 실력 차이 <b className="text-navy-900">{cand.metrics.skill_spread}</b>점/쿼터</span>
-            <span title="실력 차이·포지션·선호·게스트 분산을 합친 점수. 낮을수록 균형이 좋아요">균형 점수 {cand.total_score} <span className="text-stone-400">(낮을수록 좋음)</span></span>
+            <span>예상 실력 차이 <b className="text-ink">{cand.metrics.skill_spread}</b>점/쿼터</span>
+            <span title="실력 차이, 포지션, 같이 뛰고 싶은 사람, 게스트가 한쪽에 몰리지 않는지를 합친 점수예요">균형 점수 {cand.total_score} <span className="text-faint">(낮을수록 좋음)</span></span>
           </div>
-          <p className="mt-0.5 text-[11px] text-stone-400">두 팀이 붙었을 때 한 쿼터에 날 것으로 예상되는 점수 차예요. 0에 가까울수록 균형이 좋아요.</p>
+          <p className="mt-0.5 text-[11px] text-faint">두 팀이 붙었을 때 한 쿼터에 날 것으로 예상되는 점수 차예요. 0에 가까울수록 균형이 좋아요.</p>
         </div>
         {cand.metrics.manually_edited && (
-          <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className="flex items-center justify-between rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn-ink">
             <span>이 안은 손으로 수정됐어요 (↔ 표시).</span>
-            <button className="font-semibold text-court-700" disabled={reset.isPending} onClick={() => confirm('수동으로 옮긴 것을 모두 되돌릴까요?') && reset.mutate(cand.id)}>수동 수정 초기화</button>
+            <button className="font-semibold text-brand-ink" disabled={reset.isPending} onClick={() => confirm('수동으로 옮긴 것을 모두 되돌릴까요?') && reset.mutate(cand.id)}>수동 수정 초기화</button>
           </div>
         )}
         <div className="grid grid-cols-2 gap-2">
@@ -326,19 +326,19 @@ export function RunResultPage() {
                 {pickedSep ? '갈라놓은 두 사람의 팀을 서로 바꾸기 ↔' : `맞교체 ↔ (블랙 ${label(pick.a)} ↔ 화이트 ${label(pick.b)})`}
               </Button>
             )}
-            {pickedSep && <p className="px-1 text-center text-xs text-stone-500">갈라놓기로 설정된 사람은 한 명만 옮길 수 없어요. 두 사람의 팀을 통째로 바꾸는 것만 가능해요.</p>}
-            {!pickedSep && [...pick.a, ...pick.b].some((x) => marks.locked.has(x)) && <p className="px-1 text-center text-xs text-stone-500">묶인 사람은 그룹이 함께 선택되고 함께 움직여요.</p>}
+            {pickedSep && <p className="px-1 text-center text-xs text-muted">갈라놓기로 설정된 사람은 한 명만 옮길 수 없어요. 두 사람의 팀을 통째로 바꾸는 것만 가능해요.</p>}
+            {!pickedSep && [...pick.a, ...pick.b].some((x) => marks.locked.has(x)) && <p className="px-1 text-center text-xs text-muted">묶인 사람은 그룹이 함께 선택되고 함께 움직여요.</p>}
           </div>
         )}
         {!hasPick && !cand.is_adopted && (
-          <p className="px-1 text-center text-xs text-stone-400">
+          <p className="px-1 text-center text-xs text-faint">
             한 명을 탭하면 다른 팀으로 옮기고, 양 팀에서 골라 맞교체할 수 있어요. 팀에는 최소 5명이 남아야 해요.
             {(marks.locked.size > 0 || marks.pinned.size > 0 || marks.sepGroup.size > 0) && <><br />묶음은 함께 움직이고, 고정은 그대로, 분리는 짝과 팀을 바꿔요.</>}
           </p>
         )}
         <Card>
-          <p className="mb-1 text-sm font-bold text-navy-900">이렇게 나눈 이유</p>
-          <p className="whitespace-pre-line text-sm text-stone-600">{cand.explanation}</p>
+          <p className="mb-1 text-sm font-bold text-ink">이렇게 나눈 이유</p>
+          <p className="whitespace-pre-line text-sm text-muted">{cand.explanation}</p>
         </Card>
         <PositionTable squads={cand.squads} />
       </Content>
@@ -346,8 +346,8 @@ export function RunResultPage() {
         {cand.is_adopted ? (
           <Button full variant="secondary" onClick={() => nav(`/events/${r.event_id}/assignment`)}>확정된 결과 보기</Button>
         ) : (
-          <Button full loading={adopt.isPending} onClick={() => confirm(`[${STRATEGY_LABEL[cand.strategy]}] 안으로 확정할까요? 참석자에게 공개돼요.${adoptedAny ? ' (기존 확정은 해제)' : ''}`) && adopt.mutate(cand.id)}>
-            이 안으로 확정
+          <Button full loading={adopt.isPending} onClick={() => confirm(`[${STRATEGY_LABEL[cand.strategy]}] 배정안으로 확정할까요? 참석자에게 공개돼요.${adoptedAny ? ' (기존 확정은 해제)' : ''}`) && adopt.mutate(cand.id)}>
+            이 배정안으로 확정
           </Button>
         )}
       </BottomAction>
@@ -370,12 +370,12 @@ function constraintMarks(c: ConstraintSet): Marks {
 
 function SquadCard({ squad, dark, picked, onPick, showSkill, highlightId, marks, title, compact }: { squad: SquadView; dark: boolean; picked?: number[]; onPick?: (pid: number) => void; showSkill?: boolean; highlightId?: number; marks?: Marks; title?: string; compact?: boolean }) {
   return (
-    <div className={`rounded-2xl border-2 p-3 ${dark ? 'border-team-black bg-team-black text-white' : 'border-stone-300 bg-team-white text-navy-900'}`}>
+    <div className={`rounded-2xl border-2 p-3 ${dark ? 'border-team-black bg-team-black text-team-black-ink' : 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]'}`}>
       <div className="flex items-center justify-between text-sm font-bold">
         <span>{title ?? squad.squad_name} ({squad.members.length})</span>
         {!compact && showSkill && squad.avg_skill !== null && <Badge tone={dark ? 'court' : 'navy'}>쿼터당 {Number(squad.avg_skill) > 0 ? '+' : ''}{squad.avg_skill}</Badge>}
       </div>
-      {!compact && squad.avg_height_cm !== null && <p className={`text-[11px] ${dark ? 'text-stone-400' : 'text-stone-500'}`}>평균 신장 {squad.avg_height_cm}cm</p>}
+      {!compact && squad.avg_height_cm !== null && <p className={`text-[11px] ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>평균 신장 {squad.avg_height_cm}cm</p>}
       <ul className="mt-2 space-y-1">
         {squad.members.map((m) => {
           const pos = squad.assigned_positions[m.id]
@@ -385,15 +385,15 @@ function SquadCard({ squad, dark, picked, onPick, showSkill, highlightId, marks,
             <li key={m.id}>
               <button
                 onClick={onPick ? () => onPick(m.id) : undefined}
-                className={`flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-sm ${on ? (dark ? 'bg-court-500' : 'bg-court-100') : me ? (dark ? 'bg-white/15' : 'bg-court-50') : ''}`}
+                className={`flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-sm ${on ? (dark ? 'bg-court-500 text-white' : 'bg-court-100') : me ? (dark ? 'bg-white/15' : 'bg-court-50') : ''}`}
               >
-                <span className={`w-6 text-[10px] font-bold ${dark ? 'text-stone-300' : 'text-stone-500'}`}>{pos ?? '—'}</span>
+                <span className={`w-6 text-[10px] font-bold ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>{pos ?? '—'}</span>
                 <span className="truncate font-medium">{m.display_name}{me ? ' (나)' : ''}</span>
-                {m.kind === 'GUEST' && <span className={`text-[10px] ${dark ? 'text-stone-400' : 'text-stone-400'}`}>G</span>}
+                {m.kind === 'GUEST' && <span className={`text-[10px] ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>G</span>}
                 {squad.manual_override_ids.includes(m.id) && <span className="text-[10px] text-amber-400">↔</span>}
-                {marks?.locked.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-stone-200' : 'bg-navy-100 text-navy-700'}`} title="같은 팀으로 묶음">묶음{marks.locked.get(m.id)}</span>}
-                {marks?.pinned.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-stone-200' : 'bg-navy-100 text-navy-700'}`} title="사전 배치">고정</span>}
-                {marks?.sepGroup.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-stone-200' : 'bg-rose-50 text-rose-600'}`} title="갈라놓기">분리</span>}
+                {marks?.locked.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-team-black-sub' : 'bg-navy-100 text-navy-700'}`} title="같은 팀으로 묶음">묶음{marks.locked.get(m.id)}</span>}
+                {marks?.pinned.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-team-black-sub' : 'bg-navy-100 text-navy-700'}`} title="사전 배치">고정</span>}
+                {marks?.sepGroup.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-team-black-sub' : 'bg-rose-100 text-rose-700'}`} title="갈라놓기">분리</span>}
                 {showSkill && <span className="ml-auto"><GradeDot grade={m.skill_grade} /></span>}
               </button>
             </li>
@@ -407,16 +407,16 @@ function SquadCard({ squad, dark, picked, onPick, showSkill, highlightId, marks,
 function PositionTable({ squads }: { squads: SquadView[] }) {
   return (
     <Card>
-      <p className="mb-2 text-sm font-bold text-navy-900">포지션 슬롯</p>
+      <p className="mb-2 text-sm font-bold text-ink">포지션 슬롯</p>
       <div className="grid grid-cols-6 gap-1 text-center text-xs">
         <span />
-        {POSITIONS.map((p) => <span key={p} className="font-semibold text-stone-500">{p}</span>)}
+        {POSITIONS.map((p) => <span key={p} className="font-semibold text-muted">{p}</span>)}
         {squads.map((s) => (
           <Fragment key={s.squad_no}>
-            <span className="text-left font-semibold text-navy-900">{s.squad_name}</span>
+            <span className="text-left font-semibold text-ink">{s.squad_name}</span>
             {POSITIONS.map((p) => {
               const n = Object.values(s.assigned_positions).filter((x) => x === p).length
-              return <span key={`${s.squad_no}${p}`} className={`rounded py-0.5 ${n ? 'bg-navy-100 text-navy-800' : 'bg-rose-50 text-rose-500'}`}>{n}</span>
+              return <span key={`${s.squad_no}${p}`} className={`rounded py-0.5 ${n ? 'bg-info-soft text-ink' : 'bg-danger-soft text-danger-ink'}`}>{n}</span>
             })}
           </Fragment>
         ))}
@@ -447,15 +447,15 @@ export function AdoptedPage() {
       <div className="bg-navy-800 px-4 pb-4 text-white">
         {mine ? (
           <>
-            <p className="text-xs text-navy-200">내 팀</p>
+            <p className="text-xs text-bar-sub">내 팀</p>
             <p className="text-2xl font-black">{mine.squad_name}{v.my_assigned_position ? <span className="ml-2 rounded-lg bg-court-500 px-2 py-0.5 text-sm font-bold">{v.my_assigned_position}</span> : null}</p>
           </>
         ) : (
-          <p className="text-sm text-navy-200">{STRATEGY_LABEL[v.strategy]} 안으로 확정됐어요.</p>
+          <p className="text-sm text-bar-sub">{STRATEGY_LABEL[v.strategy]} 배정안으로 확정됐어요.</p>
         )}
       </div>
       <Content>
-        <Card><p className="text-sm text-stone-700 whitespace-pre-line">{v.explanation}</p></Card>
+        <Card><p className="text-sm text-ink-2 whitespace-pre-line">{v.explanation}</p></Card>
         {mine && (
           <section>
             <SectionTitle>내 팀 · 팀 {mine.squad_name}</SectionTitle>
@@ -463,12 +463,12 @@ export function AdoptedPage() {
           </section>
         )}
         <section>
-          <SectionTitle>{mine ? `상대 · 팀 ${others.map((s) => s.squad_name).join(' · ')}` : '편성'}</SectionTitle>
+          <SectionTitle>{mine ? `상대 · 팀 ${others.map((s) => s.squad_name).join(' · ')}` : '우리 팀'}</SectionTitle>
           <div className={mine ? '' : 'grid grid-cols-2 gap-2'}>
             {others.map((s) => <SquadCard key={s.squad_no} squad={s} dark={s.squad_no === 1} showSkill={isManager} title={`팀 ${s.squad_name}`} />)}
           </div>
         </section>
-        {!isManager && <p className="px-1 text-center text-xs text-stone-400">실력 수치는 표시하지 않아요. 등급은 8쿼터마다 갱신돼요.</p>}
+        {!isManager && <p className="px-1 text-center text-xs text-faint">실력 수치는 표시하지 않아요. 등급은 8쿼터마다 갱신돼요.</p>}
       </Content>
     </Screen>
   )
@@ -490,10 +490,10 @@ export function AdoptedSummary({ eventId, isManager }: { eventId: number; isMana
   const ordered = mine ? [mine, ...others] : v.squads  // 좌측 우리 팀, 우측 상대 팀
   const myId = v.my_player_id ?? undefined
   return (
-    <div className="-mt-1 space-y-2 rounded-b-2xl border border-t-0 border-stone-200 bg-stone-50 px-3 py-3">
+    <div className="-mt-1 space-y-2 rounded-b-2xl border border-t-0 border-line bg-surface-2 px-3 py-3">
       <div className="flex items-center justify-between px-1">
-        <p className="text-sm font-bold text-navy-900">팀 배정 확정</p>
-        <button onClick={() => nav(`/events/${eventId}/assignment`)} className="text-xs font-semibold text-court-600">자세히 →</button>
+        <p className="text-sm font-bold text-ink">팀 배정 확정</p>
+        <button onClick={() => nav(`/events/${eventId}/assignment`)} className="text-xs font-semibold text-brand-ink">자세히 →</button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         {ordered.map((s) => (
@@ -501,9 +501,9 @@ export function AdoptedSummary({ eventId, isManager }: { eventId: number; isMana
         ))}
       </div>
       {v.total_score !== null && v.total_score !== undefined && (
-        <div className="flex items-center justify-between rounded-lg bg-white px-3 py-1.5 text-xs">
-          <span className="text-stone-500">균형 점수</span>
-          <span className="font-bold text-navy-900">{v.total_score} <span className="text-[10px] font-normal text-stone-400">낮을수록 균형이 좋아요</span></span>
+        <div className="flex items-center justify-between rounded-lg bg-surface px-3 py-1.5 text-xs">
+          <span className="text-muted">균형 점수</span>
+          <span className="font-bold text-ink">{v.total_score} <span className="text-[10px] font-normal text-faint">낮을수록 균형이 좋아요</span></span>
         </div>
       )}
     </div>

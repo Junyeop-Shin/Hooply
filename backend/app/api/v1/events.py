@@ -182,7 +182,7 @@ def set_attendance_for(db: DB, me: EventManager, user: CurrentUser, event: Annot
     """
     player = db.get(Player, player_id)
     if player is None:
-        raise E.NotFound("참가자를 찾을 수 없습니다.")
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
     row = event_service.set_attendance(db, event, player, body.status, body.note, user)
     db.commit()
     return event_service.attendance_view(db, row, player, user, True)

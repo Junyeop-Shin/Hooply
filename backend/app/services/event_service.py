@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -116,7 +117,7 @@ def update_event(db: Session, event: Event, body: EventUpdate) -> Event:
 
 def cancel_event(db: Session, event: Event) -> None:
     if event.status == EventStatus.DONE:
-        raise errors.ValidationError("이미 종료된 일정은 취소할 수 없습니다.")
+        raise errors.ValidationError("이미 끝난 일정은 취소할 수 없어요.")
     event.status = EventStatus.CANCELED
     from app.services import rating_service
 
@@ -282,13 +283,36 @@ def set_attendance(
     return row
 
 
-def attendance_view(db: Session, row: EventAttendance | None, player: Player, viewer: User, viewer_is_manager: bool) -> AttendanceView:
+@dataclass(slots=True)
+class _Names:
+    """참석 목록에 붙는 이름 모음 — 사람마다 따로 조회하지 않으려고 한 번에 담아 둔다."""
+
+    users: dict[int, str]
+    players: dict[int, str]
+
+
+def _collect_names(db: Session, rows: list[EventAttendance]) -> _Names:
+    user_ids = {r.registered_by for r in rows if r.registered_by}
+    player_ids = {r.team_lock_request_player_id for r in rows if r.team_lock_request_player_id}
+    users = dict(db.execute(select(User.id, User.name).where(User.id.in_(user_ids))).all()) if user_ids else {}
+    players = dict(db.execute(select(Player.id, Player.display_name).where(Player.id.in_(player_ids))).all()) if player_ids else {}
+    return _Names(users=users, players=players)
+
+
+def attendance_view(
+    db: Session, row: EventAttendance | None, player: Player, viewer: User, viewer_is_manager: bool,
+    names: _Names | None = None,
+) -> AttendanceView:
+    """참석 행 하나를 화면용으로. `names` 를 주면 이름 조회 쿼리를 건너뛴다 (목록에서 한 번에 모아 오는 경로)."""
     reg_name = None
     lock_name = None
     if row is not None and row.registered_by:
-        reg_name = db.scalar(select(User.name).where(User.id == row.registered_by))
+        reg_name = names.users.get(row.registered_by) if names else db.scalar(select(User.name).where(User.id == row.registered_by))
     if row is not None and row.team_lock_request_player_id:
-        lock_name = db.scalar(select(Player.display_name).where(Player.id == row.team_lock_request_player_id))
+        lock_name = (
+            names.players.get(row.team_lock_request_player_id) if names
+            else db.scalar(select(Player.display_name).where(Player.id == row.team_lock_request_player_id))
+        )
     can_edit = player.kind == PlayerKind.GUEST and (viewer_is_manager or player.created_by == viewer.id)
     return AttendanceView(
         player=to_card(player, include_grade=viewer_is_manager),
@@ -321,7 +345,9 @@ def attendance_list(db: Session, event: Event, me: Player, viewer: User, status_
             continue
         entries.append((row, p))
     viewer_is_manager = me.role == TeamRole.MANAGER
-    views = [attendance_view(db, row, p, viewer, viewer_is_manager) for row, p in entries]
+    # 이름 두 종류(대리 등록자·묶기 대상)를 미리 한 번에 읽는다. 사람마다 조회하면 참석자 수만큼 쿼리가 늘어난다
+    names = _collect_names(db, [row for row, _ in entries if row is not None])
+    views = [attendance_view(db, row, p, viewer, viewer_is_manager, names) for row, p in entries]
 
     attend = [(row, p) for row, p in entries if row and row.status == AttendanceStatus.ATTEND]
     # 포지션 분포는 사람당 하나 — 가장 선호하는 포지션(preference_rank 1)만 센다 (중복 집계 방지)
@@ -432,7 +458,7 @@ def update_event_guest(db: Session, event: Event, me: Player, by: User, guest: P
         raise errors.ForbiddenNotOwner()
     row = _get_row(db, event.id, guest.id)
     if row is None:
-        raise errors.NotFound("이 회차에 등록되지 않은 게스트입니다.")
+        raise errors.NotFound("이 일정에 등록하지 않은 게스트예요.")
     fields = body.model_dump(exclude_unset=True)
     guest_service.update_guest(
         db, guest, by, display_name=body.display_name, skill_grade=body.skill_grade,
@@ -460,7 +486,7 @@ def remove_event_guest(db: Session, event: Event, by: User, guest: Player) -> No
         raise errors.ForbiddenNotOwner()
     row = _get_row(db, event.id, guest.id)
     if row is None:
-        raise errors.NotFound("이 회차에 등록되지 않은 게스트입니다.")
+        raise errors.NotFound("이 일정에 등록하지 않은 게스트예요.")
     db.delete(row)
     db.commit()
 

@@ -90,7 +90,7 @@ def player_raw(db: DB, admin: AdminUser, player_id: int):
     """
     player = db.get(Player, player_id, options=[selectinload(Player.profile)])
     if player is None:
-        raise E.NotFound("참가자를 찾을 수 없습니다.")
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
     answers: list[dict[str, Any]] = []
     if player.user_id:
         for resp in db.scalars(select(SurveyResponse).where(SurveyResponse.user_id == player.user_id).options(selectinload(SurveyResponse.answers))).all():
@@ -125,7 +125,7 @@ def adjust_rating(db: DB, admin: AdminUser, player_id: int, body: RatingAdjust):
     """
     player = db.get(Player, player_id, options=[selectinload(Player.profile), selectinload(Player.positions)])
     if player is None or player.profile is None:
-        raise E.NotFound("참가자를 찾을 수 없습니다.")
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
     prof = player.profile
     before = {"skill_overall": str(prof.skill_overall) if prof.skill_overall is not None else None, "prior_overall": str(prof.prior_overall) if prof.prior_overall is not None else None}
     after_v = Decimal(str(round(float(body.skill_overall), 1)))
@@ -193,7 +193,7 @@ def list_teams(
 def _decide(db, admin: User, team_id: int, approved: bool) -> TeamDetail:
     team = db.get(Team, team_id)
     if team is None:
-        raise E.NotFound("팀을 찾을 수 없습니다.")
+        raise E.NotFound("팀을 찾을 수 없어요.")
     before = team.approval_status
     team_service.set_approval(db, team, admin, approved)
     db.add(AuditLog(

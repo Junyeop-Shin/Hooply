@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from decimal import Decimal
 from statistics import mean
 
@@ -31,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
-from app.models import Event, Player, PlayerProfile, Quarter, SkillRatingHistory
+from app.models import Event, Player, PlayerProfile, Quarter, QuarterLineup, SkillRatingHistory
 from app.models.enums import EventStatus, PlayerKind, PriorSource, RatingSource, Side
 
 K_BASE = 0.35  # 적응형 학습률의 시작값
@@ -91,13 +92,37 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
     residual: dict[int, float] = defaultdict(float)
     margins: dict[int, list[float]] = defaultdict(list)
 
-    quarters = db.scalars(
-        select(Quarter)
+    # 팀의 모든 쿼터를 다시 재생하므로 행 수가 누적 쿼터 × 10 이다. ORM 객체를 만들지 않고 필요한 값만
+    # 튜플로 받는다 — 여기 비용의 대부분이 객체 생성이라, 같은 결과를 훨씬 싸게 얻는다.
+    rows = db.execute(
+        select(
+            Quarter.id, Quarter.event_id, Quarter.black_score, Quarter.white_score, Quarter.duration_min,
+            QuarterLineup.player_id, QuarterLineup.side, QuarterLineup.normalized_margin,
+        )
         .join(Event, Event.id == Quarter.event_id)
+        .join(QuarterLineup, QuarterLineup.quarter_id == Quarter.id)
         .where(Event.team_id == team_id, Event.status != EventStatus.CANCELED)
-        .options(selectinload(Quarter.lineups))
         .order_by(Event.event_date, Event.start_time.nulls_first(), Event.id, Quarter.quarter_no)
     ).all()
+
+    @dataclass(slots=True)
+    class _Q:
+        event_id: int
+        black_score: int
+        white_score: int
+        duration_min: int
+        lineups: list[tuple[int, Side, float]]  # (player_id, side, normalized_margin)
+
+    quarters: list[_Q] = []
+    seen_q: dict[int, _Q] = {}
+    for qid, eid, bs, ws, dur, pid_, side_, nm in rows:
+        q = seen_q.get(qid)
+        if q is None:
+            q = _Q(event_id=eid, black_score=bs, white_score=ws, duration_min=dur, lineups=[])
+            seen_q[qid] = q
+            quarters.append(q)
+        q.lineups.append((pid_, side_, float(nm)))
+
     event_order: list[int] = []
     for q in quarters:
         if q.event_id not in event_order:
@@ -106,12 +131,12 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
 
     rated = 0
     for q in quarters:
-        black = [canonical(l.player_id) for l in q.lineups if l.side == Side.BLACK]
-        white = [canonical(l.player_id) for l in q.lineups if l.side == Side.WHITE]
-        for lineup in q.lineups:
-            c = canonical(lineup.player_id)
+        black = [canonical(pid_) for pid_, side_, _ in q.lineups if side_ == Side.BLACK]
+        white = [canonical(pid_) for pid_, side_, _ in q.lineups if side_ == Side.WHITE]
+        for pid_, _side, nm in q.lineups:
+            c = canonical(pid_)
             n_played[c] += 1
-            margins[c].append(float(lineup.normalized_margin))
+            margins[c].append(nm)
         if q.event_id in warmup:
             continue  # 첫 2회 모임: 마진은 기록하되 지표에는 넣지 않는다
         rated += 1
@@ -145,7 +170,7 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
                 SkillRatingHistory(
                     player_id=p.id, source=RatingSource.RESIDUAL, before_value=before, after_value=after,
                     delta=after - (before or Decimal(0)), ref_type="team_recompute", ref_id=team_id,
-                    reason=f"쿼터 잔차 재계산 (평가 쿼터 {n_rated[p.id]}개)",
+                    reason=f"경기 기록 반영 (쿼터 {n_rated[p.id]}개)",
                 )
             )
     db.flush()

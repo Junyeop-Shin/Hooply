@@ -29,7 +29,7 @@ export function ForgotPasswordPage() {
         </div>
       ) : (
         <form onSubmit={submit} className="space-y-3 pt-6">
-          <p className="text-sm text-stone-600">가입한 이메일을 입력하면 비밀번호를 새로 정할 수 있는 링크를 보내 드려요. 카카오로 가입했다면 카카오 로그인을 이용해 주세요.</p>
+          <p className="text-sm text-muted">가입한 이메일을 입력하면 비밀번호를 새로 정할 수 있는 링크를 보내 드려요. 카카오로 가입했다면 카카오 로그인을 이용해 주세요.</p>
           <Field label="이메일" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required autoFocus />
           {error && <Alert>{error}</Alert>}
           <Button type="submit" full loading={loading} disabled={!email.trim()}>재설정 링크 보내기</Button>
@@ -45,6 +45,7 @@ export function ResetPasswordPage() {
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [expired, setExpired] = useState(false)  // 링크가 만료·재사용된 경우에만 '링크 다시 받기'를 붙인다
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const mismatch = pw2.length > 0 && pw !== pw2
@@ -52,7 +53,14 @@ export function ResetPasswordPage() {
     e.preventDefault()
     if (pw !== pw2) return
     setError(null); setLoading(true)
-    try { await authApi.resetPassword(token, pw); setDone(true) } catch (err) { setError(err instanceof ApiError ? err.message : '비밀번호를 바꾸지 못했어요.') } finally { setLoading(false) }
+    try {
+      await authApi.resetPassword(token, pw)
+      setDone(true)
+    } catch (err) {
+      // 문구가 아니라 코드로 판단한다 — 안내 문구를 고쳐도 분기가 조용히 깨지지 않게
+      setExpired(err instanceof ApiError && err.code === 'TOKEN_INVALID_OR_EXPIRED')
+      setError(err instanceof ApiError ? err.message : '비밀번호를 바꾸지 못했어요.')
+    } finally { setLoading(false) }
   }
   if (!token) {
     return (
@@ -74,7 +82,7 @@ export function ResetPasswordPage() {
         <form onSubmit={submit} className="space-y-3 pt-6">
           <Field label="새 비밀번호" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} hint="8자 이상" minLength={8} required autoFocus />
           <Field label="새 비밀번호 확인" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} error={mismatch ? '비밀번호가 서로 달라요.' : undefined} required />
-          {error && <Alert>{error}{error.includes('만료') || error.includes('유효') ? <> <Link to="/password/forgot" className="font-semibold underline">링크 다시 받기</Link></> : null}</Alert>}
+          {error && <Alert>{error}{expired ? <> <Link to="/password/forgot" className="font-semibold underline">링크 다시 받기</Link></> : null}</Alert>}
           <Button type="submit" full loading={loading} disabled={pw.length < 8 || mismatch}>비밀번호 바꾸기</Button>
         </form>
       )}

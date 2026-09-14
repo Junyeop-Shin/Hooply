@@ -30,6 +30,9 @@ class Event(TimestampMixin, Base):
 
     __tablename__ = "events"
 
+    # 일정 목록·실력 재계산이 모두 "팀으로 좁혀 날짜순" 이라 복합 인덱스로 정렬까지 인덱스가 맡게 한다
+    __table_args__ = (Index("ix_events_team_date", "team_id", "event_date", "id"),)
+
     id: Mapped[BigPK]
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
     title: Mapped[str | None] = mapped_column(String(100))  # 없으면 화면에서 날짜로 대체

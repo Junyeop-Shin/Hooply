@@ -97,7 +97,7 @@ def get_active_template(db: Session) -> SurveyTemplate:
         .order_by(SurveyTemplate.version.desc())
     )
     if tpl is None:
-        raise errors.NotFound("활성화된 설문이 없습니다. alembic upgrade head 로 시드를 넣어 주세요.")
+        raise errors.NotFound("설문을 준비하지 못했어요. 잠시 후 다시 시도해 주세요.")
     return tpl
 
 
@@ -114,30 +114,30 @@ def _validate_answers(tpl: SurveyTemplate, answers: list[SurveyAnswerIn]) -> dic
     for a in answers:
         q = q_by_id.get(a.question_id)
         if q is None:
-            details.append(ErrorDetail(field=f"question_id={a.question_id}", reason="이 설문에 없는 문항입니다."))
+            details.append(ErrorDetail(field=f"question_id={a.question_id}", reason="이 설문에 없는 질문이에요."))
             continue
         if a.question_id in seen:
-            details.append(ErrorDetail(field=q.code, reason="같은 문항에 두 번 응답했습니다."))
+            details.append(ErrorDetail(field=q.code, reason="같은 질문에 두 번 답했어요."))
             continue
         if q.answer_type == AnswerType.STEPPER:
             if a.numeric_value is None or a.selected_option_ids:
-                details.append(ErrorDetail(field=q.code, reason="숫자 문항은 numeric_value 만 채워야 합니다."))
+                details.append(ErrorDetail(field=q.code, reason="숫자로 답하는 질문이에요."))
             elif not (120 <= a.numeric_value <= 250):
-                details.append(ErrorDetail(field=q.code, reason="키는 120~250cm 사이여야 합니다."))
+                details.append(ErrorDetail(field=q.code, reason="키는 120~250cm 사이로 적어 주세요."))
         else:
             valid_ids = {o.id for o in q.options}
             if a.numeric_value is not None or not a.selected_option_ids:
-                details.append(ErrorDetail(field=q.code, reason="선택형 문항은 selected_option_ids 를 1개 이상 채워야 합니다."))
+                details.append(ErrorDetail(field=q.code, reason="선택지를 하나 이상 골라 주세요."))
             elif not set(a.selected_option_ids) <= valid_ids:
-                details.append(ErrorDetail(field=q.code, reason="이 문항의 선택지가 아닙니다."))
+                details.append(ErrorDetail(field=q.code, reason="이 질문에 없는 선택지예요."))
             elif q.answer_type != AnswerType.MULTI_CHIP and len(a.selected_option_ids) != 1:
-                details.append(ErrorDetail(field=q.code, reason="이 문항은 하나만 선택해야 합니다."))
+                details.append(ErrorDetail(field=q.code, reason="하나만 골라 주세요."))
         seen[a.question_id] = a
     missing = [q.code for q in tpl.questions if q.id not in seen]
     if missing:
-        details.append(ErrorDetail(field=",".join(missing), reason="응답하지 않은 문항이 있습니다."))
+        details.append(ErrorDetail(field=",".join(missing), reason="아직 답하지 않은 질문이 있어요."))
     if details:
-        raise errors.ValidationError("설문 응답 형식이 올바르지 않습니다.", details=details)
+        raise errors.ValidationError("설문 답변을 다시 확인해 주세요.", details=details)
     return seen
 
 

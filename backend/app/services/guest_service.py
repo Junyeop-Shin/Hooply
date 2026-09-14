@@ -65,9 +65,9 @@ def can_manage_guest(db: Session, user: User, guest: Player) -> bool:
 def require_guest(db: Session, player_id: int) -> Player:
     p = db.get(Player, player_id, options=[selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user)])
     if p is None:
-        raise errors.NotFound("참가자를 찾을 수 없습니다.")
+        raise errors.NotFound("이 사람을 찾을 수 없어요.")
     if p.kind != PlayerKind.GUEST:
-        raise errors.ValidationError("게스트만 이 방식으로 수정할 수 있습니다.")
+        raise errors.ValidationError("게스트만 이렇게 고칠 수 있어요.")
     return p
 
 
@@ -121,7 +121,7 @@ def apply_guest_grade(db: Session, guest: Player, grade: int | None, by_user_id:
             SkillRatingHistory(
                 player_id=guest.id, source=RatingSource.MANAGER_ADJUST, before_value=before, after_value=after,
                 delta=after - (before or Decimal(0)), ref_type="users", ref_id=by_user_id,
-                reason=f"게스트 등급 {'미지정(클럽 평균)' if grade is None else grade} 지정",
+                reason=f"게스트 실력 {'미지정(팀 평균으로 계산)' if grade is None else f'{grade}단계'}",
             )
         )
     if prof.quarters_played:

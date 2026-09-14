@@ -6,7 +6,7 @@ import { ApiError } from '../api/client'
 import { teamsApi } from '../api/teams'
 import { eventsApi } from '../api/events'
 import { EventRow, GuestClaimCards, useMe } from './home'
-import { fmtEvent } from './events'
+import { fmtEvent } from '../lib/format'
 import { SHARE_DONE, shareText } from '../lib/kakao'
 import { AdoptedSummary } from './assignment'
 import { surveyApi } from '../api/survey'
@@ -33,8 +33,8 @@ export function TeamCreatePage() {
       <Screen>
         <TopBar title="팀이 만들어졌어요" />
         <Content className="flex flex-col items-center justify-center text-center">
-          <p className="text-lg font-bold text-navy-900">{form.name}</p>
-          <p className="text-sm text-stone-500">아래 코드를 팀원에게 공유하세요. 관리자 승인이 끝나고 5명이 모이면 일정을 만들 수 있어요.</p>
+          <p className="text-lg font-bold text-ink">{form.name}</p>
+          <p className="text-sm text-muted">아래 코드를 팀원에게 공유하세요. 관리자 승인이 끝나고 5명이 모이면 일정을 만들 수 있어요.</p>
           <Alert kind="info">새 팀은 관리자 확인 후 승인돼요. 보통 하루 안에 처리되고, 그동안 팀원 모집은 계속할 수 있어요.</Alert>
           <TeamCodeBox code={created.team_code} teamName={form.name} />
         </Content>
@@ -75,14 +75,14 @@ function TeamCodeBox({ code, teamName }: { code: string; teamName: string }) {
   }
   const share = async () => { const { text, url } = teamInviteText(teamName, code); setMsg(SHARE_DONE[await shareText(text, url)]) }
   return (
-    <div className="mt-2 w-full rounded-2xl border-2 border-dashed border-court-300 bg-court-50 p-4">
-      <p className="text-xs font-semibold text-court-700">팀 코드</p>
-      <p className="my-1 font-mono text-3xl font-black tracking-[0.3em] text-navy-900">{code}</p>
+    <div className="mt-2 w-full rounded-2xl border-2 border-dashed border-court-300 bg-brand-soft p-4">
+      <p className="text-xs font-semibold text-brand-ink">팀 코드</p>
+      <p className="my-1 font-mono text-3xl font-black tracking-[0.3em] text-ink">{code}</p>
       <div className="flex justify-center gap-2">
         <Button variant="secondary" onClick={copy} className="min-h-10 text-sm">복사</Button>
         <button onClick={share} className="min-h-10 rounded-xl bg-[#FEE500] px-4 text-sm font-semibold text-[#191919] active:brightness-95">카카오톡 공유</button>
       </div>
-      {msg && <p className="mt-2 text-xs text-court-700">{msg}</p>}
+      {msg && <p className="mt-2 text-xs text-brand-ink">{msg}</p>}
     </div>
   )
 }
@@ -156,8 +156,8 @@ export function TeamDetailPage() {
     <Screen>
       <TopBar tone="navy" title={t.name} back="/" right={isManager && <Link to={`/teams/${id}/members`} className="mr-1 text-sm font-semibold text-court-300">팀 관리</Link>} />
       <div className="bg-navy-800 px-4 pb-4 text-white">
-        <div className="flex items-center gap-2 text-sm text-navy-200">
-          <span>회원 {t.member_count}명</span>·<span>{t.home_court ?? '홈 코트 미정'}</span>
+        <div className="flex items-center gap-2 text-sm text-bar-sub">
+          <span>팀원 {t.member_count}명</span>·<span>{t.home_court ?? '홈 코트 미정'}</span>
           <span className="ml-auto"><TeamStatusBadge status={t.status} approval={t.approval_status} /></span>
         </div>
         {t.status === 'PENDING' && (
@@ -176,9 +176,9 @@ export function TeamDetailPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 border-b border-stone-200 bg-white">
+      <div className="grid grid-cols-2 border-b border-line bg-surface">
         {(['events', 'members'] as const).map((k) => (
-          <button key={k} onClick={() => setTab(k)} className={`min-h-11 text-sm font-semibold ${tab === k ? 'border-b-2 border-court-500 text-court-600' : 'text-stone-400'}`}>
+          <button key={k} onClick={() => setTab(k)} className={`min-h-11 text-sm font-semibold ${tab === k ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
             {k === 'events' ? '일정' : `팀원 ${t.member_count}`}
           </button>
         ))}
@@ -188,7 +188,7 @@ export function TeamDetailPage() {
         <GuestClaimCards teamId={id} />
         {myTeamProfile && myTeamProfile.self_rank_level === null && (
           <button onClick={() => nav(`/teams/${id}/self-rank`)} className="flex w-full items-center justify-between rounded-2xl bg-court-500 px-4 py-3 text-left text-sm font-semibold text-white">
-            <span>이 동호회에서 내 실력 위치를 알려주세요<br /><span className="text-[11px] font-normal text-court-100">팀 배정 정확도에 가장 큰 영향을 주는 한 문항이에요</span></span>
+            <span>이 동호회에서 내 실력 위치를 알려 주세요<br /><span className="text-[11px] font-normal text-court-100">팀 배정 정확도에 가장 큰 영향을 주는 한 문항이에요</span></span>
             <span>→</span>
           </button>
         )}
@@ -203,9 +203,9 @@ export function TeamDetailPage() {
               <div className="space-y-2">
                 {sortedEvents.length > EVENTS_PAGE && (
                   <div className="flex items-center justify-between px-1 text-xs">
-                    <button disabled={page === 0} onClick={() => setPage(page - 1)} className="rounded-lg px-2 py-1 font-semibold text-navy-700 disabled:opacity-30">‹ 이전</button>
-                    <span className="text-stone-500">{page + 1} / {Math.ceil(sortedEvents.length / EVENTS_PAGE)} · 예정 {upcomingCount}개 · 지난 {sortedEvents.length - upcomingCount}개</span>
-                    <button disabled={(page + 1) * EVENTS_PAGE >= sortedEvents.length} onClick={() => setPage(page + 1)} className="rounded-lg px-2 py-1 font-semibold text-navy-700 disabled:opacity-30">다음 ›</button>
+                    <button disabled={page === 0} onClick={() => setPage(page - 1)} className="rounded-lg px-2 py-1 font-semibold text-ink-2 disabled:opacity-30">‹ 이전</button>
+                    <span className="text-muted">{page + 1} / {Math.ceil(sortedEvents.length / EVENTS_PAGE)} · 예정 {upcomingCount}개 · 지난 {sortedEvents.length - upcomingCount}개</span>
+                    <button disabled={(page + 1) * EVENTS_PAGE >= sortedEvents.length} onClick={() => setPage(page + 1)} className="rounded-lg px-2 py-1 font-semibold text-ink-2 disabled:opacity-30">다음 ›</button>
                   </div>
                 )}
                 {sortedEvents.slice(page * EVENTS_PAGE, page * EVENTS_PAGE + EVENTS_PAGE).map((e) => (
@@ -229,8 +229,8 @@ export function TeamDetailPage() {
           </>
         ) : players.isLoading ? <Spinner /> : (
           <div className="space-y-2">
-            <button onClick={() => nav(`/teams/${id}/leaderboard`)} className="flex w-full items-center justify-between rounded-2xl border border-stone-200 bg-white px-4 py-3 text-left text-sm font-semibold text-navy-800">
-              <span>리더보드 <span className="ml-1 text-[11px] font-normal text-stone-500">참여율 · 출전 쿼터{isManager ? ' · 잔차' : ''}</span></span><span>→</span>
+            <button onClick={() => nav(`/teams/${id}/leaderboard`)} className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left text-sm font-semibold text-ink">
+              <span>리더보드 <span className="ml-1 text-[11px] font-normal text-muted">참여율 · 출전 쿼터{isManager ? ' · 기여 점수' : ''}</span></span><span>→</span>
             </button>
             {players.data?.items.map((p) => <PlayerRow key={p.id} p={p} isMe={p.id === t.my_player_id} />)}
           </div>
@@ -246,16 +246,16 @@ function PlayerRow({ p, isMe, right, ownerRow }: { p: PlayerCard | PlayerCardDet
     <Card className="flex items-center gap-3 py-3">
       <Avatar name={p.display_name} src={p.profile_image_url} />
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 truncate font-semibold text-navy-900">
+        <p className="flex items-center gap-1.5 truncate font-semibold text-ink">
           {p.display_name}
-          {isMe && <span className="text-[11px] font-medium text-court-600">(나)</span>}
+          {isMe && <span className="text-[11px] font-medium text-brand-ink">(나)</span>}
           {p.kind === 'GUEST' && <Badge>게스트</Badge>}
-          {right && p.role === 'MANAGER' && <span className="rounded bg-court-100 px-1.5 py-0.5 text-[10px] font-semibold text-court-700">{ownerRow ? '팀장' : '매니저'}</span>}
+          {right && p.role === 'MANAGER' && <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand-ink">{ownerRow ? '팀장' : '매니저'}</span>}
         </p>
-        <p className="text-xs text-stone-500">
+        <p className="text-xs text-muted">
           {p.playable_positions.length ? p.playable_positions.join(' · ') : '포지션 미입력'}
-          {detailed && detailed.skill_overall != null && <span className="ml-2 text-navy-500">실력 {detailed.skill_overall}</span>}
-          {detailed && <span className="ml-2 text-stone-500">참여 {detailed.attended_events}회</span>}
+          {detailed && detailed.skill_overall != null && <span className="ml-2 text-muted">실력 {detailed.skill_overall}</span>}
+          {detailed && <span className="ml-2 text-muted">참여 {detailed.attended_events}회</span>}
         </p>
       </div>
       {detailed && <GradeDot grade={p.skill_grade} />}
@@ -362,8 +362,8 @@ export function MembersPage() {
         ) : (
           <Card className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-bold text-navy-900">{t.name}</p>
-              <p className="truncate text-xs text-stone-500">{t.description || '팀 소개가 없어요'}{t.home_court ? ` · ${t.home_court}` : ''}</p>
+              <p className="truncate text-base font-bold text-ink">{t.name}</p>
+              <p className="truncate text-xs text-muted">{t.description || '팀 소개가 없어요'}{t.home_court ? ` · ${t.home_court}` : ''}</p>
             </div>
             <Button variant="ghost" className="min-h-10 text-sm" onClick={() => { setTf({ name: t.name, description: t.description ?? '', home_court: t.home_court ?? '' }); setEditTeam(true) }}>수정</Button>
           </Card>
@@ -371,23 +371,23 @@ export function MembersPage() {
         {t && (
           <Card className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-stone-500">팀 코드</p>
-              <p className="font-mono text-xl font-black tracking-[0.25em] text-navy-900">{t.team_code}</p>
+              <p className="text-xs text-muted">팀 코드</p>
+              <p className="font-mono text-xl font-black tracking-[0.25em] text-ink">{t.team_code}</p>
             </div>
             <Button variant="ghost" className="min-h-10 text-sm" loading={regen.isPending} onClick={() => confirm('기존 코드는 더 이상 쓸 수 없어요. 재발급할까요?') && regen.mutate()}>재발급</Button>
           </Card>
         )}
         <Card className="flex items-center justify-between">
           <div>
-            <p className="text-xs text-stone-500">실력 정렬</p>
-            <p className="text-sm font-semibold text-navy-900">팀원 순위를 매겨 사전 실력값에 반영</p>
+            <p className="text-xs text-muted">실력 정렬</p>
+            <p className="text-sm font-semibold text-ink">팀원 순서를 매기면 처음 실력에 반영돼요</p>
           </div>
           <Button variant="ghost" className="min-h-10 text-sm" onClick={() => nav(`/teams/${id}/ranking`)}>정렬하기</Button>
         </Card>
         <Card className="flex items-center justify-between">
           <div>
-            <p className="text-xs text-stone-500">지난 기록 추가</p>
-            <p className="text-sm font-semibold text-navy-900">앱을 쓰기 전 모임의 참석·쿼터 기록 남기기</p>
+            <p className="text-xs text-muted">지난 기록 추가</p>
+            <p className="text-sm font-semibold text-ink">앱을 쓰기 전 경기 기록 남기기</p>
           </div>
           <Button variant="ghost" className="min-h-10 text-sm" onClick={() => nav(`/teams/${id}/records/new`)}>추가하기</Button>
         </Card>
@@ -399,13 +399,13 @@ export function MembersPage() {
                 const on = sort.key === k
                 const hint = !on ? '' : k === 'position' ? (sort.desc ? ' C→PG' : ' PG→C') : sort.desc ? ' 높은순' : ' 낮은순'
                 return (
-                  <button key={k} onClick={() => clickSort(k)} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${on ? 'bg-navy-800 text-white' : 'bg-stone-100 text-stone-500'}`}>
+                  <button key={k} onClick={() => clickSort(k)} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${on ? 'bg-navy-800 text-white' : 'bg-sunken text-muted'}`}>
                     {l}{hint}{on ? (sort.desc ? ' ▼' : ' ▲') : ''}
                   </button>
                 )
               })}
             </div>
-          }>회원 {members.length}</SectionTitle>
+          }>팀원 {members.length}</SectionTitle>
           {players.isLoading ? <Spinner /> : (
             <div className="space-y-2">
               {members.map((p) => {
@@ -420,18 +420,18 @@ export function MembersPage() {
                       isMe={isMe}
                       ownerRow={ownerRow}
                       right={
-                        <button aria-label="관리" className={`flex size-9 items-center justify-center rounded-lg text-lg font-bold ${menu ? 'bg-navy-800 text-white' : 'bg-stone-100 text-navy-700'}`} onClick={() => setOpen(menu ? null : p.id)}>⋯</button>
+                        <button aria-label="관리" className={`flex size-9 items-center justify-center rounded-lg text-lg font-bold ${menu ? 'bg-navy-800 text-white' : 'bg-sunken text-ink-2'}`} onClick={() => setOpen(menu ? null : p.id)}>⋯</button>
                       }
                     />
                     {menu && (
-                      <div className="-mt-1 grid grid-cols-3 gap-2 rounded-b-2xl border border-t-0 border-stone-200 bg-stone-50 px-3 py-2">
-                        <button className="min-h-10 rounded-xl bg-white text-xs font-semibold text-navy-800 shadow-sm active:bg-stone-100" onClick={() => nav(`/teams/${id}/players/${p.id}`)}>지표 보기</button>
+                      <div className="-mt-1 grid grid-cols-3 gap-2 rounded-b-2xl border border-t-0 border-line bg-surface-2 px-3 py-2">
+                        <button className="min-h-10 rounded-xl bg-surface text-xs font-semibold text-ink shadow-sm active:bg-sunken" onClick={() => nav(`/teams/${id}/players/${p.id}`)}>실력 보기</button>
                         {isOwner ? (
-                          <button className="min-h-10 rounded-xl bg-white text-xs font-semibold text-navy-800 shadow-sm active:bg-stone-100 disabled:opacity-50" disabled={setRole.isPending} onClick={() => changeRole(p, isMe, managers)}>{p.role === 'MANAGER' ? '매니저 해제' : '매니저 지정'}</button>
+                          <button className="min-h-10 rounded-xl bg-surface text-xs font-semibold text-ink shadow-sm active:bg-sunken disabled:opacity-50" disabled={setRole.isPending} onClick={() => changeRole(p, isMe, managers)}>{p.role === 'MANAGER' ? '매니저 해제' : '매니저 지정'}</button>
                         ) : (
-                          <button className="min-h-10 rounded-xl bg-white text-xs font-semibold text-stone-400 shadow-sm" onClick={() => alert('매니저 지정·해제는 팀장(팀을 만든 사람)만 할 수 있어요.')}>팀장 전용</button>
+                          <button className="min-h-10 rounded-xl bg-surface text-xs font-semibold text-faint shadow-sm" onClick={() => alert('매니저 지정·해제는 팀장(팀을 만든 사람)만 할 수 있어요.')}>팀장 전용</button>
                         )}
-                        <button className="min-h-10 rounded-xl bg-white text-xs font-semibold text-rose-600 shadow-sm active:bg-rose-50 disabled:opacity-40" disabled={isMe} onClick={() => confirm(`${p.display_name}님을 팀에서 제외할까요?`) && remove.mutate(p.id)}>{isMe ? '본인 제외 불가' : '팀에서 제외'}</button>
+                        <button className="min-h-10 rounded-xl bg-surface text-xs font-semibold text-danger-ink shadow-sm active:bg-danger-soft disabled:opacity-40" disabled={isMe} onClick={() => confirm(`${p.display_name}님을 팀에서 제외할까요?`) && remove.mutate(p.id)}>{isMe ? '본인 제외 불가' : '팀에서 제외'}</button>
                       </div>
                     )}
                   </div>
@@ -449,8 +449,8 @@ export function MembersPage() {
               {candidates.data.items.map((c) => (
                 <Card key={`${c.guest.id}-${c.member.id}`} className="flex items-center gap-3 py-3">
                   <div className="min-w-0 flex-1 text-sm">
-                    <p className="font-semibold text-navy-900">게스트 {c.guest.display_name} <span className="text-stone-400">→</span> 회원 {c.member.display_name}</p>
-                    <p className="text-xs text-stone-500">게스트 기록(배정·쿼터·투표)이 회원 계정으로 승계돼요. 되돌릴 수 있어요.</p>
+                    <p className="font-semibold text-ink">게스트 {c.guest.display_name} <span className="text-faint">→</span> 팀원 {c.member.display_name}</p>
+                    <p className="text-xs text-muted">게스트 기록(배정·쿼터·투표)이 회원 계정으로 승계돼요. 되돌릴 수 있어요.</p>
                   </div>
                   <Button className="min-h-10 text-sm" loading={merge.isPending} onClick={() => confirm(`게스트 ${c.guest.display_name}의 기록을 ${c.member.display_name}님에게 병합할까요?`) && merge.mutate({ guest: c.guest.id, into: c.member.id })}>병합</Button>
                 </Card>

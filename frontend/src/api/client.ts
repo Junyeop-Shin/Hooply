@@ -21,7 +21,7 @@ export class ApiError extends Error {
 }
 
 async function parseError(res: Response): Promise<ApiError> {
-  let body: ErrorResponse = { code: 'UNKNOWN', message: `요청 실패 (${res.status})`, details: [] }
+  let body: ErrorResponse = { code: 'UNKNOWN', message: res.status >= 500 ? '문제가 생겼어요. 잠시 후 다시 시도해 주세요.' : '요청을 처리하지 못했어요.', details: [] }
   try {
     body = (await res.json()) as ErrorResponse
   } catch {

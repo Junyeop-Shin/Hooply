@@ -10,11 +10,11 @@ import { Screen } from '../components/layout'
 function Brand() {
   return (
     <div className="flex flex-col items-center gap-3 pb-6 pt-14 text-center">
-      <span className="flex size-16 items-center justify-center rounded-3xl bg-court-500 text-3xl font-black tracking-tight text-white shadow-lg shadow-court-200">H</span>
+      <span className="flex size-16 items-center justify-center rounded-3xl bg-court-500 text-3xl font-black tracking-tight text-white shadow-lg shadow-brand-line">H</span>
       <div>
-        <h1 className="text-3xl font-black tracking-[0.12em] text-navy-900">HOOPLY</h1>
-        <p className="mt-1 text-sm font-semibold text-court-600">농구를 즐기는 새로운 방식</p>
-        <p className="mt-2 text-xs leading-relaxed text-stone-500">사람을 모으고, 기록을 쌓고,<br />그날의 실력에 맞는 팀을 만들어요.</p>
+        <h1 className="text-3xl font-black tracking-[0.12em] text-ink">HOOPLY</h1>
+        <p className="mt-1 text-sm font-semibold text-brand-ink">농구를 즐기는 새로운 방식</p>
+        <p className="mt-2 text-xs leading-relaxed text-muted">사람을 모으고, 기록을 쌓고,<br />그날의 실력에 맞는 팀을 만들어요.</p>
       </div>
     </div>
   )
@@ -80,7 +80,7 @@ export function KakaoCallbackPage() {
           <Button full variant="secondary" onClick={() => nav('/login', { replace: true })}>로그인 화면으로</Button>
         </div>
       ) : (
-        <p className="text-center text-sm text-stone-500">카카오 계정을 확인하고 있어요…</p>
+        <p className="text-center text-sm text-muted">카카오 계정을 확인하고 있어요…</p>
       )}
     </Screen>
   )
@@ -112,8 +112,8 @@ export function LoginPage() {
     <Screen className="px-6">
       <Brand />
       <KakaoButton />
-      <div className="my-5 flex items-center gap-3 text-xs text-stone-400">
-        <span className="h-px flex-1 bg-stone-200" />또는<span className="h-px flex-1 bg-stone-200" />
+      <div className="my-5 flex items-center gap-3 text-xs text-faint">
+        <span className="h-px flex-1 bg-line" />또는<span className="h-px flex-1 bg-line" />
       </div>
       <form onSubmit={submit} className="space-y-3">
         <Field label="이메일" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required />
@@ -121,10 +121,10 @@ export function LoginPage() {
         {error && <Alert>{error}</Alert>}
         <Button type="submit" full loading={loading}>로그인</Button>
       </form>
-      <div className="mt-6 flex justify-center gap-4 text-sm text-stone-500">
-        <Link to="/password/forgot" className="hover:text-navy-700">비밀번호 찾기</Link>
-        <span className="text-stone-300">|</span>
-        <Link to="/signup" className="font-semibold text-court-600">회원가입</Link>
+      <div className="mt-6 flex justify-center gap-4 text-sm text-muted">
+        <Link to="/password/forgot" className="hover:text-ink-2">비밀번호 찾기</Link>
+        <span className="text-faint">|</span>
+        <Link to="/signup" className="font-semibold text-brand-ink">회원가입</Link>
       </div>
     </Screen>
   )
@@ -173,8 +173,8 @@ export function SignupPage() {
   return (
     <Screen className="px-6 pb-8">
       <div className="pt-10 pb-6">
-        <h1 className="text-2xl font-black text-navy-900">회원가입</h1>
-        <p className="mt-1 text-sm text-stone-500">가입 후 2분짜리 실력 설문이 이어져요.</p>
+        <h1 className="text-2xl font-black text-ink">회원가입</h1>
+        <p className="mt-1 text-sm text-muted">가입 후 2분짜리 실력 설문이 이어져요.</p>
       </div>
       <form onSubmit={submit} className="space-y-3">
         <Field label="이메일" type="email" value={form.email} onChange={set('email')} error={fieldErrors.email} required />
@@ -185,8 +185,8 @@ export function SignupPage() {
         {error && <Alert>{error}</Alert>}
         <Button type="submit" full loading={loading} className="mt-2">가입하고 설문 시작</Button>
       </form>
-      <p className="mt-6 text-center text-sm text-stone-500">
-        이미 계정이 있나요? <Link to="/login" className="font-semibold text-court-600">로그인</Link>
+      <p className="mt-6 text-center text-sm text-muted">
+        이미 계정이 있나요? <Link to="/login" className="font-semibold text-brand-ink">로그인</Link>
       </p>
     </Screen>
   )

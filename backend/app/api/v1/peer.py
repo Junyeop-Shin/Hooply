@@ -19,6 +19,7 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
     DB,
@@ -42,6 +43,8 @@ from app.schemas.peer import (
     VoteTargets,
 )
 from app.services import guest_service, peer_service
+
+_PLAYER_LOAD = [selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user)]
 
 router = APIRouter(tags=["경기 후 설문 · 통계"])
 
@@ -129,9 +132,9 @@ def compatible_players(db: DB, user: CurrentUser, player_id: int):
     - **상태:** `구현됨`.
     - **설계서:** FR-31, F11, 9.4절 "F11은 어떻게 만드나", S-17.
     """
-    player = db.get(Player, player_id)
+    player = db.get(Player, player_id, options=_PLAYER_LOAD)  # 카드·프로필을 만들 때 쓰이므로 한 번에 읽는다
     if player is None:
-        raise E.NotFound("참가자를 찾을 수 없습니다.")
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
     if player.user_id != user.id and not guest_service.is_manager(db, user, player.team_id):
         raise E.ForbiddenRole()
     return ItemList(items=peer_service.compatible(db, player))
@@ -152,9 +155,9 @@ def player_stats(db: DB, user: CurrentUser, player_id: int):
     - **상태:** `구현됨`.
     - **설계서:** FR-28 · FR-31, F11, 9.1절(원시 마진은 실력이 아님), 9.2절 표시 정책, 13.1절 Q3, S-17.
     """
-    player = db.get(Player, player_id)
+    player = db.get(Player, player_id, options=_PLAYER_LOAD)  # 카드·프로필을 만들 때 쓰이므로 한 번에 읽는다
     if player is None:
-        raise E.NotFound("참가자를 찾을 수 없습니다.")
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
     is_mgr = guest_service.is_manager(db, user, player.team_id)
     if player.user_id != user.id and not is_mgr:
         raise E.ForbiddenRole()
@@ -183,5 +186,5 @@ def leaderboard(
 
     is_mgr = me.role == TeamRole.MANAGER
     if metric == "residual" and not is_mgr:
-        raise E.ForbiddenRole("잔차 순위는 매니저만 볼 수 있어요.")
+        raise E.ForbiddenRole("기여도 순위는 매니저만 볼 수 있어요.")
     return ItemList(items=peer_service.leaderboard(db, team.id, metric=metric, period=period, include_grade=is_mgr))

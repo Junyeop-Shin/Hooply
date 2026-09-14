@@ -65,7 +65,7 @@ class AppError(Exception):
 
     status_code: int = 400
     code: str = "VALIDATION_ERROR"
-    message: str = "요청 형식이 올바르지 않습니다."
+    message: str = "입력한 내용을 다시 확인해 주세요."
 
     def __init__(
         self,
@@ -75,7 +75,7 @@ class AppError(Exception):
         code: str | None = None,
         status_code: int | None = None,
     ):
-        # message 만 위치 인자로 받고 나머지는 키워드 전용 — `E.NotFound("팀을 찾을 수 없습니다.")`
+        # message 만 위치 인자로 받고 나머지는 키워드 전용 — `E.NotFound("팀을 찾을 수 없어요.")`
         # 처럼 문구만 바꾸는 호출이 가장 흔하기 때문.
         self.message = message or self.message
         self.details = details or []
@@ -103,34 +103,34 @@ def _error(status: int, code: str, message: str) -> type[AppError]:
 # 400 — 요청 형식·값 자체가 틀림. 프론트가 입력 단계에서 막을 수 있는 종류.
 # ---------------------------------------------------------------------------
 # Pydantic 검증 실패의 기본 코드. 서비스에서 직접 던질 때는 문구를 바꿔 쓴다
-# (예: "게스트에게는 매니저 권한을 줄 수 없습니다.")
-ValidationError = _error(400, "VALIDATION_ERROR", "요청 형식이 올바르지 않습니다.")
+# (예: "게스트에게는 매니저 권한을 줄 수 없어요.")
+ValidationError = _error(400, "VALIDATION_ERROR", "입력한 내용을 다시 확인해 주세요.")
 # 쿼터 저장 시 한쪽 사이드가 5명이 아님 — S-15 쿼터 기록
-InvalidLineupSize = _error(400, "INVALID_LINEUP_SIZE", "쿼터 출전 인원은 팀당 5명이어야 합니다.")
+InvalidLineupSize = _error(400, "INVALID_LINEUP_SIZE", "쿼터마다 팀당 5명을 골라 주세요.")
 # 피어 설문에서 본인을 target 으로 지정 — S-16
-SelfVoteNotAllowed = _error(400, "SELF_VOTE_NOT_ALLOWED", "본인은 선택할 수 없습니다.")
+SelfVoteNotAllowed = _error(400, "SELF_VOTE_NOT_ALLOWED", "자기 자신은 고를 수 없어요.")
 # 비밀번호 재설정 토큰이 없거나·30분 지났거나·이미 사용됨 — POST /auth/password/reset
-TokenInvalidOrExpired = _error(400, "TOKEN_INVALID_OR_EXPIRED", "토큰이 유효하지 않거나 만료되었습니다.")
+TokenInvalidOrExpired = _error(400, "TOKEN_INVALID_OR_EXPIRED", "이 링크는 만료되었거나 이미 사용했어요. 다시 요청해 주세요.")
 
 # ---------------------------------------------------------------------------
 # 401 — 인증 실패. 로그인 화면으로 보내야 하는 종류.
 # ---------------------------------------------------------------------------
 # 이메일/비밀번호 불일치 — S-01. 어느 쪽이 틀렸는지는 알려주지 않는다(계정 존재 여부 노출 방지)
-InvalidCredentials = _error(401, "INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않습니다.")
+InvalidCredentials = _error(401, "INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않아요.")
 # access/refresh 토큰이 없거나·만료·위조·type 불일치·탈퇴 계정 — app/api/deps.py get_current_user
-TokenExpired = _error(401, "TOKEN_EXPIRED", "로그인이 만료되었습니다. 다시 로그인해 주세요.")
+TokenExpired = _error(401, "TOKEN_EXPIRED", "로그인이 풀렸어요. 다시 로그인해 주세요.")
 # 카카오 인가 코드 → 토큰 교환 또는 사용자 정보 조회 실패, state 불일치 — GET /auth/kakao/callback
-KakaoAuthFailed = _error(401, "KAKAO_AUTH_FAILED", "카카오 인증에 실패했습니다.")
+KakaoAuthFailed = _error(401, "KAKAO_AUTH_FAILED", "카카오 로그인에 실패했어요.")
 
 # ---------------------------------------------------------------------------
 # 403 — 로그인은 됐지만 이 자원에 대한 권한이 없음 (3.3절 권한 매트릭스).
 # ---------------------------------------------------------------------------
 # PLAYER 가 MANAGER 전용 API 호출, 비 ADMIN 이 /admin 호출 — deps.require_team_manager 등
-ForbiddenRole = _error(403, "FORBIDDEN_ROLE", "이 작업을 수행할 권한이 없습니다.")
+ForbiddenRole = _error(403, "FORBIDDEN_ROLE", "이 기능은 매니저만 쓸 수 있어요.")
 # 소속되지 않은 팀의 자원에 접근 — deps.require_team_member / require_event_member
-NotAMember = _error(403, "NOT_A_MEMBER", "소속되지 않은 팀입니다.")
+NotAMember = _error(403, "NOT_A_MEMBER", "내가 속한 팀이 아니에요.")
 # 그 일정에 참석하지 않은 사람이 피어 설문 조회 — GET /events/{id}/post-game-survey
-NotAttendee = _error(403, "NOT_ATTENDEE", "이 일정의 참석자가 아닙니다.")
+NotAttendee = _error(403, "NOT_ATTENDEE", "이 일정에 참석한 사람만 볼 수 있어요.")
 # 남이 등록한 게스트를 등록자도 매니저도 아닌 플레이어가 수정·삭제 — 게스트 기능 설계
 ForbiddenNotOwner = _error(403, "FORBIDDEN_NOT_OWNER", "이 게스트를 등록한 사람만 수정할 수 있어요.")
 # 일정 종료 시각 전에 피어 투표 후보 조회·제출 — 피어 투표 설계 (종료 시각이 지나면 자동 오픈)
@@ -139,34 +139,34 @@ SurveyNotOpen = _error(403, "SURVEY_NOT_OPEN", "일정이 끝나면 투표할 �
 # ---------------------------------------------------------------------------
 # 404 — 리소스 없음.
 # ---------------------------------------------------------------------------
-# 범용. 문구를 바꿔 쓴다 ("팀을 찾을 수 없습니다." 등) — deps.get_team_or_404 / get_event_or_404
-NotFound = _error(404, "NOT_FOUND", "요청한 리소스를 찾을 수 없습니다.")
+# 범용. 문구를 바꿔 쓴다 ("팀을 찾을 수 없어요." 등) — deps.get_team_or_404 / get_event_or_404
+NotFound = _error(404, "NOT_FOUND", "찾을 수 없어요. 이미 지워졌을 수 있어요.")
 # 팀 코드 오타/재발급으로 만료 — S-06 팀 가입 (POST /teams/join)
-TeamCodeNotFound = _error(404, "TEAM_CODE_NOT_FOUND", "존재하지 않는 팀 코드입니다.")
+TeamCodeNotFound = _error(404, "TEAM_CODE_NOT_FOUND", "없는 팀 코드예요. 다시 확인해 주세요.")
 # 매니저가 아직 배정을 확정하지 않음 — S-14 플레이어 배정 결과 (GET /events/{id}/assignment/adopted)
-NotAdoptedYet = _error(404, "NOT_ADOPTED_YET", "아직 확정된 배정이 없습니다.")
+NotAdoptedYet = _error(404, "NOT_ADOPTED_YET", "아직 확정된 팀 배정이 없어요.")
 # 매니저 실력 정렬(F14)을 한 번도 저장하지 않음 — GET /teams/{id}/rankings/latest
-NoRanking = _error(404, "NO_RANKING", "아직 매니저 실력 정렬이 없습니다.")
+NoRanking = _error(404, "NO_RANKING", "아직 저장된 실력 순서가 없어요.")
 
 # ---------------------------------------------------------------------------
 # 409 — 현재 상태와 충돌. "이미 ~했다" 류.
 # ---------------------------------------------------------------------------
 # 같은 이메일로 재가입 — POST /auth/signup
-EmailDuplicated = _error(409, "EMAIL_DUPLICATED", "이미 가입된 이메일입니다.")
+EmailDuplicated = _error(409, "EMAIL_DUPLICATED", "이미 가입된 이메일이에요.")
 # 이미 소속된 팀에 팀 코드로 재가입 — POST /teams/join (프론트는 토스트 후 팀 상세로 이동)
-AlreadyMember = _error(409, "ALREADY_MEMBER", "이미 소속된 팀입니다.")
+AlreadyMember = _error(409, "ALREADY_MEMBER", "이미 들어가 있는 팀이에요.")
 # 온보딩 설문 또는 경기 후 피어 설문을 두 번 제출 — POST /surveys/onboarding/responses, post-game-survey
-AlreadySubmitted = _error(409, "ALREADY_SUBMITTED", "이미 제출했습니다.")
+AlreadySubmitted = _error(409, "ALREADY_SUBMITTED", "이미 제출했어요.")
 # 같은 event 에 같은 quarter_no 를 다시 POST — POST /events/{id}/quarters (수정은 PATCH/PUT 사용)
-QuarterExists = _error(409, "QUARTER_EXISTS", "이미 존재하는 쿼터 번호입니다.")
+QuarterExists = _error(409, "QUARTER_EXISTS", "이미 기록한 쿼터예요.")
 # 한 run 안에서 후보안을 두 번 확정 — POST /assignments/candidates/{id}:adopt
-AlreadyAdopted = _error(409, "ALREADY_ADOPTED", "이미 확정된 배정이 있습니다.")
+AlreadyAdopted = _error(409, "ALREADY_ADOPTED", "이미 확정한 팀 배정이 있어요.")
 # 그 카카오 회원번호가 이미 다른 users 에 연결됨 — POST /auth/kakao/link
-IdentityAlreadyLinked = _error(409, "IDENTITY_ALREADY_LINKED", "이미 다른 계정에 연결된 로그인 수단입니다.")
+IdentityAlreadyLinked = _error(409, "IDENTITY_ALREADY_LINKED", "다른 계정에 이미 연결된 카카오 계정이에요.")
 # merged_into_player_id 가 이미 채워진 게스트를 또 병합 — POST /players/{id}:merge
-AlreadyMerged = _error(409, "ALREADY_MERGED", "이미 병합된 참가자입니다.")
+AlreadyMerged = _error(409, "ALREADY_MERGED", "이미 기록을 이어 준 게스트예요.")
 # 카카오로 가입한 사람이 이메일로 또 가입한 것으로 의심 — 5.4절 "동일인 중복 가입" (예비)
-PossibleDuplicate = _error(409, "POSSIBLE_DUPLICATE", "동일인으로 보이는 계정이 이미 있습니다.")
+PossibleDuplicate = _error(409, "POSSIBLE_DUPLICATE", "같은 사람으로 보이는 계정이 이미 있어요.")
 
 # ---------------------------------------------------------------------------
 # 422 — 형식은 맞지만 도메인 규칙에 걸림.
@@ -174,40 +174,40 @@ PossibleDuplicate = _error(409, "POSSIBLE_DUPLICATE", "동일인으로 보이는
 # 팀원 5명 미만(PENDING)인 팀에서 일정 등록 — POST /teams/{id}/events (FR-06)
 TeamNotActive = _error(422, "TEAM_NOT_ACTIVE", "팀 인원이 5명 이상 모이면 일정을 만들 수 있어요.")
 # 참석자 < 팀 수 × 5 — 배정 실행/검증 (FR-33). 문구에 현재 인원을 넣어 던지는 것을 권장
-NotEnoughPlayers = _error(422, "NOT_ENOUGH_PLAYERS", "팀을 만들기에 참석 인원이 부족합니다.")
+NotEnoughPlayers = _error(422, "NOT_ENOUGH_PLAYERS", "팀을 나누기에 참석 인원이 부족해요.")
 # rsvp_deadline 이 지난 뒤 본인 참석 응답 — PUT /events/{id}/attendance (FR-09)
 RsvpClosed = _error(422, "RSVP_CLOSED", "응답이 마감되었어요.")
 # 같은 팀끼리 교체, 후보안에 없는 선수, LOCK 그룹을 깨는 교체 등 — PATCH /assignments/candidates/{id}
-InvalidSwap = _error(422, "INVALID_SWAP", "교체할 수 없는 조합입니다.")
+InvalidSwap = _error(422, "INVALID_SWAP", "이렇게는 바꿀 수 없어요.")
 # 팀의 유일한 MANAGER 를 PLAYER 로 내리려 함 — PATCH /teams/{id}/players/{pid}/role (팀이 관리 불능이 됨)
-CannotDemoteLastManager = _error(422, "CANNOT_DEMOTE_LAST_MANAGER", "마지막 매니저의 권한은 회수할 수 없습니다.")
+CannotDemoteLastManager = _error(422, "CANNOT_DEMOTE_LAST_MANAGER", "매니저가 한 명뿐이라 권한을 뺄 수 없어요.")
 # 정렬·제약 등에 다른 팀의 player_id 가 섞임 — POST /teams/{id}/rankings 등
-PlayerNotInTeam = _error(422, "PLAYER_NOT_IN_TEAM", "팀에 속하지 않은 참가자가 포함되어 있습니다.")
+PlayerNotInTeam = _error(422, "PLAYER_NOT_IN_TEAM", "이 팀에 없는 사람이 섞여 있어요.")
 # 병합 방향이 게스트 → 회원이 아님 (회원끼리, 게스트끼리 등) — POST /players/{id}:merge
-MergeKindMismatch = _error(422, "MERGE_KIND_MISMATCH", "게스트 레코드만 회원 레코드에 병합할 수 있습니다.")
+MergeKindMismatch = _error(422, "MERGE_KIND_MISMATCH", "게스트 기록만 팀원에게 이어 줄 수 있어요.")
 
 # --- 422 배정 제약 실현 불가 (9.6절 사전 실현가능성 검사) ---
 # 이 그룹은 details[] 에 어떤 group_no·player_ids 가 문제인지 반드시 담는다.
 # LOCK 그룹 인원 > 팀 정원 (예: 7명을 묶었는데 팀당 6명)
-LockGroupTooLarge = _error(422, "LOCK_GROUP_TOO_LARGE", "묶음 그룹 인원이 팀 정원을 초과합니다.")
+LockGroupTooLarge = _error(422, "LOCK_GROUP_TOO_LARGE", "묶은 인원이 한 팀 정원보다 많아요.")
 # 같은 페어가 LOCK 과 SEPARATE 에 동시 지정, 또는 같은 LOCK 그룹의 두 사람이 서로 다른 팀에 PIN
-ConstraintConflict = _error(422, "CONSTRAINT_CONFLICT", "서로 충돌하는 제약이 있습니다.")
+ConstraintConflict = _error(422, "CONSTRAINT_CONFLICT", "서로 어긋나는 조건이 있어요.")
 # SEPARATE 그래프를 팀 수(T)개의 색으로 칠할 수 없음 (예: 2팀인데 3명을 전부 갈라놓기)
-SeparateInfeasible = _error(422, "SEPARATE_INFEASIBLE", "분리 제약을 만족하는 팀 구성이 없습니다.")
+SeparateInfeasible = _error(422, "SEPARATE_INFEASIBLE", "갈라놓기 조건을 지킬 수 있는 팀 구성이 없어요.")
 # 슈퍼노드 크기 조합으로 각 팀 정원을 정확히 채우는 부분합이 없음 ("4명 그룹과 5명 그룹으로 6명씩 두 팀 불가")
-LockPartitionInfeasible = _error(422, "LOCK_PARTITION_INFEASIBLE", "묶음 그룹 조합으로는 팀 정원을 채울 수 없습니다.")
+LockPartitionInfeasible = _error(422, "LOCK_PARTITION_INFEASIBLE", "지금 묶음으로는 두 팀 인원을 맞출 수 없어요.")
 # 한 팀 칸에 PIN 된 인원 > 정원 — S-12 에서는 드롭 자체를 거부하지만 API 도 막는다
-SquadOverflow = _error(422, "SQUAD_OVERFLOW", "팀 정원을 초과해 배치할 수 없습니다.")
+SquadOverflow = _error(422, "SQUAD_OVERFLOW", "팀 정원을 넘겨 배치할 수 없어요.")
 
 # ---------------------------------------------------------------------------
 # 429 / 500 / 501
 # ---------------------------------------------------------------------------
 # 과다 요청 (예: 비밀번호 찾기 메일 연타). 아직 미들웨어는 없고 코드만 예약
-RateLimited = _error(429, "RATE_LIMITED", "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+RateLimited = _error(429, "RATE_LIMITED", "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.")
 # 예상 못한 서버 오류. 실제 스택은 로그에만 남기고 클라이언트에는 이 문구만
-InternalError = _error(500, "INTERNAL_ERROR", "서버 오류가 발생했습니다.")
+InternalError = _error(500, "INTERNAL_ERROR", "문제가 생겼어요. 잠시 후 다시 시도해 주세요.")
 # 스켈레톤 단계에서 아직 구현되지 않은 엔드포인트가 던진다. 구현이 끝나면 호출부가 사라져야 한다
-NotImplementedYet = _error(501, "NOT_IMPLEMENTED", "아직 구현되지 않은 기능입니다.")
+NotImplementedYet = _error(501, "NOT_IMPLEMENTED", "아직 준비 중인 기능이에요.")
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -234,5 +234,5 @@ def install_error_handlers(app: FastAPI) -> None:
             ErrorDetail(field=".".join(str(p) for p in e.get("loc", [])), reason=e.get("msg", ""))
             for e in exc.errors()
         ]
-        body = ErrorResponse(code="VALIDATION_ERROR", message="요청 형식이 올바르지 않습니다.", details=details)
+        body = ErrorResponse(code="VALIDATION_ERROR", message="입력한 내용을 다시 확인해 주세요.", details=details)
         return JSONResponse(status_code=400, content=body.model_dump())

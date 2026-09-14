@@ -108,6 +108,8 @@ class Player(CreatedAtMixin, Base):
         # 게스트 ⇔ 계정 없음. kind 와 user_id 가 어긋난 행을 DB 수준에서 차단
         CheckConstraint("(kind = 'GUEST') = (user_id IS NULL)", name="ck_players_guest_has_no_user"),
         Index("ix_players_user_status", "user_id", "status"),  # 6.4절: 내 팀 목록 (GET /me/teams)
+        # 병합된 게스트를 거슬러 올라가는 조회 — 값이 있는 행만 담아 인덱스를 작게 유지한다
+        Index("ix_players_merged_into", "merged_into_player_id", postgresql_where=text("merged_into_player_id IS NOT NULL")),
     )
 
     id: Mapped[BigPK]

@@ -40,7 +40,7 @@ export function TopBar({
   return (
     <header
       className={`sticky top-0 z-10 flex h-14 items-center gap-2 px-3 ${
-        dark ? 'bg-navy-800 text-white' : 'border-b border-stone-200 bg-white/90 text-navy-900 backdrop-blur'
+        dark ? 'bg-bar text-bar-ink' : 'border-b border-line bg-surface/90 text-ink backdrop-blur'
       }`}
     >
       {back ? (
@@ -67,7 +67,7 @@ export function Content({ children, className = '' }: { children: ReactNode; cla
 /** 화면 하단 고정 액션 영역 (5.1절 한 손 조작) */
 export function BottomAction({ children }: { children: ReactNode }) {
   return (
-    <div className="safe-bottom sticky bottom-0 border-t border-stone-200 bg-white/95 px-4 pt-3 backdrop-blur">
+    <div className="safe-bottom sticky bottom-0 border-t border-line bg-surface/95 px-4 pt-3 backdrop-blur">
       {children}
     </div>
   )
@@ -85,7 +85,7 @@ const tabs = [
 /** 하단 탭 — 홈 / 프로필. 활성 탭은 코트 오렌지, 위에 짧은 바 */
 export function TabBar() {
   return (
-    <nav className="safe-bottom sticky bottom-0 z-10 grid grid-cols-2 border-t border-stone-200 bg-white">
+    <nav className="safe-bottom sticky bottom-0 z-10 grid grid-cols-2 border-t border-line bg-surface">
       {tabs.map((t) => (
         <NavLink
           key={t.to}
@@ -93,13 +93,13 @@ export function TabBar() {
           end={t.to === '/'}
           className={({ isActive }) =>
             `relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${
-              isActive ? 'text-court-600' : 'text-stone-400'
+              isActive ? 'text-brand-ink' : 'text-faint'
             }`
           }
         >
           {({ isActive }) => (
             <>
-              {isActive && <span className="absolute top-0 h-0.5 w-10 rounded-b-full bg-court-500" />}
+              {isActive && <span className="absolute top-0 h-0.5 w-10 rounded-b-full bg-brand" />}
               {t.icon}
               {t.label}
             </>

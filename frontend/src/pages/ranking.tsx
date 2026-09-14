@@ -53,8 +53,8 @@ export function RankingPage() {
       <TopBar title="실력 정렬" back={`/teams/${id}`} />
       <Content>
         <Alert kind="info">
-          <b>상위 ↑ / 하위 ↓</b> — 머릿속 순서대로 놓아 주세요. 12명이면 2분이면 충분해요. 이 순서는 설문값과 반반으로 섞여 초기 실력에 반영되고, 버전으로 남아 되돌릴 수 있어요.
-          {latest.data && <span className="mt-1 block text-xs text-navy-500">현재 활성 정렬: {new Date(latest.data.ranked_at).toLocaleDateString('ko-KR')} 저장본</span>}
+          <b>상위 ↑ / 하위 ↓</b> — 머릿속 순서대로 놓아 주세요. 12명이면 2분이면 충분해요. 이 순서는 설문과 반반으로 섞여 처음 실력에 반영돼요. 저장할 때마다 남아서 되돌릴 수 있어요.
+          {latest.data && <span className="mt-1 block text-xs text-muted">지금 쓰는 순서: {new Date(latest.data.ranked_at).toLocaleDateString('ko-KR')} 저장본</span>}
         </Alert>
         {msg && <Alert>{msg}</Alert>}
         {!order ? <Spinner /> : (
@@ -73,15 +73,15 @@ export function RankingPage() {
                   onDragEnd={() => setDrag(null)}
                   className="flex min-w-0 flex-1 cursor-grab items-center gap-2 active:cursor-grabbing"
                 >
-                  <span className="w-6 text-center text-sm font-black text-court-600">{i + 1}</span>
+                  <span className="w-6 text-center text-sm font-black text-brand-ink">{i + 1}</span>
                   <Avatar name={p.display_name} src={p.profile_image_url} size="sm" />
-                  <span className="truncate font-semibold text-navy-900">{p.display_name}</span>
+                  <span className="truncate font-semibold text-ink">{p.display_name}</span>
                   {p.kind === 'GUEST' && <Badge>게스트</Badge>}
-                  <span className="ml-auto text-[11px] text-stone-400">{p.primary_position ?? ''}</span>
+                  <span className="ml-auto text-[11px] text-faint">{p.primary_position ?? ''}</span>
                   <GradeDot grade={p.skill_grade} />
                 </div>
-                <button onClick={() => move(i, i - 1)} disabled={i === 0} className="size-9 rounded-lg bg-stone-100 font-bold disabled:opacity-30">↑</button>
-                <button onClick={() => move(i, i + 1)} disabled={i === order.length - 1} className="size-9 rounded-lg bg-stone-100 font-bold disabled:opacity-30">↓</button>
+                <button onClick={() => move(i, i - 1)} disabled={i === 0} className="size-9 rounded-lg bg-sunken font-bold disabled:opacity-30">↑</button>
+                <button onClick={() => move(i, i + 1)} disabled={i === order.length - 1} className="size-9 rounded-lg bg-sunken font-bold disabled:opacity-30">↓</button>
               </Card>
             ))}
           </div>
@@ -89,7 +89,7 @@ export function RankingPage() {
       </Content>
       <BottomAction>
         <Button full loading={save.isPending} disabled={!order || order.length < 2} onClick={() => save.mutate()}>
-          이 순서로 저장 {latest.data ? '(새 버전)' : ''}
+          이 순서로 저장 {latest.data ? '(새로 저장)' : ''}
         </Button>
       </BottomAction>
     </Screen>

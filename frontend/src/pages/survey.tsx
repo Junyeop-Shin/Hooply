@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
+import { STATIC_QUERY } from '../queryClient'
 import { surveyApi } from '../api/survey'
 import { ApiError } from '../api/client'
 import { SELF_RANK_LABEL, type SelfRankLevel, type SurveyAnswerIn, type SurveyQuestion } from '../api/types'
@@ -24,7 +25,7 @@ const AUTO_ADVANCE_MS = 260
 
 export function SurveyPage() {
   const me = useMe()
-  const tpl = useQuery({ queryKey: ['survey', 'template'], queryFn: surveyApi.template })
+  const tpl = useQuery({ queryKey: ['survey', 'template'], queryFn: surveyApi.template, ...STATIC_QUERY })
   if (me.data?.onboarding_completed) return <Navigate to="/" replace />
   if (me.isLoading || tpl.isLoading) return <Screen><TopBar title="실력 설문" /><Spinner /></Screen>
   if (!tpl.data) return <Screen><TopBar title="실력 설문" back="/" /><Content><Alert>설문을 불러오지 못했어요.</Alert></Content></Screen>
@@ -92,14 +93,14 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
   return (
     <Screen>
       <TopBar title="실력 설문" back={step === 0 ? '/' : undefined} />
-      <div className="h-1.5 bg-stone-200">
+      <div className="h-1.5 bg-line">
         <div className="h-full bg-court-500 transition-all" style={{ width: `${((step + 1) / steps.length) * 100}%` }} />
       </div>
       <Content>
-        <p className="text-xs font-semibold text-court-600">
+        <p className="text-xs font-semibold text-brand-ink">
           {SECTION_NAME[current[0].section] ?? current[0].section} · {step + 1}/{steps.length}
         </p>
-        {current[0].group_label && <h2 className="text-xl font-bold text-navy-900">{current[0].group_label}</h2>}
+        {current[0].group_label && <h2 className="text-xl font-bold text-ink">{current[0].group_label}</h2>}
         {current.map((q) => (
           <QuestionCard key={q.id} q={q} compact={current.length > 1} answer={answers[q.id]} onChange={(a) => answer(q, a)} />
         ))}
@@ -128,9 +129,9 @@ function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; ans
     onChange({ optionIds: multi ? (picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]) : [id] })
 
   return (
-    <div className={compact ? 'rounded-2xl border border-stone-200 bg-white p-4' : ''}>
-      <h2 className={compact ? 'text-base font-bold text-navy-900' : 'text-xl font-bold text-navy-900'}>{q.question_text}</h2>
-      {q.help_text && <p className="mt-1 text-sm text-stone-500">{q.help_text}</p>}
+    <div className={compact ? 'rounded-2xl border border-line bg-surface p-4' : ''}>
+      <h2 className={compact ? 'text-base font-bold text-ink' : 'text-xl font-bold text-ink'}>{q.question_text}</h2>
+      {q.help_text && <p className="mt-1 text-sm text-muted">{q.help_text}</p>}
       <div className={`mt-3 ${chip ? 'flex flex-wrap gap-2' : 'space-y-2'}`}>
         {q.answer_type === 'STEPPER' ? (
           <NumberStepper value={answer?.numeric} onChange={(v) => onChange({ optionIds: [], numeric: v })} />
@@ -143,7 +144,7 @@ function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; ans
                 key={o.id}
                 type="button"
                 onClick={() => toggle(o.id)}
-                className={`relative min-h-11 rounded-full border px-4 text-sm font-semibold ${on ? 'border-court-500 bg-court-500 text-white' : 'border-stone-300 bg-white text-navy-800'}`}
+                className={`relative min-h-11 rounded-full border px-4 text-sm font-semibold ${on ? 'border-court-500 bg-court-500 text-white' : 'border-line-strong bg-surface text-ink'}`}
               >
                 {rank > 0 && <span className="absolute -left-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-navy-800 text-[11px] font-bold text-white">{rank}</span>}
                 {o.label}
@@ -153,9 +154,9 @@ function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; ans
                 key={o.id}
                 type="button"
                 onClick={() => toggle(o.id)}
-                className={`block w-full rounded-xl border px-4 py-3.5 text-left text-[15px] ${on ? 'border-court-500 bg-court-50 font-semibold text-navy-900' : 'border-stone-200 bg-white text-stone-700'}`}
+                className={`block w-full rounded-xl border px-4 py-3.5 text-left text-[15px] ${on ? 'border-court-500 bg-brand-soft font-semibold text-ink' : 'border-line bg-surface text-ink-2'}`}
               >
-                <span className="mr-2 text-xs text-stone-400">{i + 1}</span>{o.label}
+                <span className="mr-2 text-xs text-faint">{i + 1}</span>{o.label}
               </button>
             )
           })
@@ -169,10 +170,10 @@ function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; ans
 function NumberStepper({ value, onChange }: { value?: number; onChange: (v: number | undefined) => void }) {
   const v = value ?? 175
   return (
-    <div className="flex items-center justify-center gap-4 rounded-2xl border border-stone-200 bg-white py-4">
-      <button type="button" onClick={() => onChange(Math.max(120, v - 1))} className="size-12 rounded-xl bg-stone-100 text-2xl font-bold">−</button>
-      <input type="number" inputMode="numeric" value={value ?? ''} placeholder="175" onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} className="w-28 bg-transparent text-center text-4xl font-black text-navy-900 outline-none" />
-      <button type="button" onClick={() => onChange(Math.min(250, v + 1))} className="size-12 rounded-xl bg-court-100 text-2xl font-bold text-court-700">+</button>
+    <div className="flex items-center justify-center gap-4 rounded-2xl border border-line bg-surface py-4">
+      <button type="button" onClick={() => onChange(Math.max(120, v - 1))} className="size-12 rounded-xl bg-sunken text-2xl font-bold">−</button>
+      <input type="number" inputMode="numeric" value={value ?? ''} placeholder="175" onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} className="w-28 bg-transparent text-center text-4xl font-black text-ink outline-none" />
+      <button type="button" onClick={() => onChange(Math.min(250, v + 1))} className="size-12 rounded-xl bg-brand-soft text-2xl font-bold text-brand-ink">+</button>
     </div>
   )
 }
@@ -198,11 +199,11 @@ export function SelfRankPage() {
   return (
     <Screen>
       <TopBar title={mine ? mine.team_name : '내 실력 위치'} back={`/teams/${id}`} />
-      <div className="h-1.5 bg-stone-200"><div className="h-full w-full bg-court-500" /></div>
+      <div className="h-1.5 bg-line"><div className="h-full w-full bg-court-500" /></div>
       <Content>
-        <p className="text-xs font-semibold text-court-600">팀 가입 완료 · 마지막 한 문항</p>
-        <h2 className="text-xl font-bold text-navy-900">이 동호회에서 본인의 실력 위치는?</h2>
-        <p className="text-sm text-stone-500">절대 점수가 아니라 이 팀 안에서의 위치예요. 팀 배정 정확도에 가장 큰 영향을 주는 문항이라 팀마다 따로 여쭤봐요. 나중에 바꿀 수 있어요.</p>
+        <p className="text-xs font-semibold text-brand-ink">팀 가입 완료 · 마지막 한 문항</p>
+        <h2 className="text-xl font-bold text-ink">이 동호회에서 본인의 실력 위치는?</h2>
+        <p className="text-sm text-muted">점수가 아니라 이 팀 안에서의 위치예요. 팀 배정 정확도에 가장 큰 영향을 주는 문항이라 팀마다 따로 물어봐요. 나중에 바꿀 수 있어요.</p>
         <div className="space-y-2">
           {LEVELS.map((lv, i) => (
             <button
@@ -210,9 +211,9 @@ export function SelfRankPage() {
               type="button"
               disabled={m.isPending}
               onClick={() => { setPicked(lv); m.mutate(lv) }}
-              className={`block w-full rounded-xl border px-4 py-3.5 text-left text-[15px] ${current === lv ? 'border-court-500 bg-court-50 font-semibold text-navy-900' : 'border-stone-200 bg-white text-stone-700'}`}
+              className={`block w-full rounded-xl border px-4 py-3.5 text-left text-[15px] ${current === lv ? 'border-court-500 bg-brand-soft font-semibold text-ink' : 'border-line bg-surface text-ink-2'}`}
             >
-              <span className="mr-2 text-xs text-stone-400">{i + 1}</span>{SELF_RANK_LABEL[lv]}
+              <span className="mr-2 text-xs text-faint">{i + 1}</span>{SELF_RANK_LABEL[lv]}
             </button>
           ))}
         </div>

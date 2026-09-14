@@ -26,7 +26,7 @@ export function PastRecordPage() {
   const [msg, setMsg] = useState<string | null>(null)
 
   const create = useMutation({
-    mutationFn: () => eventsApi.create(id, { title: f.title || '지난 모임', event_date: f.event_date, start_time: f.start_time || undefined, end_time: f.end_time || undefined, venue: f.venue || undefined }),
+    mutationFn: () => eventsApi.create(id, { title: f.title || '지난 일정', event_date: f.event_date, start_time: f.start_time || undefined, end_time: f.end_time || undefined, venue: f.venue || undefined }),
     onSuccess: (ev) => { qc.invalidateQueries({ queryKey: ['events'] }); setEventId(ev.id) },
     onError: (e) => setMsg(errMsg(e, '일정을 만들지 못했어요.')),
   })
@@ -37,8 +37,8 @@ export function PastRecordPage() {
         <TopBar title="지난 기록 추가" back={`/teams/${id}/members`} />
         <form onSubmit={(e: FormEvent) => { e.preventDefault(); create.mutate() }} className="flex flex-1 flex-col">
           <Content>
-            <Alert kind="info">앱을 쓰기 전 모임을 기록으로 남겨요. 일정을 만든 뒤 참석 인원을 고르고 쿼터를 입력하면 실력 지표에 그대로 반영돼요.</Alert>
-            <Field label="제목 (선택)" value={f.title} onChange={set('title')} placeholder="지난 모임" />
+            <Alert kind="info">앱을 쓰기 전에 했던 경기를 남겨요. 일정을 만들고 참석한 사람을 고른 뒤 쿼터를 입력하면 실력에 그대로 반영돼요.</Alert>
+            <Field label="제목 (선택)" value={f.title} onChange={set('title')} placeholder="지난 일정" />
             <Field label="날짜" type="date" value={f.event_date} onChange={set('event_date')} max={localISODate()} required />
             <div className="grid grid-cols-2 gap-3">
               <Field label="시작" type="time" value={f.start_time} onChange={set('start_time')} />
@@ -88,17 +88,17 @@ function AttendeeStep({ teamId, eventId, onDone }: { teamId: number; eventId: nu
       <Content>
         {msg && <Alert>{msg}</Alert>}
         <section>
-          <SectionTitle>회원 · 참석 {members.filter((m) => attending.has(m.id)).length}명</SectionTitle>
+          <SectionTitle>팀원 · 참석 {members.filter((m) => attending.has(m.id)).length}명</SectionTitle>
           {players.isLoading || att.isLoading ? <Spinner /> : (
-            <Card className="divide-y divide-stone-100 p-0">
+            <Card className="divide-y divide-line p-0">
               {members.map((p) => {
                 const on = attending.has(p.id)
                 return (
                   <label key={p.id} className="flex min-h-12 items-center gap-3 px-4 py-2">
-                    <input type="checkbox" checked={on} onChange={() => toggle.mutate({ pid: p.id, on: !on })} className="size-5 accent-court-500" />
+                    <input type="checkbox" checked={on} onChange={() => toggle.mutate({ pid: p.id, on: !on })} className="size-5 accent-brand" />
                     <Avatar name={p.display_name} src={p.profile_image_url} size="sm" />
-                    <span className="flex-1 text-sm font-semibold text-navy-900">{p.display_name}</span>
-                    <span className="text-xs text-stone-400">{p.primary_position ?? ''}</span>
+                    <span className="flex-1 text-sm font-semibold text-ink">{p.display_name}</span>
+                    <span className="text-xs text-faint">{p.primary_position ?? ''}</span>
                   </label>
                 )
               })}
@@ -112,22 +112,22 @@ function AttendeeStep({ teamId, eventId, onDone }: { teamId: number; eventId: nu
             {guests.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {guests.map((g) => (
-                  <span key={g.player.id} className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-navy-800">
+                  <span key={g.player.id} className="inline-flex items-center gap-1 rounded-full bg-sunken px-2.5 py-1 text-xs font-semibold text-ink">
                     {g.player.display_name}
-                    <button className="text-stone-400" onClick={() => removeGuest.mutate(g.player.id)} aria-label="빼기">×</button>
+                    <button className="text-faint" onClick={() => removeGuest.mutate(g.player.id)} aria-label="빼기">×</button>
                   </span>
                 ))}
               </div>
             )}
             {similar ? (
               <div className="space-y-2">
-                <p className="text-sm text-navy-900">같은 이름의 게스트가 있어요. 같은 사람이면 골라 주세요. 기록이 이어져요.</p>
+                <p className="text-sm text-ink">같은 이름의 게스트가 있어요. 같은 사람이면 골라 주세요. 기록이 이어져요.</p>
                 {similar.map((p) => (
-                  <button key={p.id} onClick={() => addGuest.mutate({ existing_player_id: p.id })} className="flex w-full items-center gap-3 rounded-xl border border-stone-200 px-3 py-2 text-left active:bg-stone-50">
+                  <button key={p.id} onClick={() => addGuest.mutate({ existing_player_id: p.id })} className="flex w-full items-center gap-3 rounded-xl border border-line px-3 py-2 text-left active:bg-surface-2">
                     <Avatar name={p.display_name} src={p.profile_image_url} size="sm" />
-                    <span className="flex-1 text-sm font-semibold text-navy-900">{p.display_name}</span>
+                    <span className="flex-1 text-sm font-semibold text-ink">{p.display_name}</span>
                     <Badge>{p.playable_positions.join(' · ') || '포지션 없음'}</Badge>
-                    <span className="text-xs font-semibold text-court-600">같은 사람</span>
+                    <span className="text-xs font-semibold text-brand-ink">같은 사람</span>
                   </button>
                 ))}
                 <div className="flex gap-2">
@@ -137,14 +137,14 @@ function AttendeeStep({ teamId, eventId, onDone }: { teamId: number; eventId: nu
               </div>
             ) : (
               <div className="flex gap-2">
-                <input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="게스트 이름을 입력해 주세요" maxLength={50} className="min-h-11 flex-1 rounded-xl border border-stone-200 px-3.5 text-[15px] outline-none focus:ring-2 focus:ring-court-200" onKeyDown={(e) => { if (e.key === 'Enter' && guestName.trim()) { e.preventDefault(); addGuest.mutate({}) } }} />
-                <input value={guestHeight} onChange={(e) => setGuestHeight(e.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" placeholder="키(cm)" className="min-h-11 w-20 rounded-xl border border-stone-200 px-3 text-[15px] outline-none focus:ring-2 focus:ring-court-200" />
+                <input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="게스트 이름을 입력해 주세요" maxLength={50} className="min-h-11 flex-1 rounded-xl border border-line px-3.5 text-[15px] outline-none focus:ring-2 focus:ring-brand-line" onKeyDown={(e) => { if (e.key === 'Enter' && guestName.trim()) { e.preventDefault(); addGuest.mutate({}) } }} />
+                <input value={guestHeight} onChange={(e) => setGuestHeight(e.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" placeholder="키(cm)" className="min-h-11 w-20 rounded-xl border border-line px-3 text-[15px] outline-none focus:ring-2 focus:ring-brand-line" />
                 <Button variant="secondary" className="min-h-11" disabled={!guestName.trim()} loading={addGuest.isPending} onClick={() => addGuest.mutate({})}>추가</Button>
               </div>
             )}
           </Card>
         </section>
-        <p className="px-1 text-xs text-stone-500">쿼터를 기록하려면 참석 인원이 10명 이상이어야 해요. 배정 없이 기록하므로 쿼터마다 블랙·화이트 출전 5명을 직접 고르게 돼요.</p>
+        <p className="px-1 text-xs text-muted">쿼터를 기록하려면 참석 인원이 10명 이상이어야 해요. 배정 없이 기록하므로 쿼터마다 블랙·화이트 출전 5명을 직접 고르게 돼요.</p>
       </Content>
       <BottomAction>
         <Button full disabled={count < 10} onClick={onDone}>{count < 10 ? `쿼터 기록하기 (참석 10명 이상 필요 · 현재 ${count}명)` : `쿼터 기록하러 가기 (${count}명)`}</Button>

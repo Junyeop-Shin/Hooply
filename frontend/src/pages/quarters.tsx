@@ -131,17 +131,17 @@ export function QuartersPage() {
       }))
       return quartersApi.bulkSave(id, payload)
     },
-    onSuccess: (r) => {
+    onSuccess: () => {
       try { localStorage.removeItem(draftKey(id)) } catch { /* ignore */ }
       qc.invalidateQueries({ queryKey: ['events'] }); qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] })
-      setMsg(`저장했어요 (새로 ${r.created} · 수정 ${r.updated} · 삭제 ${r.deleted}). 실력 지표를 다시 계산했어요.`)
+      setMsg(`저장했어요. 실력에 반영했어요.`)
       goBack(`/events/${id}`)
     },
     onError: (e) => setMsg(errMsg(e, '저장하지 못했어요.')),
   })
 
-  if (ev.isLoading || att.isLoading || saved.isLoading || !quarters) return <Screen><TopBar title="쿼터 기록" back={`/events/${id}`} /><Spinner /></Screen>
-  if (!ev.data) return <Screen><TopBar title="쿼터 기록" back={`/events/${id}`} /><Content><Alert>일정을 불러오지 못했어요.</Alert></Content></Screen>
+  if (ev.isLoading || att.isLoading || saved.isLoading || !quarters) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Spinner /></Screen>
+  if (!ev.data) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Content><Alert>일정을 불러오지 못했어요.</Alert></Content></Screen>
   const total = quarters.reduce((a, q) => ({ black: a.black + q.black_score, white: a.white + q.white_score }), { black: 0, white: 0 })
   const invalid = quarters.filter((q) => q.black.length !== 5 || q.white.length !== 5)
   const update = (i: number, patch: Partial<Draft>) => setQuarters((qs) => qs!.map((q, j) => (j === i ? { ...q, ...patch } : q)))
@@ -173,9 +173,9 @@ export function QuartersPage() {
               <ScoreBoard black={s.black_total} white={s.white_total} sub={`${s.quarter_count}쿼터 · 블랙 ${s.black_wins}승 / 화이트 ${s.white_wins}승`} />
               {saved.data!.items.map((q) => (
                 <Card key={q.id} className="space-y-1">
-                  <div className="flex items-center justify-between"><p className="font-bold text-navy-900">{q.quarter_no}쿼터</p><p className="text-sm font-bold"><span className="text-navy-900">{q.black_score}</span> : <span className="text-stone-600">{q.white_score}</span></p></div>
-                  <p className="text-xs text-stone-600"><b>블랙</b> {q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.display_name).join(' · ')}</p>
-                  <p className="text-xs text-stone-600"><b>화이트</b> {q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.display_name).join(' · ')}</p>
+                  <div className="flex items-center justify-between"><p className="font-bold text-ink">{q.quarter_no}쿼터</p><p className="text-sm font-bold"><span className="text-ink">{q.black_score}</span> : <span className="text-muted">{q.white_score}</span></p></div>
+                  <p className="text-xs text-muted"><b>블랙</b> {q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.display_name).join(' · ')}</p>
+                  <p className="text-xs text-muted"><b>화이트</b> {q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.display_name).join(' · ')}</p>
                 </Card>
               ))}
               <PlayTime per={s.per_player} />
@@ -189,34 +189,34 @@ export function QuartersPage() {
   // ---- 매니저: 입력 ----
   return (
     <Screen>
-      <TopBar title="쿼터 기록" back={`/events/${id}`} right={<span className="mr-2 text-sm font-bold"><span className="text-navy-900">블랙 {total.black}</span> <span className="text-stone-400">:</span> <span className="text-stone-600">{total.white} 화이트</span></span>} />
+      <TopBar title="경기 기록" back={`/events/${id}`} right={<span className="mr-2 text-sm font-bold"><span className="text-ink">블랙 {total.black}</span> <span className="text-faint">:</span> <span className="text-muted">{total.white} 화이트</span></span>} />
       <Content>
-        <p className="px-1 text-xs text-stone-500">경기 후 한 번에 입력하세요. 저장 전 내용은 이 기기에 임시 보관돼요.</p>
+        <p className="px-1 text-xs text-muted">경기 후 한 번에 입력하세요. 저장 전 내용은 이 기기에 임시 보관돼요.</p>
         {restored && <Alert kind="info">저장하지 않은 입력을 되살렸어요.</Alert>}
-        {!hasAssignment && <Alert kind="warn">확정된 팀 배정이 없어 참석자 전원이 양쪽 후보로 보여요. 사이드별로 5명씩 골라 주세요.</Alert>}
+        {!hasAssignment && <Alert kind="warn">확정된 팀 배정이 없어 참석자 전원이 양쪽에 보여요. 팀마다 5명씩 골라 주세요.</Alert>}
         {msg && <Alert>{msg}</Alert>}
 
-        <SectionTitle action={<button className="text-xs font-semibold text-court-600" onClick={() => setEditRoster((v) => !v)}>{editRoster ? '닫기' : '명단 고치기'}</button>}>
+        <SectionTitle action={<button className="text-xs font-semibold text-brand-ink" onClick={() => setEditRoster((v) => !v)}>{editRoster ? '닫기' : '명단 고치기'}</button>}>
           오늘 출전 명단
         </SectionTitle>
         <Card className="space-y-2">
           {(['black', 'white'] as const).map((side) => (
             <div key={side} className="text-xs">
-              <p className="font-bold text-navy-900">{side === 'black' ? '블랙' : '화이트'} {pool[side].length}명</p>
+              <p className="font-bold text-ink">{side === 'black' ? '블랙' : '화이트'} {pool[side].length}명</p>
               <div className="mt-1 flex flex-wrap gap-1">
                 {pool[side].map((p) => (
-                  <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-stone-700">
-                    {p.display_name}{p.kind === 'GUEST' && <span className="text-[10px] text-stone-400">G</span>}
+                  <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-0.5 text-ink-2">
+                    {p.display_name}{p.kind === 'GUEST' && <span className="text-[10px] text-faint">G</span>}
                     {editRoster && removable(side, p.id) && (
-                      <button aria-label={`${p.display_name} 명단에서 빼기`} className="text-stone-400" onClick={() => dropFromSide(side, p.id)}>×</button>
+                      <button aria-label={`${p.display_name} 명단에서 빼기`} className="text-faint" onClick={() => dropFromSide(side, p.id)}>×</button>
                     )}
                   </span>
                 ))}
-                {pool[side].length === 0 && <span className="text-stone-400">아직 없어요</span>}
+                {pool[side].length === 0 && <span className="text-faint">아직 없어요</span>}
               </div>
             </div>
           ))}
-          {!editRoster && <p className="text-[11px] text-stone-500">늦게 온 사람이나 게스트가 있으면 명단을 고쳐서 넣으세요. 팀을 옮긴 사람은 새 팀에 넣으면 돼요.</p>}
+          {!editRoster && <p className="text-[11px] text-muted">늦게 온 사람이나 게스트가 있으면 명단을 고쳐서 넣으세요. 팀을 옮긴 사람은 새 팀에 넣으면 돼요.</p>}
         </Card>
         {editRoster && (
           <RosterEditor
@@ -228,19 +228,19 @@ export function QuartersPage() {
         )}
 
         {quarters.map((q, i) => (
-          <Card key={i} className="space-y-3">
+          <Card key={q.quarter_no} className="space-y-3">
             <div className="flex items-center justify-between">
-              <p className="font-bold text-navy-900">{q.quarter_no}쿼터
-                <label className="ml-2 text-xs font-normal text-stone-500">
+              <p className="font-bold text-ink">{q.quarter_no}쿼터
+                <label className="ml-2 text-xs font-normal text-muted">
                   <input
                     type="number" min={MIN_DURATION} max={MAX_DURATION} value={q.duration_min}
                     onChange={(ev2) => update(i, { duration_min: Math.max(MIN_DURATION, Math.min(MAX_DURATION, Number(ev2.target.value) || DEFAULT_DURATION)) })}
                     aria-label={`${q.quarter_no}쿼터 길이(분)`}
-                    className="w-10 rounded border border-stone-200 px-1 text-center"
+                    className="w-10 rounded border border-line px-1 text-center"
                   />분
                 </label>
               </p>
-              {quarters.length > 1 && <button className="text-xs text-rose-500" onClick={() => removeQuarter(i)}>삭제</button>}
+              {quarters.length > 1 && <button className="text-xs text-danger-ink" onClick={() => removeQuarter(i)}>삭제</button>}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Stepper label="블랙" dark value={q.black_score} onChange={(v) => update(i, { black_score: v })} />
@@ -251,15 +251,15 @@ export function QuartersPage() {
                 const list = q[side]
                 const ok = list.length === 5
                 return (
-                  <div key={side} className={`rounded-xl border p-2 ${side === 'black' ? 'border-team-black bg-team-black text-white' : 'border-stone-300 bg-team-white text-navy-900'}`}>
+                  <div key={side} className={`rounded-xl border p-2 ${side === 'black' ? 'border-team-black bg-team-black text-team-black-ink [color-scheme:dark]' : 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]'}`}>
                     <p className={`mb-1 text-[11px] font-bold ${ok ? '' : 'text-rose-400'}`}>{side === 'black' ? '블랙' : '화이트'} 출전 {list.length}/5</p>
                     <div className="space-y-0.5">
                       {pool[side].map((p) => {
                         const on = list.includes(p.id)
                         const blocked = (side === 'black' ? q.white : q.black).includes(p.id)
                         return (
-                          <label key={p.id} className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm ${on ? (side === 'black' ? 'bg-court-500' : 'bg-court-100') : ''} ${blocked ? 'opacity-30' : ''}`}>
-                            <input type="checkbox" checked={on} disabled={blocked} onChange={() => toggle(i, side, p.id)} className="accent-court-500" />
+                          <label key={p.id} className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm ${on ? (side === 'black' ? 'bg-court-500 text-white' : 'bg-court-100') : ''} ${blocked ? 'opacity-30' : ''}`}>
+                            <input type="checkbox" checked={on} disabled={blocked} onChange={() => toggle(i, side, p.id)} className="accent-brand" />
                             <span className="truncate">{p.display_name}</span>
                             {p.kind === 'GUEST' && <span className="text-[10px] opacity-60">G</span>}
                           </label>
@@ -272,14 +272,14 @@ export function QuartersPage() {
             </div>
           </Card>
         ))}
-        <Button variant="ghost" full onClick={addQuarter}>+ 쿼터 추가 (직전 라인업 복사)</Button>
+        <Button variant="ghost" full onClick={addQuarter}>+ 쿼터 추가 (앞 쿼터 명단 그대로)</Button>
         {invalid.length > 0 && <Alert kind="warn">{invalid.map((q) => `${q.quarter_no}쿼터`).join(', ')}의 출전 인원이 5명이 아니에요.</Alert>}
         {saved.data && saved.data.summary.quarter_count > 0 && <PlayTime per={saved.data.summary.per_player} />}
-        <p className="px-1 text-[11px] text-stone-400">명단에 넣은 사람: {[...extra.black, ...extra.white].length ? uniq([...extra.black, ...extra.white]).map(nameOf).join(' · ') : '없음'}</p>
+        <p className="px-1 text-[11px] text-faint">명단에 넣은 사람: {[...extra.black, ...extra.white].length ? uniq([...extra.black, ...extra.white]).map(nameOf).join(' · ') : '없음'}</p>
       </Content>
       <BottomAction>
         <Button full loading={save.isPending} disabled={invalid.length > 0 || quarters.length === 0} onClick={() => save.mutate()}>
-          {saved.data && saved.data.summary.quarter_count > 0 ? '기록 수정 저장' : '경기 후 일괄 저장'} ({quarters.length}쿼터)
+          {saved.data && saved.data.summary.quarter_count > 0 ? '기록 수정 저장' : '경기 후 한 번에 저장'} ({quarters.length}쿼터)
         </Button>
       </BottomAction>
     </Screen>
@@ -324,22 +324,22 @@ function RosterEditor({
       <div>
         <input
           value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름으로 찾기" aria-label="명단에 넣을 사람 찾기"
-          className="w-full rounded-xl border border-stone-200 px-3 py-2 text-sm"
+          className="w-full rounded-xl border border-line px-3 py-2 text-sm"
         />
         <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
           {rows.map((p) => (
             <div key={p.id} className="flex items-center gap-2 text-sm">
-              <span className="min-w-0 flex-1 truncate text-navy-900">
+              <span className="min-w-0 flex-1 truncate text-ink">
                 {p.display_name}
                 {p.kind === 'GUEST' && <Badge>게스트</Badge>}
-                {!attend.has(p.id) && <span className="ml-1 text-[10px] text-stone-400">참석 응답 없음</span>}
+                {!attend.has(p.id) && <span className="ml-1 text-[10px] text-faint">참석 응답 없음</span>}
               </span>
               {(['black', 'white'] as const).map((side) => {
                 const already = side === 'black' ? inBlack.has(p.id) : inWhite.has(p.id)
                 return (
                   <button
                     key={side} disabled={already} onClick={() => onAdd(side, p.id)}
-                    className={`min-h-8 rounded-lg px-2 text-xs font-semibold ${already ? 'bg-stone-100 text-stone-300' : side === 'black' ? 'bg-navy-900 text-white' : 'border border-stone-300 text-navy-900'}`}
+                    className={`min-h-8 rounded-lg px-2 text-xs font-semibold ${already ? 'bg-sunken text-faint' : side === 'black' ? 'bg-team-black text-team-black-ink' : 'border border-line-strong text-ink'}`}
                   >
                     {already ? '있음' : side === 'black' ? '＋블랙' : '＋화이트'}
                   </button>
@@ -347,26 +347,26 @@ function RosterEditor({
               })}
             </div>
           ))}
-          {rows.length === 0 && <p className="text-xs text-stone-400">넣을 수 있는 사람이 없어요.</p>}
+          {rows.length === 0 && <p className="text-xs text-faint">넣을 수 있는 사람이 없어요.</p>}
         </div>
       </div>
-      <div className="border-t border-stone-100 pt-3">
-        <p className="mb-1 text-xs font-semibold text-navy-900">처음 온 게스트 추가</p>
+      <div className="border-t border-line pt-3">
+        <p className="mb-1 text-xs font-semibold text-ink">처음 온 게스트 추가</p>
         <div className="flex items-center gap-2">
           <input
             value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="이름" aria-label="새 게스트 이름"
-            className="min-w-0 flex-1 rounded-xl border border-stone-200 px-3 py-2 text-sm"
+            className="min-w-0 flex-1 rounded-xl border border-line px-3 py-2 text-sm"
           />
           {(['black', 'white'] as const).map((side) => (
             <button
               key={side} disabled={!guestName.trim() || addGuest.isPending} onClick={() => addGuest.mutate(side)}
-              className={`min-h-9 rounded-lg px-2 text-xs font-semibold disabled:opacity-40 ${side === 'black' ? 'bg-navy-900 text-white' : 'border border-stone-300 text-navy-900'}`}
+              className={`min-h-9 rounded-lg px-2 text-xs font-semibold disabled:opacity-40 ${side === 'black' ? 'bg-navy-900 text-white' : 'border border-line-strong text-ink'}`}
             >
               {side === 'black' ? '＋블랙' : '＋화이트'}
             </button>
           ))}
         </div>
-        <p className="mt-1 text-[11px] text-stone-400">이 회차 참석자로도 함께 등록돼요. 실력 등급은 나중에 참석자 화면에서 지정할 수 있어요.</p>
+        <p className="mt-1 text-[11px] text-faint">이 일정 참석자로도 함께 등록돼요. 실력 등급은 나중에 참석자 화면에서 지정할 수 있어요.</p>
       </div>
     </Card>
   )
@@ -374,17 +374,17 @@ function RosterEditor({
 
 function Stepper({ label, dark, value, onChange }: { label: string; dark?: boolean; value: number; onChange: (v: number) => void }) {
   return (
-    <div className={`rounded-xl p-2 ${dark ? 'bg-team-black text-white' : 'border border-stone-200 bg-team-white text-navy-900'}`}>
+    <div className={`rounded-xl p-2 ${dark ? 'bg-team-black text-team-black-ink' : 'border border-line-strong bg-team-white text-team-white-ink'}`}>
       <p className="text-[11px] font-semibold opacity-70">{label}</p>
       <div className="flex items-center justify-between">
-        <button onClick={() => onChange(Math.max(0, value - 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-white/10' : 'bg-stone-100'}`}>−</button>
+        <button onClick={() => onChange(Math.max(0, value - 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-white/10' : 'bg-stone-200'}`}>−</button>
         <input
           type="text" inputMode="numeric" pattern="[0-9]*" value={value} aria-label={`${label} 득점`}
           onChange={(e) => { const d = e.target.value.replace(/\D/g, '').slice(-2); onChange(d === '' ? 0 : Number(d)) }}  // 두 자리가 찬 뒤 더 치면 앞자리가 밀린다 (13 → 4 입력 → 34)
           onFocus={(e) => e.target.select()}
           className="w-14 bg-transparent text-center text-2xl font-black tabular-nums outline-none"
         />
-        <button onClick={() => onChange(Math.min(99, value + 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-court-500' : 'bg-court-100 text-court-700'}`}>+</button>
+        <button onClick={() => onChange(Math.min(99, value + 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-court-500 text-white' : 'bg-court-100 text-court-700'}`}>+</button>
       </div>
     </div>
   )
@@ -392,11 +392,11 @@ function Stepper({ label, dark, value, onChange }: { label: string; dark?: boole
 
 export function ScoreBoard({ black, white, sub }: { black: number; white: number; sub?: string }) {
   return (
-    <div className="flex items-center justify-center gap-4 rounded-2xl bg-navy-800 px-4 py-4 text-white">
-      <div className="text-center"><p className="text-[11px] text-stone-300">블랙</p><p className="text-3xl font-black">{black}</p></div>
-      <span className="text-xl text-navy-300">:</span>
-      <div className="text-center"><p className="text-[11px] text-stone-300">화이트</p><p className="text-3xl font-black">{white}</p></div>
-      {sub && <p className="ml-2 text-xs text-navy-200">{sub}</p>}
+    <div className="flex items-center justify-center gap-4 rounded-2xl bg-bar px-4 py-4 text-bar-ink">
+      <div className="text-center"><p className="text-[11px] text-bar-sub">블랙</p><p className="text-3xl font-black">{black}</p></div>
+      <span className="text-xl text-bar-sub">:</span>
+      <div className="text-center"><p className="text-[11px] text-bar-sub">화이트</p><p className="text-3xl font-black">{white}</p></div>
+      {sub && <p className="ml-2 text-xs text-bar-sub">{sub}</p>}
     </div>
   )
 }
@@ -405,12 +405,12 @@ function PlayTime({ per }: { per: { player_id: number; display_name: string; sid
   if (!per.length) return null
   return (
     <Card>
-      <p className="mb-1 text-sm font-bold text-navy-900">출전 쿼터 수</p>
+      <p className="mb-1 text-sm font-bold text-ink">출전 쿼터 수</p>
       <div className="grid grid-cols-2 gap-x-3 text-xs">
         {(['BLACK', 'WHITE'] as const).map((side) => (
           <div key={side}>
-            <p className="mb-0.5 font-semibold text-stone-500">{side === 'BLACK' ? '블랙' : '화이트'}</p>
-            {per.filter((p) => p.side === side).map((p) => <p key={p.player_id} className="flex justify-between text-stone-700"><span>{p.display_name}</span><Badge>{p.quarters}</Badge></p>)}
+            <p className="mb-0.5 font-semibold text-muted">{side === 'BLACK' ? '블랙' : '화이트'}</p>
+            {per.filter((p) => p.side === side).map((p) => <p key={p.player_id} className="flex justify-between text-ink-2"><span>{p.display_name}</span><Badge>{p.quarters}</Badge></p>)}
           </div>
         ))}
       </div>

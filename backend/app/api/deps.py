@@ -102,7 +102,7 @@ def get_team_or_404(db: DB, team_id: Annotated[int, Path()]) -> Team:
     """
     team = db.get(Team, team_id)
     if team is None:
-        raise errors.NotFound("팀을 찾을 수 없습니다.")
+        raise errors.NotFound("팀을 찾을 수 없어요.")
     return team
 
 
@@ -146,7 +146,7 @@ def get_event_or_404(db: DB, event_id: Annotated[int, Path()]) -> Event:
     """
     event = db.get(Event, event_id)
     if event is None:
-        raise errors.NotFound("일정을 찾을 수 없습니다.")
+        raise errors.NotFound("일정을 찾을 수 없어요.")
     return event
 
 

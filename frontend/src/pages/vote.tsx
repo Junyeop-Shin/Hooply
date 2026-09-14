@@ -12,7 +12,7 @@ import { peerApi } from '../api/peer'
 import { REASON_TAGS, reasonLabel, type ReasonTag, type VoteCandidate, type VoteIn } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
-import { fmtEvent } from './events'
+import { fmtEvent } from '../lib/format'
 
 const MAX_PER_SIDE = 2
 
@@ -64,7 +64,7 @@ export function VotePage() {
         { key: 'opp', title: '상대 팀에서', items: data.candidates.filter((c) => c.is_same_team === false) },
         ...(data.candidates.some((c) => c.is_same_team === null) ? [{ key: 'etc', title: '팀 미배정', items: data.candidates.filter((c) => c.is_same_team === null) }] : []),
       ]
-    : [{ key: 'all', title: '그날 참석자', items: data.candidates }]
+    : [{ key: 'all', title: '그날 참석한 사람', items: data.candidates }]
   const limitOf = (key: string) => (key === 'all' || key === 'etc' ? MAX_PER_SIDE * 2 : MAX_PER_SIDE)
   const countIn = (g: { items: VoteCandidate[] }) => g.items.filter((c) => picked.includes(c.player.id)).length
 
@@ -75,12 +75,12 @@ export function VotePage() {
         <TopBar title="경기 후 투표" back={back} />
         <Content>
           <Card className="text-center">
-            <p className="font-bold text-navy-900">응답을 남겼어요</p>
-            <p className="text-xs text-stone-500">투표는 회차당 한 번만 할 수 있어요.</p>
+            <p className="font-bold text-ink">투표를 마쳤어요</p>
+            <p className="text-xs text-muted">투표는 일정마다 한 번만 할 수 있어요.</p>
           </Card>
           <section>
-            <p className="mb-2 px-1 text-sm font-bold tracking-wide text-stone-500">다음에 같이 뛰고 싶은 사람</p>
-            {data.my_votes.length === 0 ? <p className="px-1 text-sm text-stone-400">선택 안 함</p> : (
+            <p className="mb-2 px-1 text-sm font-bold tracking-wide text-muted">다음에 같이 뛰고 싶은 사람</p>
+            {data.my_votes.length === 0 ? <p className="px-1 text-sm text-faint">선택 안 함</p> : (
               <div className="space-y-2">
                 {data.my_votes.map((v) => {
                   const c = byId.get(v.target_player_id)
@@ -88,8 +88,8 @@ export function VotePage() {
                     <Card key={v.target_player_id} className="flex items-center gap-3 py-3">
                       <Avatar name={c?.player.display_name ?? '?'} src={c?.player.profile_image_url} />
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-navy-900">{c?.player.display_name ?? '참가자'}</p>
-                        {v.reason_tag && <p className="text-xs text-court-600">{reasonLabel(v.reason_tag, c?.is_same_team ?? null)}</p>}
+                        <p className="font-semibold text-ink">{c?.player.display_name ?? '참가자'}</p>
+                        {v.reason_tag && <p className="text-xs text-brand-ink">{reasonLabel(v.reason_tag, c?.is_same_team ?? null)}</p>}
                       </div>
                       {c && <SquadBadge c={c} />}
                     </Card>
@@ -125,25 +125,25 @@ export function VotePage() {
       <TopBar title="경기 후 투표" back={back} />
       <Content>
         <div className="px-1">
-          {ev.data && <p className="text-xs font-semibold text-stone-500">{fmtEvent(ev.data)}</p>}
-          <p className="mt-2 text-sm leading-relaxed text-navy-900">같이 농구를 한 사람 중 다음에 같은 팀으로 뛰고 싶은 사람을 골라주세요. {hasTeams ? '우리 팀 최대 2명, 상대 팀 최대 2명까지 고를 수 있어요.' : `최대 ${MAX_PER_SIDE * 2}명까지 고를 수 있어요.`}</p>
+          {ev.data && <p className="text-xs font-semibold text-muted">{fmtEvent(ev.data)}</p>}
+          <p className="mt-2 text-sm leading-relaxed text-ink">같이 농구를 한 사람 중 다음에 같은 팀으로 뛰고 싶은 사람을 골라 주세요. {hasTeams ? '우리 팀 최대 2명, 상대 팀 최대 2명까지 고를 수 있어요.' : `최대 ${MAX_PER_SIDE * 2}명까지 고를 수 있어요.`}</p>
         </div>
         {msg && <Alert>{msg}</Alert>}
 
         {groups.map((g) => (
           <section key={g.key}>
             <div className="mb-2 flex items-center justify-between px-1">
-              <h3 className="text-sm font-bold tracking-wide text-stone-500">{g.title}</h3>
+              <h3 className="text-sm font-bold tracking-wide text-muted">{g.title}</h3>
               <span className="flex items-center gap-2">
-                <span className={`text-xs font-semibold ${countIn(g) ? 'text-court-600' : 'text-stone-400'}`}>{countIn(g)}/{limitOf(g.key)} 선택됨</span>
-                {!collapsed[g.key] && countIn(g) > 0 && <button className="text-xs font-semibold text-navy-600" onClick={() => setCollapsed((c) => ({ ...c, [g.key]: true }))}>접기</button>}
+                <span className={`text-xs font-semibold ${countIn(g) ? 'text-brand-ink' : 'text-faint'}`}>{countIn(g)}/{limitOf(g.key)} 선택됨</span>
+                {!collapsed[g.key] && countIn(g) > 0 && <button className="text-xs font-semibold text-ink-2" onClick={() => setCollapsed((c) => ({ ...c, [g.key]: true }))}>접기</button>}
               </span>
             </div>
             {collapsed[g.key] ? (
               <Card className="flex items-center gap-3 py-3">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                   {g.items.filter((c) => picked.includes(c.player.id)).map((c) => (
-                    <span key={c.player.id} className="inline-flex items-center gap-1 rounded-full bg-court-50 px-2.5 py-1 text-xs font-semibold text-court-700">
+                    <span key={c.player.id} className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-semibold text-brand-ink">
                       {c.player.display_name}{reasons[c.player.id] && <span className="font-normal text-court-500">· {reasonLabel(reasons[c.player.id]!, c.is_same_team)}</span>}
                     </span>
                   ))}
@@ -163,7 +163,7 @@ export function VotePage() {
                           const sel = reasons[c.player.id] === r.tag
                           return (
                             <button key={r.tag} onClick={() => pickReason(g, c.player.id, sel ? null : r.tag)}
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sel ? 'border-court-500 bg-court-500 text-white' : 'border-stone-200 bg-white text-stone-600'}`}>
+                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sel ? 'border-court-500 bg-court-500 text-white' : 'border-line bg-surface text-muted'}`}>
                               {reasonLabel(r.tag, c.is_same_team)}
                             </button>
                           )
@@ -191,7 +191,7 @@ function SquadBadge({ c }: { c: VoteCandidate }) {
   if (c.squad_no === null) return c.player.kind === 'GUEST' ? <Badge>게스트</Badge> : null
   const black = c.squad_no === 1
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${black ? 'bg-navy-900 text-white' : 'border border-stone-300 bg-white text-navy-900'}`}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${black ? 'bg-team-black text-team-black-ink' : 'border border-line-strong bg-surface text-ink'}`}>
       {c.squad_name ?? (black ? '블랙' : '화이트')}
     </span>
   )
@@ -200,14 +200,14 @@ function SquadBadge({ c }: { c: VoteCandidate }) {
 function CandidateRow({ c, on, disabled, onClick }: { c: VoteCandidate; on: boolean; disabled: boolean; onClick: () => void }) {
   const p = c.player
   return (
-    <button onClick={onClick} disabled={disabled} className={`flex min-h-14 w-full items-center gap-3 rounded-2xl border-2 bg-white px-3 py-2 text-left transition disabled:opacity-40 ${on ? 'border-court-500 bg-court-50' : 'border-stone-200'}`}>
+    <button onClick={onClick} disabled={disabled} className={`flex min-h-14 w-full items-center gap-3 rounded-2xl border-2 bg-surface px-3 py-2 text-left transition disabled:opacity-40 ${on ? 'border-court-500 bg-brand-soft' : 'border-line'}`}>
       <Avatar name={p.display_name} src={p.profile_image_url} />
       <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold text-navy-900">{p.display_name}{p.kind === 'GUEST' && <span className="ml-1.5 text-[11px] text-stone-500">게스트</span>}</p>
-        <p className="truncate text-xs text-stone-500">{p.primary_position ?? p.playable_positions[0] ?? '포지션 미입력'}</p>
+        <p className="truncate font-semibold text-ink">{p.display_name}{p.kind === 'GUEST' && <span className="ml-1.5 text-[11px] text-muted">게스트</span>}</p>
+        <p className="truncate text-xs text-muted">{p.primary_position ?? p.playable_positions[0] ?? '포지션 미입력'}</p>
       </div>
       <SquadBadge c={c} />
-      <span className={`flex size-6 items-center justify-center rounded-full text-xs font-bold ${on ? 'bg-court-500 text-white' : 'border border-stone-300 text-transparent'}`}>✓</span>
+      <span className={`flex size-6 items-center justify-center rounded-full text-xs font-bold ${on ? 'bg-court-500 text-white' : 'border border-line-strong text-transparent'}`}>✓</span>
     </button>
   )
 }

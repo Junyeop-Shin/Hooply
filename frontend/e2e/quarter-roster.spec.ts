@@ -9,7 +9,7 @@ test('쿼터 기록: 명단에 없던 사람을 반대 팀에 넣을 수 있다'
   await login(page)
   await openEvent(page, 1)
   await page.getByRole('button', { name: /경기 기록 \d+쿼터/ }).click()
-  await expect(page.getByRole('heading', { name: '쿼터 기록' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '경기 기록' })).toBeVisible()
 
   // 쿼터 길이는 1~10분만 받는다
   const dur = page.getByLabel('1쿼터 길이(분)')

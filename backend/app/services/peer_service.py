@@ -476,7 +476,7 @@ def leaderboard(db: Session, team_id: int, *, metric: str, period: str | None, i
             else:
                 raise ValueError(period)
         except ValueError:
-            raise errors.ValidationError("period 는 2026-Q3 또는 2026-09 형식이에요.") from None
+            raise errors.ValidationError("기간은 2026-Q3 또는 2026-09 형태로 적어 주세요.") from None
     ev_stmt = select(Event).where(Event.team_id == team_id, Event.status != EventStatus.CANCELED, Event.event_date <= today)
     if lo:
         ev_stmt = ev_stmt.where(Event.event_date >= lo, Event.event_date < hi)

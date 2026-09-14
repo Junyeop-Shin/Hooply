@@ -475,7 +475,7 @@ def explain_manager(sc: Scored, strategy: Strategy, prep: Prepared) -> str:
     if sc.hard_ok:
         lines.append("양 팀 모두 1번(볼 운반)·5번(골밑) 가능 인원을 확보했어요.")
     else:
-        lines.append("⚠ 참석 인원으로는 한쪽 팀에 1번 또는 5번 가능 인원을 채울 수 없어 완화했어요.")
+        lines.append("⚠ 오늘 인원으로는 한쪽 팀에 볼 운반이나 골밑을 맡을 사람이 없어요.")
     if prep.pin_list:
         lines.append(f"사전 배치 {len(prep.pin_list)}명은 지정한 팀에 고정했어요.")
     unknown = [r for s in sc.squads for r in s if r.is_guest and not r.known]
@@ -555,7 +555,7 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> Assi
         pool = [s for s in scored if s.hard_ok]
     else:
         pool = scored
-        prep.warnings.append("1번·5번 하드 제약을 만족하는 편성이 없어 완화했어요")
+        prep.warnings.append("양 팀에 볼 운반·골밑 자원을 다 넣을 수 없어 이 조건은 접었어요")
 
     _drop_unadopted_runs(db, event)  # 검증을 통과한 뒤에 정리한다 — 실패한 실행 때문에 지난 안을 잃지 않도록
     run_row = AssignmentRun(
@@ -637,7 +637,7 @@ def _load_run(db: Session, run_id: int) -> AssignmentRun:
         options=[selectinload(AssignmentRun.constraints), selectinload(AssignmentRun.candidates).selectinload(AssignmentCandidate.squads).selectinload(AssignmentSquad.slots)],
     )
     if r is None:
-        raise errors.NotFound("배정 실행을 찾을 수 없습니다.")
+        raise errors.NotFound("팀 배정 기록을 찾을 수 없어요.")
     return r
 
 
@@ -717,7 +717,7 @@ def last_constraints(db: Session, event: Event) -> ConstraintSet:
         .order_by(Event.event_date.desc(), AssignmentRun.created_at.desc())
     )
     if prev is None:
-        raise errors.NotFound("직전 회차의 배정 기록이 없습니다.")
+        raise errors.NotFound("지난 일정의 팀 배정 기록이 없어요.")
     return constraints_of(prev)
 
 
@@ -733,7 +733,7 @@ def _load_candidate(db: Session, candidate_id: int) -> AssignmentCandidate:
         populate_existing=True,
     )
     if c is None:
-        raise errors.NotFound("후보안을 찾을 수 없습니다.")
+        raise errors.NotFound("배정안을 찾을 수 없어요.")
     return c
 
 
@@ -782,7 +782,7 @@ def exchange(db: Session, cand: AssignmentCandidate, exchanges: list[Exchange]) 
                 side |= lock_of.get(pid, set())
         for pid in a | b:
             if pid not in slot_of:
-                raise errors.InvalidSwap("이 후보안에 없는 선수예요.")
+                raise errors.InvalidSwap("이 배정안에 없는 사람이에요.")
             if pid in pinned:
                 raise errors.InvalidSwap("사전 배치된 사람은 옮길 수 없어요.")
         if a & b:
@@ -795,7 +795,7 @@ def exchange(db: Session, cand: AssignmentCandidate, exchanges: list[Exchange]) 
             raise errors.InvalidSwap("같은 팀 안에서는 교체할 필요가 없어요.")
         squad_ids = [sq.id for sq in sorted(cand.squads, key=lambda x: x.squad_no)]
         if len(squad_ids) != 2:
-            raise errors.InvalidSwap("2팀 편성에서만 옮길 수 있어요.")
+            raise errors.InvalidSwap("두 팀으로 나눈 배정에서만 옮길 수 있어요.")
         src_a = next(iter(sq_a)) if sq_a else next(i for i in squad_ids if i not in sq_b)
         src_b = next(iter(sq_b)) if sq_b else next(i for i in squad_ids if i != src_a)
         # 결과 편성 계산 후 검증
@@ -837,7 +837,7 @@ def move(db: Session, cand: AssignmentCandidate, moves: list[MovePlayer]) -> Ass
         target = squads.get(mv.to_squad_no)
         slot = slot_of.get(mv.player_id)
         if target is None or slot is None:
-            raise errors.InvalidSwap("없는 팀 번호이거나 이 후보안에 없는 선수예요.")
+            raise errors.InvalidSwap("없는 팀이거나 이 배정안에 없는 사람이에요.")
         if slot.squad_id == target.id:
             raise errors.InvalidSwap("이미 그 팀에 있어요.")
         exs.append(Exchange(a_player_ids=[mv.player_id], b_player_ids=[]))
@@ -855,10 +855,10 @@ def _reload_slots(db: Session, cand: AssignmentCandidate) -> None:
 def reset_manual(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
     """수동 수정을 모두 되돌려 알고리즘이 낸 원래 편성으로 복원한다."""
     if cand.is_adopted:
-        raise errors.AlreadyAdopted("확정된 후보안은 수정할 수 없어요.")
+        raise errors.AlreadyAdopted("확정한 배정안은 고칠 수 없어요.")
     original = cand.metrics.get("original_squads") or {}
     if not original:
-        raise errors.ValidationError("원본 편성 정보가 없어 초기화할 수 없어요.")
+        raise errors.ValidationError("처음 배정 결과가 남아 있지 않아 되돌릴 수 없어요.")
     squads = {sq.squad_no: sq for sq in cand.squads}
     slot_of: dict[int, AssignmentSlot] = {s.player_id: s for sq in cand.squads for s in sq.slots}
     for no, ids in original.items():

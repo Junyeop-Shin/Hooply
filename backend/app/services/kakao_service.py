@@ -48,7 +48,7 @@ class KakaoProfile:
 
 def _configured() -> None:
     if not get_settings().kakao_client_id:
-        raise errors.KakaoAuthFailed("카카오 로그인이 아직 설정되지 않았어요 (KAKAO_CLIENT_ID).")
+        raise errors.KakaoAuthFailed("카카오 로그인을 아직 쓸 수 없어요.")
 
 
 def resolve_redirect_uri(requested: str | None) -> str:
@@ -58,10 +58,10 @@ def resolve_redirect_uri(requested: str | None) -> str:
     allowed.discard("")
     if requested is None:
         if not s.kakao_redirect_uri:
-            raise errors.KakaoAuthFailed("KAKAO_REDIRECT_URI 가 설정되지 않았어요.")
+            raise errors.KakaoAuthFailed("카카오 로그인을 아직 쓸 수 없어요.")
         return s.kakao_redirect_uri
     if requested not in allowed:
-        raise errors.KakaoAuthFailed("허용되지 않은 redirect_uri 예요.")
+        raise errors.KakaoAuthFailed("허용되지 않은 주소예요.")
     return requested
 
 
@@ -77,9 +77,9 @@ def verify_state(state: str) -> None:
     try:
         payload = jwt.decode(state, s.jwt_secret_key, algorithms=[s.jwt_algorithm])
     except JWTError:
-        raise errors.KakaoAuthFailed("state 가 올바르지 않거나 만료됐어요. 다시 시도해 주세요.") from None
+        raise errors.KakaoAuthFailed("로그인 요청이 만료됐어요. 다시 시도해 주세요.") from None
     if payload.get("type") != "kakao_state":
-        raise errors.KakaoAuthFailed("state 가 올바르지 않아요.")
+        raise errors.KakaoAuthFailed("로그인 요청이 올바르지 않아요. 다시 시도해 주세요.")
 
 
 def login_url(redirect_uri: str | None) -> tuple[str, str]:
@@ -100,12 +100,12 @@ def fetch_profile(code: str, redirect_uri: str) -> KakaoProfile:
         with httpx.Client(timeout=10) as client:
             tok = client.post(TOKEN_URL, data=data, headers={"Content-Type": "application/x-www-form-urlencoded;charset=utf-8"})
             if tok.status_code != 200:
-                raise errors.KakaoAuthFailed(f"카카오 토큰 교환 실패 ({tok.json().get('error_description', tok.status_code)})")
+                raise errors.KakaoAuthFailed("카카오 로그인에 실패했어요. 다시 시도해 주세요.")
             me = client.get(ME_URL, headers={"Authorization": f"Bearer {tok.json()['access_token']}"})
             if me.status_code != 200:
-                raise errors.KakaoAuthFailed("카카오 프로필 조회에 실패했어요.")
+                raise errors.KakaoAuthFailed("카카오에서 프로필을 받지 못했어요.")
     except httpx.HTTPError:
-        raise errors.KakaoAuthFailed("카카오 서버에 연결하지 못했어요.") from None
+        raise errors.KakaoAuthFailed("카카오에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.") from None
     body = me.json()
     account = body.get("kakao_account") or {}
     profile = account.get("profile") or {}

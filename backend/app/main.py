@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
@@ -141,6 +142,8 @@ def create_app() -> FastAPI:
         docs_url="/docs" if settings.docs_enabled else None,
         openapi_url="/openapi.json" if settings.docs_enabled else None,
     )
+    # 팀원 목록·참석 현황 같은 JSON 은 수십 KB 가 되기도 한다. 체육관 통신이 느린 상황을 고려해 압축해 보낸다
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

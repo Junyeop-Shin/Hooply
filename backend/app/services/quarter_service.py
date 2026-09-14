@@ -48,13 +48,13 @@ def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn]) -> dic
     players = {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(ids), Player.team_id == event.team_id, Player.status == PlayerStatus.ACTIVE)).all()}
     missing = [pid for pid in ids if pid not in players]
     if missing:
-        raise errors.PlayerNotInTeam(details=[ErrorDetail(field="lineups", reason=f"이 팀의 참가자가 아닌 id: {missing}")])
+        raise errors.PlayerNotInTeam(details=[ErrorDetail(field="lineups", reason=f"이 팀에 없는 사람이 {len(missing)}명 있어요.")])
     # 회원 계정에 병합된 게스트 행은 쓸 수 없다 — 같은 사람이 두 번 세어진다. 회원 행(id)을 대신 넣어야 한다
     merged = [pid for pid, p in players.items() if p.merged_into_player_id is not None]
     if merged:
         raise errors.PlayerNotInTeam(
-            "회원 계정에 병합된 게스트예요. 회원 이름으로 넣어 주세요.",
-            details=[ErrorDetail(field="lineups", reason=f"병합된 게스트 id: {merged} → 회원 id: {[players[m].merged_into_player_id for m in merged]}")],
+            "기록을 이미 팀원에게 이어 준 게스트예요. 팀원 이름으로 넣어 주세요.",
+            details=[ErrorDetail(field="lineups", reason=f"이어 준 게스트 {len(merged)}명이 들어 있어요.")],
         )
     return players
 
@@ -109,7 +109,7 @@ def _guard(event: Event) -> None:
 def add_quarter(db: Session, event: Event, by: User, body: QuarterIn) -> Quarter:
     _guard(event)
     if db.scalar(select(Quarter.id).where(Quarter.event_id == event.id, Quarter.quarter_no == body.quarter_no)):
-        raise errors.QuarterExists(f"{body.quarter_no}쿼터는 이미 기록되어 있어요. 수정은 PATCH 나 일괄 저장으로 해 주세요.")
+        raise errors.QuarterExists(f"{body.quarter_no}쿼터는 이미 기록했어요. 고치려면 기록 화면에서 저장해 주세요.")
     q = Quarter(event_id=event.id, quarter_no=body.quarter_no, black_score=0, white_score=0, duration_min=body.duration_min, recorded_by=by.id)
     db.add(q)
     db.flush()
@@ -123,7 +123,7 @@ def bulk_save(db: Session, event: Event, by: User, body: QuarterBulkSave) -> Qua
     _guard(event)
     nos = [q.quarter_no for q in body.quarters]
     if len(set(nos)) != len(nos):
-        raise errors.ValidationError("quarter_no 가 중복되었어요.")
+        raise errors.ValidationError("같은 쿼터 번호가 두 번 들어 있어요.")
     existing = {q.quarter_no: q for q in db.scalars(select(Quarter).where(Quarter.event_id == event.id).options(selectinload(Quarter.lineups))).all()}
     created = updated = deleted = 0
     for item in body.quarters:
@@ -175,7 +175,7 @@ def delete_quarter(db: Session, q: Quarter) -> None:
 def _load(db: Session, quarter_id: int) -> Quarter:
     q = db.get(Quarter, quarter_id, options=[selectinload(Quarter.lineups)], populate_existing=True)
     if q is None:
-        raise errors.NotFound("쿼터를 찾을 수 없습니다.")
+        raise errors.NotFound("쿼터를 찾을 수 없어요.")
     return q
 
 

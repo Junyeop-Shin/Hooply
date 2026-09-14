@@ -99,7 +99,7 @@ def update_positions(db: DB, user: CurrentUser, body: PositionsUpdate):
         if p.position in seen:
             from app.core import errors as E
 
-            raise E.ValidationError(f"{p.position} 포지션이 중복되었습니다.")
+            raise E.ValidationError(f"{p.position} 포지션을 두 번 골랐어요.")
         seen.add(p.position)
     user.position_prefs = [p.position.value for p in body.positions]  # 팀이 없어도 저장되는 원본
     players = db.scalars(select(Player).where(Player.user_id == user.id, Player.status == PlayerStatus.ACTIVE)).all()

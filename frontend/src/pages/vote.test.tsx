@@ -88,7 +88,7 @@ describe('VotePage', () => {
   it('이미 제출했으면 완료 화면을 보여준다', async () => {
     vi.mocked(peerApi.targets).mockResolvedValue({ ...targets, already_submitted: true, my_votes: [{ target_player_id: 2, vote_type: 'PLAY_AGAIN', reason_tag: 'PASS' }] })
     renderPage()
-    expect(await screen.findByText('응답을 남겼어요')).toBeInTheDocument()
+    expect(await screen.findByText('투표를 마쳤어요')).toBeInTheDocument()
     const card = screen.getByText('서장훈').closest('div')!
     expect(within(card).getByText('패스가 좋았어요')).toBeInTheDocument()
   })
