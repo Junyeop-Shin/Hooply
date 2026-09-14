@@ -1,6 +1,6 @@
-"""관리자 API (F12) · 팀 리더보드 — 권한, 검색, 보정 이력, 감사 로그, 참여율/쿼터/잔차 순위."""
+"""관리자 API (F12) · 팀 리더보드 — 권한, 검색, 보정 이력, 감사 로그, 참여율/쿼터/기여 점수 순위."""
 
-from tests.test_ranking_assignment import club  # noqa: F401 — 픽스처 재사용
+from tests.test_ranking_assignment import ROSTER, club  # noqa: F401 — 픽스처 재사용
 
 API = "/api/v1"
 
@@ -85,3 +85,60 @@ def test_team_approval_flow(client, signup):
         assert client.get(f"{API}/admin/audit-logs", headers=admin).json()["items"][0]["action"] == "TEAM_REJECT"
     finally:
         get_settings().team_approval_required = False
+
+
+# 검증: 기여 점수는 기간마다 달라야 한다 — 프로필 누적 총합을 그대로 쓰면 어느 달을 골라도 같은 값이 나온다
+def test_leaderboard_residual_is_scoped_to_period(client, club):
+    m, tid, pid = club["manager"], club["team_id"], club["pid"]
+    names = [n for n, *_ in ROSTER][:10]
+    lineups = (
+        [{"player_id": pid[n], "side": "BLACK"} for n in names[:5]]
+        + [{"player_id": pid[n], "side": "WHITE"} for n in names[5:]]
+    )
+
+    def record(day: str, black: int, white: int) -> None:
+        eid = client.post(f"{API}/teams/{tid}/events", json={"event_date": day, "start_time": "10:00", "end_time": "12:00"}, headers=m).json()["id"]
+        for n in names:
+            client.put(f"{API}/events/{eid}/attendances/{pid[n]}", json={"status": "ATTEND"}, headers=m)
+        r = client.post(f"{API}/events/{eid}/quarters", json={"quarter_no": 1, "black_score": black, "white_score": white, "duration_min": 8, "lineups": lineups}, headers=m)
+        assert r.status_code == 201, r.text
+
+    # 앞의 두 일정은 지표에 넣지 않는 구간(13.2절 1항)이라 기여도가 0 이다. 그 뒤 두 달에만 값이 생긴다
+    record("2026-06-07", 10, 8)
+    record("2026-06-14", 10, 8)
+    record("2026-07-05", 20, 4)
+    record("2026-08-02", 4, 20)
+
+    def scores(period: str | None) -> dict[str, float]:
+        url = f"{API}/teams/{tid}/stats/leaderboard?metric=residual" + (f"&period={period}" if period else "")
+        r = client.get(url, headers=m)
+        assert r.status_code == 200, r.text
+        return {i["player"]["display_name"]: float(i["value"]) for i in r.json()["items"]}
+
+    total, jun, jul, aug = scores(None), scores("2026-06"), scores("2026-07"), scores("2026-08")
+    top = names[0]  # 블랙에서 뛴 사람
+    assert jun[top] == 0.0  # 첫 두 일정은 지표 미반영
+    assert jul[top] > 0 and aug[top] < 0  # 7월엔 크게 이기고 8월엔 크게 졌다
+    assert jul[top] != total[top] and aug[top] != total[top]  # 기간마다 값이 다르다
+    assert round(jun[top] + jul[top] + aug[top], 1) == round(total[top], 1)  # 달을 합치면 전체가 된다
+    # 기록이 없는 달은 0 (요청 자체는 유효)
+    assert scores("2026-05")[top] == 0.0
+
+    # 그 달에 안 뛴 사람은 못 뛴 게 아니라 기록이 없는 것 — 0 으로 쳐서 중간에 끼지 않고 맨 아래로 간다
+    r = client.get(f"{API}/teams/{tid}/stats/leaderboard?metric=residual&period=2026-08", headers=m)
+    items = r.json()["items"]
+    played = [i for i in items if i["detail"] != "출전 없음"]
+    assert played and all(i["rank"] < min(x["rank"] for x in items if x["detail"] == "출전 없음") for i in played)
+    assert any(float(i["value"]) < 0 for i in played)  # 못한 사람도 안 나온 사람보다 위
+
+
+# 검증: 월 선택 목록에는 기록이 있는 달만, 최신순으로 들어간다
+def test_leaderboard_periods_lists_only_months_with_records(client, club):
+    m, tid = club["manager"], club["team_id"]
+    for day in ("2026-06-07", "2026-08-02", "2026-08-30"):
+        client.post(f"{API}/teams/{tid}/events", json={"event_date": day}, headers=m)
+    canceled = client.post(f"{API}/teams/{tid}/events", json={"event_date": "2026-05-03"}, headers=m).json()["id"]
+    client.delete(f"{API}/events/{canceled}", headers=m)
+    r = client.get(f"{API}/teams/{tid}/stats/periods", headers=club["members"][1])
+    assert r.status_code == 200, r.text
+    assert r.json()["items"] == ["2026-08", "2026-06"]  # 최신순, 같은 달은 한 번, 취소된 일정의 5월은 없다

@@ -1,6 +1,9 @@
 /**
- * 팀 리더보드 — 참여율 · 출전 쿼터 (전원) / 잔차 누적 (매니저). 팀 화면 팀원 탭에서 진입.
+ * 팀 리더보드 — 참여율 · 출전 쿼터 (전원) / 기여 점수 (매니저). 팀 화면 팀원 탭에서 진입.
  * 실력 수치를 순위로 공개하는 것은 갈등을 부르므로(9.2절 표시 정책) 플레이어에게는 참여 지표만 보여준다.
+ *
+ * 기간은 전체 또는 한 달을 고른다. 고를 수 있는 달은 서버가 알려 주는 "기록이 있는 달" 뿐이라
+ * 빈 달을 골라 놓고 아무것도 안 나오는 상황이 생기지 않는다.
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -11,6 +14,14 @@ import { Alert, Avatar, Card, GradeDot, Spinner } from '../components/ui'
 import { Content, Screen, TopBar } from '../components/layout'
 
 const LABEL: Record<LeaderboardMetric, string> = { attendance: '참여율', quarters: '출전 쿼터', residual: '기여 점수' }
+const HELP: Record<LeaderboardMetric, string> = {
+  attendance: '지난 일정 중 참석한 비율이에요. 가입 전 일정은 빼요.',
+  quarters: '기록된 쿼터에 출전한 횟수예요.',
+  residual: '예상보다 얼마나 더 벌었는지를 쌓은 값이에요. 매니저에게만 보여요.',
+}
+
+/** "2026-09" → "2026년 9월" */
+const monthLabel = (p: string) => `${p.slice(0, 4)}년 ${Number(p.slice(5))}월`
 
 export function LeaderboardPage() {
   const { teamId } = useParams()
@@ -19,10 +30,11 @@ export function LeaderboardPage() {
   const isManager = team.data?.my_role === 'MANAGER'
   const [metric, setMetric] = useState<LeaderboardMetric>('attendance')
   const [period, setPeriod] = useState<string>('')
+  // 일정에서 나오는 목록이라 'events' 아래에 둔다 — 일정을 만들거나 취소하면 함께 갱신된다
+  const periods = useQuery({ queryKey: ['events', 'team', id, 'periods'], queryFn: () => teamsApi.leaderboardPeriods(id) })
   const q = useQuery({ queryKey: ['team', id, 'leaderboard', metric, period], queryFn: () => teamsApi.leaderboard(id, metric, period || undefined) })
   const metrics: LeaderboardMetric[] = isManager ? ['attendance', 'quarters', 'residual'] : ['attendance', 'quarters']
-  const now = new Date()
-  const months = Array.from({ length: 3 }, (_, i) => { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })
+  const months = periods.data?.items ?? []
 
   return (
     <Screen>
@@ -33,14 +45,19 @@ export function LeaderboardPage() {
         ))}
       </div>
       <Content>
-        <div className="flex gap-1.5 overflow-x-auto px-1">
-          {[['', '전체'], ...months.map((m) => [m, `${Number(m.slice(5))}월`])].map(([v, l]) => (
-            <button key={v} onClick={() => setPeriod(v)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${period === v ? 'bg-navy-800 text-white' : 'bg-sunken text-muted'}`}>{l}</button>
-          ))}
+        <div className="flex items-center gap-2 px-1">
+          <label htmlFor="period" className="text-xs font-semibold text-muted">기간</label>
+          <select
+            id="period" value={period} onChange={(e) => setPeriod(e.target.value)}
+            disabled={periods.isLoading}
+            className="min-h-9 flex-1 rounded-xl border border-line bg-surface px-3 text-sm font-semibold text-ink"
+          >
+            <option value="">전체</option>
+            {months.map((p) => <option key={p} value={p}>{monthLabel(p)}</option>)}
+          </select>
         </div>
-        <p className="px-1 text-xs text-muted">
-          {metric === 'attendance' ? '지난 일정 중 참석한 비율이에요. 가입 전 일정은 빼요.' : metric === 'quarters' ? '기록된 쿼터에 출전한 횟수예요.' : '예상보다 얼마나 더 벌었는지를 쌓은 값이에요. 매니저에게만 보여요.'}
-        </p>
+        {!periods.isLoading && months.length === 0 && <p className="px-1 text-xs text-faint">아직 지난 일정이 없어 달을 고를 수 없어요.</p>}
+        <p className="px-1 text-xs text-muted">{HELP[metric]}</p>
         {q.isLoading ? <Spinner /> : q.isError ? <Alert>불러오지 못했어요.</Alert> : (
           <Card className="divide-y divide-line p-0">
             {q.data!.items.map((e) => {

@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from statistics import mean
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
@@ -97,7 +97,8 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
     rows = db.execute(
         select(
             Quarter.id, Quarter.event_id, Quarter.black_score, Quarter.white_score, Quarter.duration_min,
-            QuarterLineup.player_id, QuarterLineup.side, QuarterLineup.normalized_margin,
+            QuarterLineup.id, QuarterLineup.player_id, QuarterLineup.side, QuarterLineup.normalized_margin,
+            QuarterLineup.residual,
         )
         .join(Event, Event.id == Quarter.event_id)
         .join(QuarterLineup, QuarterLineup.quarter_id == Quarter.id)
@@ -111,17 +112,18 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
         black_score: int
         white_score: int
         duration_min: int
-        lineups: list[tuple[int, Side, float]]  # (player_id, side, normalized_margin)
+        # (lineup_id, player_id, side, normalized_margin, 지금 저장돼 있는 residual)
+        lineups: list[tuple[int, int, Side, float, float]]
 
     quarters: list[_Q] = []
     seen_q: dict[int, _Q] = {}
-    for qid, eid, bs, ws, dur, pid_, side_, nm in rows:
+    for qid, eid, bs, ws, dur, lid, pid_, side_, nm, res in rows:
         q = seen_q.get(qid)
         if q is None:
             q = _Q(event_id=eid, black_score=bs, white_score=ws, duration_min=dur, lineups=[])
             seen_q[qid] = q
             quarters.append(q)
-        q.lineups.append((pid_, side_, float(nm)))
+        q.lineups.append((lid, pid_, side_, float(nm), float(res or 0)))
 
     event_order: list[int] = []
     for q in quarters:
@@ -130,15 +132,25 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
     warmup = set(event_order[: settings.rating_warmup_events])
 
     rated = 0
+    # 쿼터마다 각자가 남긴 몫. 리더보드가 기간별로 합칠 수 있게 lineup 행에 되돌려 쓴다 (값이 바뀐 행만)
+    changed: list[dict[str, object]] = []
+
+    def _stage(lineup_id: int, old_value: float, new_value: float) -> None:
+        if abs(new_value - old_value) >= 0.005:
+            changed.append({"id": lineup_id, "residual": Decimal(str(round(new_value, 2)))})
+
     for q in quarters:
-        black = [canonical(pid_) for pid_, side_, _ in q.lineups if side_ == Side.BLACK]
-        white = [canonical(pid_) for pid_, side_, _ in q.lineups if side_ == Side.WHITE]
-        for pid_, _side, nm in q.lineups:
+        black = [canonical(pid_) for _lid, pid_, side_, _nm, _res in q.lineups if side_ == Side.BLACK]
+        white = [canonical(pid_) for _lid, pid_, side_, _nm, _res in q.lineups if side_ == Side.WHITE]
+        for _lid, pid_, _side, nm, _res in q.lineups:
             c = canonical(pid_)
             n_played[c] += 1
             margins[c].append(nm)
         if q.event_id in warmup:
-            continue  # 첫 2회 모임: 마진은 기록하되 지표에는 넣지 않는다
+            # 첫 2회 모임: 마진은 기록하되 지표에는 넣지 않는다 → 남긴 몫도 0
+            for lid, _pid, _side, _nm, old_res in q.lineups:
+                _stage(lid, old_res, 0.0)
+            continue
         rated += 1
         m = _clipped_margin(q.black_score - q.white_score, q.duration_min)
         expected = sum(r.get(p, 0.0) for p in black) - sum(r.get(p, 0.0) for p in white)
@@ -148,6 +160,10 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
             r[pid] = r.get(pid, 0.0) + sign * k * d / 5
             n_rated[pid] += 1
             residual[pid] += sign * d
+        for lid, _pid, side_, _nm, old_res in q.lineups:
+            _stage(lid, old_res, d if side_ == Side.BLACK else -d)
+    if changed:
+        db.execute(update(QuarterLineup), changed)
 
     for p in players:
         prof = p.profile

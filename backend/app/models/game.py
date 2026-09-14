@@ -76,5 +76,9 @@ class QuarterLineup(Base):
     raw_margin: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     # raw_margin × (10 / duration_min). 10분 환산값. 지표 갱신·대시보드 추이는 이 값을 쓴다
     normalized_margin: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    # 이 쿼터가 이 사람의 실력에 남긴 몫 = (실제 마진 − 기대 마진). rating_service 가 팀 전체를 재생하며 채운다.
+    # 기간별 기여 점수(리더보드 월별)를 내려면 회차 단위로 쪼개진 값이 필요하다 — 프로필의 누적 총합만으로는
+    # "9월에 얼마나 기여했나" 를 답할 수 없다. 지표에 반영하지 않는 첫 두 일정은 0 이다.
+    residual: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=0, server_default="0")
 
     quarter: Mapped[Quarter] = relationship(back_populates="lineups")

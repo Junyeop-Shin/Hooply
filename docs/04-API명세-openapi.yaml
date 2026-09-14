@@ -1852,6 +1852,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/stats/periods:
+    get:
+      summary: 리더보드에서 고를 수 있는 달
+      tags:
+      - 경기 후 설문 · 통계
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList_str_'
   /teams/{team_id}/stats/leaderboard:
     get:
       summary: 팀 리더보드
@@ -2884,6 +2902,15 @@ components:
             anyOf:
             - $ref: '#/components/schemas/PlayerCard'
             - $ref: '#/components/schemas/PlayerCardDetailed'
+          type: array
+      type: object
+      required:
+      - items
+    ItemList_str_:
+      properties:
+        items:
+          items:
+            type: string
           type: array
       type: object
       required:

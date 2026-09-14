@@ -19,6 +19,8 @@ export const teamsApi = {
 
   leaderboard: (teamId: number, metric: LeaderboardMetric, period?: string) =>
     api<{ items: LeaderboardEntry[] }>(`/teams/${teamId}/stats/leaderboard?metric=${metric}${period ? `&period=${period}` : ''}`),
+  /** 리더보드에서 고를 수 있는 달 (기록이 있는 달만, 최신순). 예: ["2026-09", "2026-08"] */
+  leaderboardPeriods: (teamId: number) => api<{ items: string[] }>(`/teams/${teamId}/stats/periods`),
 
   // 게스트 레코드 (회차와 무관)
   guests: (teamId: number, q?: string) =>

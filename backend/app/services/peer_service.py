@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -454,33 +454,72 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
     return stats
 
 
-def leaderboard(db: Session, team_id: int, *, metric: str, period: str | None, include_grade: bool) -> list:
-    """팀 리더보드. metric: attendance(참여율) / quarters(출전 쿼터) / residual(잔차 누적, 매니저)."""
-    from datetime import date as _date
+def _period_range(period: str) -> tuple[date, date]:
+    """"2026-09"(월) 또는 "2026-Q3"(분기) 를 [시작일, 끝일) 로. 형식이 아니면 400."""
+    try:
+        if "-Q" in period:
+            y, q = period.split("-Q")
+            if not 1 <= int(q) <= 4:
+                raise ValueError(period)
+            lo = date(int(y), (int(q) - 1) * 3 + 1, 1)
+            hi = date(int(y) + (int(q) == 4), 1 if int(q) == 4 else int(q) * 3 + 1, 1)
+        elif len(period) == 7 and period[4] == "-":
+            y, mth = period.split("-")
+            if not 1 <= int(mth) <= 12:
+                raise ValueError(period)
+            lo = date(int(y), int(mth), 1)
+            hi = date(int(y) + (int(mth) == 12), 1 if int(mth) == 12 else int(mth) + 1, 1)
+        else:
+            raise ValueError(period)
+    except ValueError:
+        raise errors.ValidationError("기간은 2026-09(월) 또는 2026-Q3(분기) 형태로 적어 주세요.") from None
+    return lo, hi
 
+
+def leaderboard_periods(db: Session, team_id: int) -> list[str]:
+    """기록이 있는 달만 최신순으로 ("2026-09"). 화면의 월 선택 목록이 이 값을 그대로 쓴다.
+
+    "기록이 있다" = 취소되지 않은 지난 일정이 그 달에 하나라도 있다. 참석 응답만 있고 쿼터가 없는
+    달도 참여율은 볼 수 있으므로 일정 기준으로 잡는다.
+    """
+    today = datetime.now(ZoneInfo(get_settings().timezone)).date()
+    # to_char 를 두 번 쓰면 바인드 파라미터가 달라져 GROUP BY 가 같은 식으로 인식되지 않는다. 서브쿼리로 한 번만 만든다
+    sub = (
+        select(func.to_char(Event.event_date, "YYYY-MM").label("ym"))
+        .where(Event.team_id == team_id, Event.status != EventStatus.CANCELED, Event.event_date <= today)
+        .subquery()
+    )
+    return list(db.scalars(select(sub.c.ym).group_by(sub.c.ym).order_by(sub.c.ym.desc())).all())
+
+
+def leaderboard(db: Session, team_id: int, *, metric: str, period: str | None, include_grade: bool) -> list:
+    """팀 리더보드. metric: attendance(참여율) / quarters(출전 쿼터) / residual(기여 점수, 매니저).
+
+    셋 다 `period` 로 좁힌다. 기여 점수는 프로필의 누적 총합이 아니라 그 기간 쿼터에 남긴 몫을 더한다
+    (`quarter_lineups.residual`) — 총합만 쓰면 어느 달을 골라도 같은 값이 나온다.
+    병합된 게스트의 기록은 회원 쪽으로 합산한다 (선수 상세 화면과 같은 규칙).
+    """
     from app.models import Quarter
     from app.schemas.peer import LeaderboardEntry
 
     today = datetime.now(ZoneInfo(get_settings().timezone)).date()
-    lo, hi = None, None
+    ev_stmt = select(Event.id).where(Event.team_id == team_id, Event.status != EventStatus.CANCELED, Event.event_date <= today)
     if period:
-        try:
-            if "-Q" in period:
-                y, q = period.split("-Q")
-                lo = _date(int(y), (int(q) - 1) * 3 + 1, 1)
-                hi = _date(int(y) + (int(q) == 4), 1 if int(q) == 4 else int(q) * 3 + 1, 1)
-            elif len(period) == 7 and period[4] == "-":
-                y, m = period.split("-")
-                lo = _date(int(y), int(m), 1)
-                hi = _date(int(y) + (int(m) == 12), 1 if int(m) == 12 else int(m) + 1, 1)
-            else:
-                raise ValueError(period)
-        except ValueError:
-            raise errors.ValidationError("기간은 2026-Q3 또는 2026-09 형태로 적어 주세요.") from None
-    ev_stmt = select(Event).where(Event.team_id == team_id, Event.status != EventStatus.CANCELED, Event.event_date <= today)
-    if lo:
+        lo, hi = _period_range(period)
         ev_stmt = ev_stmt.where(Event.event_date >= lo, Event.event_date < hi)
-    event_ids = list(db.scalars(select(ev_stmt.subquery().c.id)).all())
+    event_ids = list(db.scalars(ev_stmt).all())
+
+    # 병합 관계까지 알아야 게스트 시절 기록을 회원 쪽으로 합칠 수 있으므로 팀의 모든 참가자를 읽는다
+    all_rows = db.execute(select(Player.id, Player.merged_into_player_id).where(Player.team_id == team_id)).all()
+    merged_into = {pid: into for pid, into in all_rows if into is not None}
+
+    def canonical(pid: int) -> int:
+        seen: set[int] = set()
+        while pid in merged_into and pid not in seen:
+            seen.add(pid)
+            pid = merged_into[pid]
+        return pid
+
     players = db.scalars(
         select(Player).where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE, Player.merged_into_player_id.is_(None))
         .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
@@ -488,30 +527,40 @@ def leaderboard(db: Session, team_id: int, *, metric: str, period: str | None, i
     attended: dict[int, int] = defaultdict(int)
     eligible: dict[int, int] = defaultdict(int)  # 응답 행이 있는 회차 수 = 가입 이후 회차 (행은 일정 생성 시 활성 회원에게만 만들어진다)
     quarters: dict[int, int] = defaultdict(int)
+    residuals: dict[int, Decimal] = defaultdict(Decimal)
     if event_ids:
         for pid, st, n in db.execute(
             select(EventAttendance.player_id, EventAttendance.status, func.count()).where(EventAttendance.event_id.in_(event_ids)).group_by(EventAttendance.player_id, EventAttendance.status)
         ).all():
-            eligible[pid] += n
+            eligible[canonical(pid)] += n
             if st == AttendanceStatus.ATTEND:
-                attended[pid] = n
-        for pid, n in db.execute(
-            select(QuarterLineup.player_id, func.count()).join(Quarter, Quarter.id == QuarterLineup.quarter_id).where(Quarter.event_id.in_(event_ids)).group_by(QuarterLineup.player_id)
+                attended[canonical(pid)] += n
+        for pid, n, res in db.execute(
+            select(QuarterLineup.player_id, func.count(), func.coalesce(func.sum(QuarterLineup.residual), 0))
+            .join(Quarter, Quarter.id == QuarterLineup.quarter_id)
+            .where(Quarter.event_id.in_(event_ids))
+            .group_by(QuarterLineup.player_id)
         ).all():
-            quarters[pid] = n
-    out = []
+            quarters[canonical(pid)] += n
+            residuals[canonical(pid)] += Decimal(res)
+    out: list[tuple[bool, LeaderboardEntry]] = []
     for p in players:
         if metric == "attendance":
             n_el = eligible[p.id]
             value = Decimal(str(round(attended[p.id] / n_el, 2))) if n_el else Decimal(0)
-            detail = f"{attended[p.id]}/{n_el}회"
+            detail = f"{attended[p.id]}/{n_el}회" if n_el else "해당 없음"
+            has_data = n_el > 0
         elif metric == "quarters":
             value, detail = Decimal(quarters[p.id]), f"{quarters[p.id]}쿼터"
+            has_data = quarters[p.id] > 0
         else:
-            value = p.profile.cumulative_residual if p.profile and p.profile.cumulative_residual is not None else Decimal(0)
-            detail = f"평가 쿼터 {quarters[p.id]}개"
-        out.append(LeaderboardEntry(player=to_card(p, include_grade=include_grade), value=value, detail=detail))
-    out.sort(key=lambda e: (-float(e.value), e.player.display_name))
-    for i, e in enumerate(out):
+            value = Decimal(str(round(float(residuals[p.id]), 1)))
+            detail = f"출전 {quarters[p.id]}쿼터" if quarters[p.id] else "출전 없음"
+            has_data = quarters[p.id] > 0
+        out.append((has_data, LeaderboardEntry(player=to_card(p, include_grade=include_grade), value=value, detail=detail)))
+    # 그 기간에 기록이 아예 없는 사람은 맨 아래로. 0 을 성적으로 치면 못한 사람이 안 나온 사람보다 아래로 간다
+    out.sort(key=lambda x: (not x[0], -float(x[1].value), x[1].player.display_name))
+    entries = [e for _, e in out]
+    for i, e in enumerate(entries):
         e.rank = i + 1
-    return out
+    return entries

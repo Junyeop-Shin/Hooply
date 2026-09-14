@@ -164,20 +164,35 @@ def player_stats(db: DB, user: CurrentUser, player_id: int):
     return peer_service.player_stats(db, player, detailed=is_mgr)
 
 
+@router.get("/teams/{team_id}/stats/periods", response_model=ItemList[str], summary="리더보드에서 고를 수 있는 달")
+def leaderboard_periods(db: DB, me: TeamMember, team: Annotated[Team, Depends(get_team_or_404)]):
+    """기록이 있는 달만 최신순으로 돌려준다 (`["2026-09", "2026-08"]`).
+
+    - **권한:** 팀원 또는 ADMIN.
+    - **처리:** 취소되지 않은 지난 일정이 하나라도 있는 달. 화면의 월 선택 목록이 이 값을 그대로 쓰므로
+      기록이 없는 달은 아예 고를 수 없다.
+    - **오류:** `404 NOT_FOUND`, `403 NOT_A_MEMBER`.
+    - **상태:** `구현됨`.
+    - **설계서:** 7.3절, S-08 리더보드.
+    """
+    return ItemList(items=peer_service.leaderboard_periods(db, team.id))
+
+
 @router.get(
     "/teams/{team_id}/stats/leaderboard", response_model=ItemList[LeaderboardEntry],
     responses=errors(_403="FORBIDDEN_ROLE"), summary="팀 리더보드",
 )
 def leaderboard(
     db: DB, me: TeamMember, team: Annotated[Team, Depends(get_team_or_404)],
-    metric: Annotated[Literal["residual", "attendance", "quarters"], Query(description="attendance=참여율(전원), quarters=출전 쿼터 수(전원), residual=잔차 누적(매니저/ADMIN)")] = "attendance",
-    period: Annotated[str | None, Query(description="집계 기간. 예: 2026-Q3, 2026-09, 생략 시 전체")] = None,
+    metric: Annotated[Literal["residual", "attendance", "quarters"], Query(description="attendance=참여율(전원), quarters=출전 쿼터 수(전원), residual=기여 점수(매니저/ADMIN)")] = "attendance",
+    period: Annotated[str | None, Query(description="집계 기간. 예: 2026-09(월), 2026-Q3(분기). 생략하면 전체. 고를 수 있는 달은 /stats/periods 로 조회")] = None,
 ):
-    """팀원을 참여율·출전 쿼터·잔차 누적 기준으로 순위 매긴다.
+    """팀원을 참여율·출전 쿼터·기여 점수 기준으로 순위 매긴다.
 
     - **권한:** 팀원 또는 ADMIN. `metric=residual` 은 팀 매니저/ADMIN 전용 (플레이어에게는 실력 수치를 보이지 않는다, FR-28).
-    - **처리:** attendance = 참석한 지난 회차 ÷ 기간 내 지난 회차 수(가입 이후만), quarters = 출전 쿼터 수, residual =
-      `cumulative_residual`. 게스트·병합된 행은 제외. 값 내림차순, 같으면 이름순.
+    - **처리:** 세 지표 모두 `period` 로 좁힌다. attendance = 참석한 지난 회차 ÷ 기간 내 지난 회차 수(가입 이후만),
+      quarters = 출전 쿼터 수, residual = 그 기간 쿼터에 남긴 몫의 합(`quarter_lineups.residual`).
+      병합된 게스트의 기록은 회원 쪽으로 합산한다. 값 내림차순, 같으면 이름순.
     - **오류:** `404 NOT_FOUND`, `403 NOT_A_MEMBER`, `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절, 9.1절 코트 마진의 함정, 9.2절 표시 정책.
