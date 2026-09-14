@@ -161,7 +161,7 @@ def test_player_stats(client, club, past_event):
     others = [x for x in ids if x != me_id]
     lineups = [{"player_id": x, "side": "BLACK"} for x in [me_id, *others[:4]]] + [{"player_id": x, "side": "WHITE"} for x in others[4:9]]  # 이정현은 블랙
     r = client.put(f"{API}/events/{past_event}/quarters", json={"quarters": [
-        {"quarter_no": 1, "black_score": 12, "white_score": 9, "duration_min": 12, "lineups": lineups},
+        {"quarter_no": 1, "black_score": 12, "white_score": 9, "duration_min": 6, "lineups": lineups},
         {"quarter_no": 2, "black_score": 8, "white_score": 10, "lineups": lineups},
     ]}, headers=m)
     assert r.status_code == 200, r.text
@@ -174,7 +174,7 @@ def test_player_stats(client, club, past_event):
     assert s["skill_overall"] is None and s["history"] == []  # 본인에게는 수치 없음
     assert s["skill_grade"] is not None  # 등급은 본인에게만 보인다 (9.2절)
     assert [q["quarter_no"] for q in s["recent_quarters"]] == [2, 1]
-    assert s["recent_quarters"][1]["my_score"] == 12 and float(s["recent_quarters"][1]["normalized_margin"]) == 2.5
+    assert s["recent_quarters"][1]["my_score"] == 12 and float(s["recent_quarters"][1]["normalized_margin"]) == 5.0
     assert s["margin_trend"][0]["wins"] == 1 and s["margin_trend"][0]["losses"] == 1
     # 남의 통계는 매니저만
     assert client.get(f"{API}/players/{pid['최준용']}/stats", headers=me).status_code == 403

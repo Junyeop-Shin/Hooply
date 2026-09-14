@@ -46,8 +46,8 @@ class Quarter(CreatedAtMixin, Base):
     quarter_no: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1부터. 삭제 후 번호가 비어도 됨
     black_score: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 블랙(squad_no 1) 팀 득점
     white_score: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 화이트(squad_no 2) 팀 득점
-    # 쿼터 길이(분). 기본 10. 시간 정규화 기준이며, 마지막 쿼터를 짧게 뛴 경우 등에 바꾼다
-    duration_min: Mapped[int] = mapped_column(SmallInteger, default=10, server_default="10", nullable=False)
+    # 쿼터 길이(분). 기본 8, 입력은 1~10분(app.schemas.game). 시간 정규화 기준이며, 마지막 쿼터를 짧게 뛴 경우 등에 바꾼다
+    duration_min: Mapped[int] = mapped_column(SmallInteger, default=8, server_default="8", nullable=False)
     recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)  # 입력한 매니저
 
     # 출전 10명 (블랙 5 + 화이트 5). 쿼터 삭제 시 함께 삭제 → 마진 롤백 재계산

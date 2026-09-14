@@ -535,7 +535,11 @@ def _raise_violations(vr: ValidateResult) -> None:
 
 
 def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> AssignmentRun:
-    """배정 실행: 검증 → 완전 탐색 → 전략별 후보안 저장. 이력은 run 으로 쌓인다."""
+    """배정 실행: 검증 → 완전 탐색 → 전략별 후보안 저장.
+
+    실행 기록을 쌓아 두지 않는다. 확정하지 않고 흘려보낸 지난 실행은 여기서 지우고, 확정한 편성만
+    `adopt()` 때까지 남긴다 — 그래야 새 안을 짜 보는 동안에도 플레이어에게 직전 배정이 계속 보인다.
+    """
     if event.status == EventStatus.CANCELED:
         raise errors.ValidationError("취소된 일정은 배정할 수 없어요.")
     vr = validate(db, event, body)
@@ -553,6 +557,7 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> Assi
         pool = scored
         prep.warnings.append("1번·5번 하드 제약을 만족하는 편성이 없어 완화했어요")
 
+    _drop_unadopted_runs(db, event)  # 검증을 통과한 뒤에 정리한다 — 실패한 실행 때문에 지난 안을 잃지 않도록
     run_row = AssignmentRun(
         event_id=event.id, executed_by=by.id, team_count=body.team_count,
         params={"strategies": [s.value for s in body.strategies], "weights": {k.value: v for k, v in STRATEGY_WEIGHTS.items()}, "w_fair": W_FAIR, "w_guest": W_GUEST, "search": "exhaustive", "partitions_evaluated": len(scored)},
@@ -583,6 +588,17 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> Assi
     db.commit()
     db.refresh(run_row)
     return run_row
+
+
+def _drop_unadopted_runs(db: Session, event: Event) -> None:
+    """확정되지 않은 지난 실행을 지운다. 확정된 편성은 새 안을 확정할 때까지 남겨 둔다."""
+    for old_run in db.scalars(
+        select(AssignmentRun).where(AssignmentRun.event_id == event.id)
+        .options(selectinload(AssignmentRun.candidates))
+    ).all():
+        if not any(c.is_adopted for c in old_run.candidates):
+            db.delete(old_run)
+    db.flush()
 
 
 def _persist_candidate(db: Session, run_row: AssignmentRun, strategy: Strategy, sc: Scored, prep: Prepared) -> AssignmentCandidate:
@@ -887,21 +903,34 @@ def _recompute_candidate(db: Session, cand: AssignmentCandidate, *, manual: bool
 
 
 def adopt(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
-    """후보안 확정 → 플레이어 공개. 같은 run 의 다른 후보안은 해제. 일정은 CLOSED(응답 마감·배정 단계)."""
+    """후보안 확정 → 플레이어 공개. 이 회차의 지난 실행은 여기서 지운다.
+
+    한 회차에 남는 배정 기록은 **확정한 실행 하나**뿐이다. 그 안의 후보안 3개는 지우지 않는다 —
+    같은 결정의 비교 대상이고, 결과 화면이 확정 뒤에도 세 안을 그대로 보여 준다. 남은 run 의
+    `roster_snapshot`·제약 덕분에 실력값이 바뀐 뒤에도 "그때 왜 이렇게 나눴는가" 를 설명할 수 있다.
+    확정 전에는 지우지 않으므로, 재배정을 돌려 보는 동안에도 플레이어에게는 직전 확정안이 계속 보인다.
+    """
     run_row = cand.run
     already = [c for c in run_row.candidates if c.is_adopted and c.id != cand.id]
     if already:
         raise errors.AlreadyAdopted()
-    # 같은 회차의 다른 run 에 확정된 것이 있으면 해제 (재배정)
-    for other in db.scalars(select(AssignmentCandidate).join(AssignmentRun).where(AssignmentRun.event_id == run_row.event_id, AssignmentCandidate.is_adopted.is_(True))).all():
-        other.is_adopted = False
-    db.flush()
     cand.is_adopted = True
     event = db.get(Event, run_row.event_id)
     if event.status == EventStatus.OPEN:
         event.status = EventStatus.CLOSED
+    db.flush()
+    _prune_history(db, run_row)
     db.commit()
     return _load_candidate(db, cand.id)
+
+
+def _prune_history(db: Session, run_row: AssignmentRun) -> None:
+    """확정한 실행만 남기고 이 회차의 지난 실행(재배정 전 결과)을 지운다."""
+    for other in db.scalars(
+        select(AssignmentRun).where(AssignmentRun.event_id == run_row.event_id, AssignmentRun.id != run_row.id)
+    ).all():
+        db.delete(other)
+    db.flush()
 
 
 def adopted_candidate(db: Session, event: Event) -> AssignmentCandidate | None:

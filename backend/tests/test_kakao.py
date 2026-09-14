@@ -76,3 +76,27 @@ def test_link(client, signup):
     h2 = signup("other@example.com", name="현주엽")
     r3 = client.post(f"{API}/auth/kakao/link", json={"code": "code-a", "state": client.get(f"{API}/auth/kakao/login-url").json()["state"]}, headers=h2)
     assert r3.status_code == 409 and r3.json()["code"] == "IDENTITY_ALREADY_LINKED"
+
+
+# 검증: 직접 올린 프로필 사진은 카카오 로그인이 덮어쓰지 않는다 (사진이 "혼자 사라지던" 문제)
+def test_kakao_login_keeps_uploaded_avatar(client):
+    import base64
+
+    png = "data:image/png;base64," + base64.b64encode(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )).decode()
+    state = client.get(f"{API}/auth/kakao/login-url").json()["state"]
+    tok = client.get(f"{API}/auth/kakao/callback?code=code-a&state={state}").json()["access_token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    assert client.get(f"{API}/me", headers=h).json()["profile_image_url"] == "https://k.kakaocdn.net/a.jpg"
+    uploaded = client.post(f"{API}/me/avatar", json={"data_url": png}, headers=h).json()["profile_image_url"]
+    assert uploaded.startswith("/api/v1/users/")
+    # 다시 로그인해도 올린 사진이 그대로 남는다
+    state2 = client.get(f"{API}/auth/kakao/login-url").json()["state"]
+    tok2 = client.get(f"{API}/auth/kakao/callback?code=code-a&state={state2}").json()["access_token"]
+    assert client.get(f"{API}/me", headers={"Authorization": f"Bearer {tok2}"}).json()["profile_image_url"] == uploaded
+    # 사진을 지우면 다음 로그인에 카카오 사진을 다시 받아 온다
+    client.delete(f"{API}/me/avatar", headers=h)
+    state3 = client.get(f"{API}/auth/kakao/login-url").json()["state"]
+    tok3 = client.get(f"{API}/auth/kakao/callback?code=code-a&state={state3}").json()["access_token"]
+    assert client.get(f"{API}/me", headers={"Authorization": f"Bearer {tok3}"}).json()["profile_image_url"] == "https://k.kakaocdn.net/a.jpg"

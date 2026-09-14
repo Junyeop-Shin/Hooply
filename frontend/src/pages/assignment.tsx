@@ -103,7 +103,7 @@ export function AssignPage() {
             <Button variant="secondary" className="min-h-10 text-sm" loading={closeRsvp.isPending} onClick={() => confirm('참석 응답을 지금 마감할까요?') && closeRsvp.mutate()}>응답 마감</Button>
           </Card>
         )}
-        {ev.data.run_count > 0 && <Alert kind="warn">이 회차에 배정을 {ev.data.run_count}번 실행했어요. 다시 실행하면 새 결과가 쌓이고, 확정은 새로 해야 해요.</Alert>}
+        {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 짠 안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
 
         {suggestions.length > 0 && (
           <section>

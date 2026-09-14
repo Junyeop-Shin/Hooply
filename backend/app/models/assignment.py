@@ -6,7 +6,7 @@
   PIN      + squad_no  → 지정한 팀에 사전 배치
 
 계층 구조와 각 계층의 의미 (설계서 6.3절 "1:N 체인")
-  assignment_runs          "언제·누가·어떤 조건으로 배정을 돌렸나"  — 재배정마다 새 행 (이력 보존)
+  assignment_runs          "언제·누가·어떤 조건으로 배정을 돌렸나"  — 한 회차에 최종 편성 하나만 남는다
     ├─ assignment_constraints  그 실행에 걸린 묶기/분리/사전배치
     └─ assignment_candidates   전략별 후보안 (보통 SKILL / CHEMISTRY / BALANCED 3개)
          └─ assignment_squads    후보안 안의 팀 (2팀이면 블랙/화이트)
@@ -43,10 +43,14 @@ from app.models.enums import ConstraintType, Position, Strategy, db_enum
 
 
 class AssignmentRun(CreatedAtMixin, Base):
-    """배정 실행 1회 (`POST /events/{id}/assignments`). events 1:N — 노쇼 등으로 재실행하면 행이 늘어난다.
+    """배정 실행 1회 (`POST /events/{id}/assignments`).
+
+    실행 이력을 쌓지 않는다. 확정하지 않은 지난 실행은 다시 실행할 때 지우고, 확정하는 순간 그 회차의
+    다른 run 과 고르지 않은 후보안까지 지워 **최종 편성 한 건만** 남긴다. 재배정을 돌려 보는 동안에는
+    직전 확정안이 남아 있어 플레이어 화면이 비지 않는다.
 
     `roster_snapshot` 을 저장하는 이유: 실력값은 쿼터를 저장할 때마다 바뀐다. 나중에 "그때 왜 이렇게
-    나눴는가" 를 설명하려면 실행 시점의 참석자와 실력값을 그대로 보관해야 한다.
+    나눴는가" 를 설명하려면 실행 시점의 참석자와 실력값을 그대로 보관해야 한다. 남은 한 건이 그 근거다.
     """
 
     __tablename__ = "assignment_runs"

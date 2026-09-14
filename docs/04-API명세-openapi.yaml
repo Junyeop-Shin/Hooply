@@ -3488,8 +3488,8 @@ components:
           minimum: 0.0
         duration_min:
           type: integer
-          maximum: 60.0
-          minimum: 3.0
+          maximum: 10.0
+          minimum: 1.0
         lineups:
           items:
             $ref: '#/components/schemas/LineupIn'
@@ -3589,8 +3589,8 @@ components:
           nullable: true
         duration_min:
           type: integer
-          maximum: 60.0
-          minimum: 3.0
+          maximum: 10.0
+          minimum: 1.0
           nullable: true
         lineups:
           items:

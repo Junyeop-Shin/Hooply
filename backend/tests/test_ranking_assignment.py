@@ -260,10 +260,20 @@ def test_swap_adopt_and_player_view(client, club):
     mgr_view = client.get(f"{API}/events/{eid}/assignment/adopted", headers=m).json()
     assert all(s["avg_skill"] is not None for s in mgr_view["squads"])
 
-    # 재배정(새 run) 후 확정하면 이전 확정 해제
+    # 재배정(새 run): 확정하기 전에는 직전 확정안이 그대로 보인다
     run2 = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2}, headers=m).json()
+    assert client.get(f"{API}/events/{eid}/assignment/adopted", headers=m).json()["candidate_id"] == cand["id"]
     client.post(f"{API}/assignments/candidates/{run2['candidates'][2]['id']}:adopt", headers=m)
     assert client.get(f"{API}/events/{eid}/assignment/adopted", headers=m).json()["candidate_id"] == run2["candidates"][2]["id"]
+    # 확정하는 순간 지난 실행은 사라진다 — 한 회차에 남는 배정 기록은 확정한 것 하나뿐
+    runs = client.get(f"{API}/events/{eid}/assignments", headers=m).json()["items"]
+    assert [x["id"] for x in runs] == [run2["id"]]
+    assert client.get(f"{API}/assignments/runs/{run['id']}", headers=m).status_code == 404
+    # 확정하지 않은 실행도 다음 실행 때 지워진다 (확정안은 남는다)
+    run3 = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2}, headers=m).json()
+    run4 = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2}, headers=m).json()
+    assert client.get(f"{API}/assignments/runs/{run3['id']}", headers=m).status_code == 404
+    assert {x["id"] for x in client.get(f"{API}/events/{eid}/assignments", headers=m).json()["items"]} == {run2["id"], run4["id"]}
 
     # 직전 회차 제약: 다음 일정에서 불러오기
     nxt = client.post(f"{API}/teams/{club['team_id']}/events", json={"event_date": "2026-09-20"}, headers=m).json()["id"]

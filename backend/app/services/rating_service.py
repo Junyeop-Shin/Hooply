@@ -48,7 +48,9 @@ def normalized_margin(raw: int, duration_min: int) -> Decimal:
 
 
 def _clipped_margin(raw: int, duration_min: int) -> float:
-    return max(-MARGIN_CLIP, min(MARGIN_CLIP, raw)) * REFERENCE_MIN / max(1, duration_min)
+    """10분 환산한 뒤 상한을 건다. 짧은 쿼터일수록 정규화 배수가 커지므로 환산 전에 자르면 상한이 무의미해진다
+    (1분 쿼터에서 15점 차 → 150점). 10분 쿼터에서는 예전과 같은 값이다."""
+    return max(-MARGIN_CLIP, min(MARGIN_CLIP, raw * REFERENCE_MIN / max(1, duration_min)))
 
 
 def _base_confidence(prof: PlayerProfile, kind: PlayerKind) -> float:

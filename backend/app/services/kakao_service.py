@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.core import errors
 from app.core.config import get_settings
-from app.models import AuthIdentity, User
+from app.models import AuthIdentity, User, UserAvatar
 from app.models.enums import AuthProvider
 from app.schemas.auth import TokenPair
 from app.services.auth_service import _issue_tokens
@@ -126,8 +126,9 @@ def login_or_signup(db: Session, p: KakaoProfile) -> tuple[TokenPair, bool]:
         user = db.get(User, ident.user_id)
         if user is None or user.deleted_at is not None:
             raise errors.KakaoAuthFailed("탈퇴한 계정이에요.")
-        # 프로필 사진은 카카오 CDN 주소가 바뀔 수 있으므로 로그인 때마다 갱신 (11.5절 3항)
-        if p.profile_image_url:
+        # 카카오 CDN 주소는 바뀔 수 있으므로 로그인 때마다 새로 받는다 (11.5절 3항).
+        # 단, 직접 올린 사진이 있으면 건드리지 않는다 — 예전에는 여기서 덮어써서 올린 사진이 로그인 한 번에 사라졌다.
+        if p.profile_image_url and db.get(UserAvatar, user.id) is None:
             user.profile_image_url = p.profile_image_url
         db.commit()
         return _issue_tokens(user), False
@@ -151,7 +152,7 @@ def link(db: Session, user: User, p: KakaoProfile) -> User:
             return user
         raise errors.IdentityAlreadyLinked()
     db.add(AuthIdentity(user_id=user.id, provider=AuthProvider.KAKAO, provider_uid=p.uid, linked_at=datetime.now(UTC)))
-    if not user.profile_image_url and p.profile_image_url:
+    if not user.profile_image_url and p.profile_image_url and db.get(UserAvatar, user.id) is None:
         user.profile_image_url = p.profile_image_url
     db.commit()
     db.refresh(user)

@@ -55,14 +55,21 @@ def test_quarter_validation_and_margins(client, club, event):
     # 플레이어는 기록 불가
     assert client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 10, "white_score": 8, "lineups": good}, headers=p1).status_code == 403
 
-    # 정상 — 12분 쿼터, 블랙 12:9 → raw +3, 정규화 2.5 (블랙) / −2.5 (화이트)
-    r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 12, "white_score": 9, "duration_min": 12, "lineups": good}, headers=m)
+    # 쿼터 길이는 1~10분만 받는다 (기본 8분)
+    r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 1, "white_score": 0, "duration_min": 11, "lineups": good}, headers=m)
+    assert r.status_code == 400 and r.json()["code"] == "VALIDATION_ERROR"
+    assert client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 1, "white_score": 0, "duration_min": 0, "lineups": good}, headers=m).status_code == 400
+    # 정상 — 6분 쿼터, 블랙 12:9 → raw +3, 정규화 5.0 (블랙) / −5.0 (화이트)
+    r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 12, "white_score": 9, "duration_min": 6, "lineups": good}, headers=m)
     assert r.status_code == 201, r.text
     q = r.json()
+    assert q["duration_min"] == 6
     black = [x for x in q["lineups"] if x["side"] == "BLACK"]
     white = [x for x in q["lineups"] if x["side"] == "WHITE"]
-    assert len(black) == 5 and all(x["raw_margin"] == 3 and float(x["normalized_margin"]) == 2.5 for x in black)
-    assert all(x["raw_margin"] == -3 and float(x["normalized_margin"]) == -2.5 for x in white)
+    assert len(black) == 5 and all(x["raw_margin"] == 3 and float(x["normalized_margin"]) == 5.0 for x in black)
+    assert all(x["raw_margin"] == -3 and float(x["normalized_margin"]) == -5.0 for x in white)
+    # 길이를 생략하면 기본 8분
+    assert client.patch(f"{API}/quarters/{q['id']}", json={"duration_min": 10}, headers=m).json()["duration_min"] == 10
     # 중복 → 409
     r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 1, "white_score": 0, "lineups": good}, headers=m)
     assert r.status_code == 409 and r.json()["code"] == "QUARTER_EXISTS"
@@ -165,3 +172,34 @@ def test_merged_guest_quarters_count_for_member(client, signup, club):
     assert client.post(f"{API}/players/{gid}:unmerge", headers=m).status_code == 200
     member = next(c for c in client.get(f"{API}/teams/{club['team_id']}/players", headers=m).json()["items"] if c["id"] == new_pid)
     assert member["quarters_played"] == 0
+
+
+# 검증: 확정 배정 밖의 사람도 쿼터에 넣을 수 있다 — 늦게 온 회원, 당일 부른 게스트, 한 경기 뒤 팀을 옮긴 사람
+def test_lineup_accepts_late_joiners_and_side_change(client, club, event):
+    m = club["manager"]
+    # 그날 처음 온 게스트를 활동이 끝난 뒤에 등록해도 참석자로 들어간다 (일정이 DONE 이어도)
+    g = client.post(f"{API}/events/{event}/guests", json={"display_name": "당일합류", "force_new": True}, headers=m)
+    assert g.status_code == 201, g.text
+    guest_id = g.json()["player"]["id"]
+    # 1쿼터: 게스트가 블랙으로 뛴다 (참석 응답을 하지 않은 사람 대신)
+    q1 = _lineups(club, TOP5[:4], BOT5)
+    q1.append({"player_id": guest_id, "side": "BLACK"})
+    r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 10, "white_score": 6, "duration_min": 8, "lineups": q1}, headers=m)
+    assert r.status_code == 201, r.text
+    # 2쿼터: 밸런스를 맞추려고 같은 게스트를 화이트로 옮긴다
+    q2 = _lineups(club, TOP5, BOT5[:4])
+    q2.append({"player_id": guest_id, "side": "WHITE"})
+    r = client.put(f"{API}/events/{event}/quarters", json={"quarters": [
+        {"quarter_no": 1, "black_score": 10, "white_score": 6, "duration_min": 8, "lineups": q1},
+        {"quarter_no": 2, "black_score": 7, "white_score": 9, "duration_min": 8, "lineups": q2},
+    ]}, headers=m)
+    assert r.status_code == 200, r.text
+    lst = client.get(f"{API}/events/{event}/quarters", headers=m).json()
+    sides = {q["quarter_no"]: next(x["side"] for x in q["lineups"] if x["player_id"] == guest_id) for q in lst["items"]}
+    assert sides == {1: "BLACK", 2: "WHITE"}
+    # 두 사이드로 나뉘어 뛰었어도 출전 쿼터 수는 합쳐서 2
+    assert sum(c["quarters"] for c in lst["summary"]["per_player"] if c["player_id"] == guest_id) == 2
+    # 같은 쿼터에 양 팀으로 동시에 넣는 것은 여전히 막힌다
+    dup = _lineups(club, TOP5[:4], BOT5[:4]) + [{"player_id": guest_id, "side": "BLACK"}, {"player_id": guest_id, "side": "WHITE"}]
+    r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 3, "black_score": 1, "white_score": 0, "lineups": dup}, headers=m)
+    assert r.status_code == 400 and r.json()["code"] == "VALIDATION_ERROR"

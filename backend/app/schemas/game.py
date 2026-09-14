@@ -20,6 +20,11 @@ from pydantic import BaseModel, Field
 
 from app.models.enums import Position, Side
 
+# 쿼터 길이(분) — 동호회 쿼터는 보통 8분이고, 시간이 모자라면 짧게 끊는다. 10분을 넘기는 운영은 받지 않는다.
+DEFAULT_DURATION_MIN = 8
+MIN_DURATION_MIN = 1
+MAX_DURATION_MIN = 10
+
 
 class LineupIn(BaseModel):
     """한 쿼터의 출전자 1명. `QuarterIn.lineups` 원소."""
@@ -39,7 +44,7 @@ class QuarterIn(BaseModel):
     quarter_no: int = Field(ge=1, le=30, description="1부터. 회차마다 개수가 다를 수 있다 (하루 최대 30쿼터)")
     black_score: int = Field(ge=0, le=200, description="블랙 팀 득점")
     white_score: int = Field(ge=0, le=200, description="화이트 팀 득점")
-    duration_min: int = Field(default=10, ge=3, le=60, description="쿼터 길이(분). 마진을 10분 기준으로 정규화하는 데 쓴다 (3분 미만은 정규화가 과대해져 거부)")
+    duration_min: int = Field(default=DEFAULT_DURATION_MIN, ge=MIN_DURATION_MIN, le=MAX_DURATION_MIN, description="쿼터 길이(분). 기본 8분, 1~10분. 마진을 10분 기준으로 정규화하는 데 쓴다")
     lineups: list[LineupIn] = Field(min_length=10, max_length=10, description="팀당 5명, 총 10명")
 
 
@@ -51,7 +56,7 @@ class QuarterUpdate(BaseModel):
 
     black_score: int | None = Field(default=None, ge=0, le=200)
     white_score: int | None = Field(default=None, ge=0, le=200)
-    duration_min: int | None = Field(default=None, ge=3, le=60)
+    duration_min: int | None = Field(default=None, ge=MIN_DURATION_MIN, le=MAX_DURATION_MIN)
     lineups: list[LineupIn] | None = Field(default=None, min_length=10, max_length=10, description="보내면 10명 전체로 교체")
 
 
