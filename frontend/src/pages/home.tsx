@@ -12,7 +12,7 @@ import { MarginTrend, QuarterList } from './player-detail'
 import { surveyApi } from '../api/survey'
 import { POSITIONS, SELF_RANK_LABEL, localISODate, type EventView, type Position, type UserDetail } from '../api/types'
 import { useAuthStore } from '../store/auth'
-import { Avatar, Badge, Button, Card, EmptyState, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
+import { Avatar, Badge, Button, Card, EmptyState, GradeDot, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { fmtEvent } from './events'
 import { startKakao } from './auth'
@@ -208,8 +208,20 @@ export function ProfilePage() {
             )}
 
             {current && (
-              <section>
+              <section className="space-y-2">
                 <SectionTitle>{teams.length > 1 ? `${current.team_name} 설정` : '팀별 설정'}</SectionTitle>
+                {/* 내 등급은 나에게만 보인다. 다른 사람 카드에는 등급이 실리지 않는다 (9.2절 표시 정책) */}
+                <Card className="flex items-center gap-3">
+                  <GradeDot grade={current.skill_grade} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-navy-900">내 실력 등급</p>
+                    <p className="text-xs text-stone-500">
+                      {current.skill_grade
+                        ? '나만 볼 수 있어요. 경기 기록이 쌓이면 달라져요.'
+                        : '설문과 경기 기록이 쌓이면 등급이 생겨요.'}
+                    </p>
+                  </div>
+                </Card>
                 <Card className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs text-stone-500">이 동호회에서 내 실력 위치</p>

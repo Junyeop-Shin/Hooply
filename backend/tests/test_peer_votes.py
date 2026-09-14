@@ -171,7 +171,8 @@ def test_player_stats(client, club, past_event):
     assert r.status_code == 200, r.text
     s = r.json()
     assert s["quarters_played"] == 2 and s["events_attended"] == 1
-    assert s["skill_overall"] is None and s["skill_grade"] is None and s["history"] == []  # 본인에게는 수치 없음
+    assert s["skill_overall"] is None and s["history"] == []  # 본인에게는 수치 없음
+    assert s["skill_grade"] is not None  # 등급은 본인에게만 보인다 (9.2절)
     assert [q["quarter_no"] for q in s["recent_quarters"]] == [2, 1]
     assert s["recent_quarters"][1]["my_score"] == 12 and float(s["recent_quarters"][1]["normalized_margin"]) == 2.5
     assert s["margin_trend"][0]["wins"] == 1 and s["margin_trend"][0]["losses"] == 1

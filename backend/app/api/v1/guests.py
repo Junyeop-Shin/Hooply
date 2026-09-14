@@ -28,6 +28,7 @@ from app.api.deps import DB, CurrentUser, TeamManager, TeamMember, get_team_or_4
 from app.api.v1._docs import errors
 from app.core import errors as E
 from app.models import Team
+from app.models.enums import TeamRole
 from app.schemas.common import ItemList, PlayerCard
 from app.schemas.team import (
     GuestClaimIn,
@@ -42,8 +43,8 @@ from app.services import guest_service
 from app.services.player_service import to_card as _to_card
 
 
-def to_card(p, *, include_grade=True):
-    """이 라우터의 응답은 게스트 관리 화면(매니저·등록자)이 쓰므로 등급을 포함한다."""
+def to_card(p, *, include_grade=False):
+    """기본은 등급을 빼고 돌려준다 (9.2절 표시 정책). 등급을 볼 수 있는 쪽에서만 `include_grade=True` 를 준다."""
     return _to_card(p, include_grade=include_grade)
 
 router = APIRouter(tags=["게스트 관리"])
@@ -75,7 +76,7 @@ def create_guest(db: DB, me: TeamMember, user: CurrentUser, team: Annotated[Team
     )
     db.commit()
     db.refresh(guest)
-    return to_card(guest)
+    return to_card(guest, include_grade=True)  # 방금 본인이 입력한 값
 
 
 @router.get("/teams/{team_id}/guests", response_model=ItemList[PlayerCard], summary="기존 게스트 검색")
@@ -85,14 +86,15 @@ def search_guests(
 ):
     """재방문 게스트를 골라 기록을 이어 붙이기 위해 기존 게스트 레코드를 검색한다.
 
-    - **권한:** 팀원 또는 ADMIN.
+    - **권한:** 팀원 또는 ADMIN. 실력 등급은 매니저에게만 실린다.
     - **처리:** `players(team_id, kind=GUEST, status=ACTIVE)` 를 이름 부분 일치로 찾는다.
       회차 게스트 등록 시 `existing_player_id` 로 넘길 후보 목록이다.
     - **오류:** `404 NOT_FOUND`, `403 NOT_A_MEMBER`.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절, FR-12, S-11.
     """
-    return ItemList(items=[to_card(p) for p in guest_service.search_guests(db, team.id, q)])
+    show_grade = me.role == TeamRole.MANAGER  # 매니저가 매긴 등급은 매니저에게만 (9.2절)
+    return ItemList(items=[to_card(p, include_grade=show_grade) for p in guest_service.search_guests(db, team.id, q)])
 
 
 @router.get(
@@ -110,7 +112,7 @@ def merge_candidates(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_
     - **설계서:** FR-13, 6.2절 병합 절차, S-08 계정 연결.
     """
     pairs = guest_service.merge_candidates(db, team.id)
-    return ItemList(items=[MergeCandidate(guest=to_card(g), member=to_card(m)) for g, m in pairs])
+    return ItemList(items=[MergeCandidate(guest=to_card(g, include_grade=True), member=to_card(m, include_grade=True)) for g, m in pairs])
 
 
 @router.patch(
@@ -139,7 +141,7 @@ def update_player(db: DB, user: CurrentUser, player_id: int, body: PlayerUpdate)
     )
     db.commit()
     db.refresh(guest)
-    return to_card(guest)
+    return to_card(guest, include_grade=True)
 
 
 @router.post(
@@ -164,7 +166,7 @@ def merge_guest(db: DB, user: CurrentUser, guest_player_id: int, body: MergeRequ
         raise E.ForbiddenRole()
     target = guest_service.merge(db, guest, body.into_player_id)
     db.refresh(target)
-    return to_card(target)
+    return to_card(target, include_grade=True)  # 매니저만 호출한다
 
 
 @router.post(
@@ -185,7 +187,7 @@ def unmerge_guest(db: DB, user: CurrentUser, player_id: int):
         raise E.ForbiddenRole()
     guest_service.unmerge(db, guest)
     db.refresh(guest)
-    return to_card(guest)
+    return to_card(guest, include_grade=True)  # 매니저만 호출한다
 
 
 @router.get("/me/guest-claims", response_model=ItemList[GuestClaimView], summary="내 것일 수 있는 게스트 기록")

@@ -48,6 +48,7 @@ from app.models.enums import (
     SelfRankLevel,
 )
 from app.schemas.survey import MyProfile, SurveyAnswerIn, SurveyResponseIn, TeamProfileSummary
+from app.services.player_service import skill_grade_of
 
 PRIOR_SCALE = 2.0  # z 1.0 = 쿼터당 2점 (9.3절: 개인 실력 표준편차 2점)
 SURVEY_CONFIDENCE = Decimal("0.40")  # 설문만 있는 회원의 skill_confidence (게스트 등급 0.25 보다 높게)
@@ -531,7 +532,11 @@ def my_profile(db: Session, user: User) -> MyProfile:
         teams.append(
             TeamProfileSummary(
                 team_id=p.team_id, team_name=p.team.name, player_id=p.id,
-                skill_grade=None, prior_source=prof.prior_source if prof else None,  # 등급은 매니저만 본다
+                # 내 등급은 나에게만 보여 준다 (다른 사람 카드에는 여전히 안 실린다 — 9.2절)
+                skill_grade=skill_grade_of(
+                    prof.skill_overall if prof and prof.skill_overall is not None else (prof.prior_overall if prof else None)
+                ),
+                prior_source=prof.prior_source if prof else None,
                 skill_confidence=prof.skill_confidence if prof else None,
                 self_rank_level=prof.self_rank_level if prof else None,
                 survey_sample_size=survey_sample_size(db, p.team_id),

@@ -412,19 +412,20 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
                Event.event_date <= datetime.now(ZoneInfo(get_settings().timezone)).date())
     ) or 0
     stats = PlayerStats(
-        player=to_card(player, include_grade=detailed), events_attended=attended, quarters_played=len(records),
+        # 이 API 는 본인 또는 매니저만 부를 수 있으므로 등급은 항상 보여 준다. 수치·근거는 아래에서 매니저에게만 붙인다
+        player=to_card(player, include_grade=True), events_attended=attended, quarters_played=len(records),
         position_distribution=dict(positions), margin_trend=trend, recent_quarters=records[:200],
     )
+    skill_now = prof.skill_overall if prof and prof.skill_overall is not None else (prof.prior_overall if prof else None)
+    stats.skill_grade = skill_grade_of(skill_now)  # 등급은 본인에게도 보여 준다
     if not detailed:
         return stats
 
-    skill = prof.skill_overall if prof and prof.skill_overall is not None else (prof.prior_overall if prof else None)
     stats.skill_overall = prof.skill_overall if prof else None
     stats.prior_overall = prof.prior_overall if prof else None
     stats.prior_source = str(prof.prior_source) if prof and prof.prior_source else None
     stats.skill_confidence = prof.skill_confidence if prof else None
     stats.cumulative_residual = prof.cumulative_residual if prof else None
-    stats.skill_grade = skill_grade_of(skill)
     if prof:
         stats.skill_axes = {
             "shooting": prof.skill_shooting, "ball_handling": prof.skill_ball_handling, "passing": prof.skill_passing,
