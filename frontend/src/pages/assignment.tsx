@@ -15,6 +15,7 @@ import { assignmentsApi } from '../api/assignments'
 import { eventsApi } from '../api/events'
 import { POSITIONS, type AttendanceView, type CandidateView, type ConstraintSet, type PlayerCard, type SquadView, type Strategy } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, GradeDot, SectionTitle, Spinner } from '../components/ui'
+import { inSameLock, mergeLock } from '../lib/locks'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
@@ -73,7 +74,7 @@ export function AssignPage() {
   const lockIndexOf = (pid: number) => locks.findIndex((g) => g.includes(pid))
   const sepIndexOf = (pid: number) => seps.findIndex((g) => g.includes(pid))
   const toggle = (pid: number) => setSelected((s) => (s.includes(pid) ? s.filter((x) => x !== pid) : [...s, pid]))
-  const addLock = (ids: number[]) => { setLocks((l) => [...l.filter((g) => !g.some((p) => ids.includes(p))), ids]); setSelected([]) }
+  const addLock = (ids: number[]) => { setLocks((l) => mergeLock(l, ids)); setSelected([]) }  // 이미 묶인 사람이 있으면 그 묶음에 합친다
   const addSep = (ids: number[]) => { setSeps((l) => [...l, ids.slice(-2)]); setSelected([]) }  // 3명 이상이면 가장 오래 전에 고른 사람부터 뺀다
   const pinTo = (sq: 1 | 2) => { setPins((p) => ({ ...p, ...Object.fromEntries(selected.map((pid) => [pid, sq])) })); setSelected([]) }
   const unpin = (pid: number) => setPins((p) => { const n = { ...p }; delete n[pid]; return n })
@@ -86,7 +87,10 @@ export function AssignPage() {
     const gx = x.player.skill_grade ? GRADE_ORDER[x.player.skill_grade] : 9, gy = y.player.skill_grade ? GRADE_ORDER[y.player.skill_grade] : 9
     return gx - gy || x.player.display_name.localeCompare(y.player.display_name)
   })
-  const suggestions = (sug.data?.items ?? []).filter((s) => lockIndexOf(s.guest.id) < 0)
+  // 게스트와 초대한 사람이 이미 같은 묶음이면 승인할 게 없다. 다른 묶음에 있으면 제안은 남기고, 승인하면 두 묶음이 합쳐진다
+  const suggestions = (sug.data?.items ?? []).filter((s) => !inSameLock(locks, s.guest.id, s.target.id))
+  const approvable = suggestions.filter((s) => !dismissed.includes(s.guest.id))
+  const approveAll = () => setLocks((l) => approvable.reduce((acc, s) => mergeLock(acc, [s.guest.id, s.target.id]), l))
   const feasible = validate.data?.feasible ?? false
 
   return (
@@ -107,14 +111,19 @@ export function AssignPage() {
 
         {suggestions.length > 0 && (
           <section>
-            <SectionTitle>묶기 제안 {suggestions.length}</SectionTitle>
+            <SectionTitle action={approvable.length >= 2 && (
+              <button className="text-xs font-semibold text-brand-ink" onClick={approveAll}>모두 승인 ({approvable.length})</button>
+            )}>묶기 제안 {suggestions.length}</SectionTitle>
             <div className="space-y-2">
               {suggestions.map((s) => {
                 const off = dismissed.includes(s.guest.id)
+                const group = locks[lockIndexOf(s.target.id)]  // 초대한 사람이 이미 묶여 있으면 그 묶음에 추가된다
                 return (
                   <Card key={s.guest.id} className={`flex items-center gap-3 py-3 ${off ? 'opacity-60' : ''}`}>
                     <p className="min-w-0 flex-1 text-sm text-ink">
-                      <b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님과 같은 팀으로 묶을까요?
+                      {group
+                        ? <><b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님 묶음({group.length}명)에 함께 넣을까요?</>
+                        : <><b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님과 같은 팀으로 묶을까요?</>}
                     </p>
                     {off ? (
                       <button className="text-xs font-semibold text-brand-ink" onClick={() => setDismissed((d) => d.filter((x) => x !== s.guest.id))}>무시 취소</button>
