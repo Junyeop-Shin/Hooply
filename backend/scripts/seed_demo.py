@@ -21,7 +21,6 @@
       · 이번 주 일요일 — 참석 응답 완료, **배정은 일부러 실행하지 않음** (심사자가 직접 돌려 보는 화면)
       · 다음 주 일요일 — 참석 응답 완료, 역시 배정 전 (심사자가 두 번 해 볼 수 있게)
       · 2주 뒤 일요일 — 응답 수집 중 (미응답 다수 → RSVP 확인용)
-      · 3주 뒤 일정 1건은 취소됨 (취소 상태 표시 확인용)
   - 두 번째 팀 "수요 픽업" (기본 팀 설정 확인용) · 승인 대기 팀 "목요 픽업"
   이미 팀이 있으면 아무것도 만들지 않고 계정 정보만 출력한다 (멱등).
 
@@ -416,13 +415,6 @@ def main() -> None:
         upcoming(1, responded=True, guests=["허훈"])
         upcoming(2, responded=False, guests=[])
 
-        # 5-b) 취소된 일정 1건 — 목록의 '취소됨' 표시 확인용
-        canceled = event_service.create_event(
-            db, team, manager,
-            EventCreate(title="우천 취소된 번개", event_date=sunday + timedelta(days=24), start_time=time(19, 0), end_time=time(21, 0), venue="양재 시민의숲 코트"),
-        )
-        event_service.cancel_event(db, canceled)
-
         # 6) 게스트였던 사람이 가입한 상황 — m20 "허웅" 은 "허웅" 과 이름이 같아
         #    본인 홈에 "본인이 맞나요?" 카드가, 매니저의 팀원 관리에 "기록 이어받기 제안" 이 뜬다
         auth_service.signup(db, SignupRequest(email="m20@demo.com", password=SecretStr(PASSWORD), name="허웅", height_cm=186))
@@ -452,7 +444,7 @@ def main() -> None:
         print(f"최근 {VOTE_WEEKS}회차에는 경기 후 투표가 들어가 있어요 (회차마다 3명은 미응답 — 직접 투표해 볼 수 있어요)")
         print("지난주 회차 제약: 묶기(게스트 허웅+초대자 문경은) · 갈라놓기(서장훈/이상민) · 사전 배치(허재→블랙) → 이번 주 배정 화면의 '지난 조건 불러오기'")
         print("매니저 실력 정렬: 2개 버전 저장됨 (최신이 활성)")
-        print(f"앞으로의 일정: {sunday} / {sunday + timedelta(days=7)} 는 응답 완료 · **배정 전** (직접 실행해 보세요) · {sunday + timedelta(days=14)} 는 응답 수집 중 · {canceled.event_date} 는 취소됨")
+        print(f"앞으로의 일정: {sunday} / {sunday + timedelta(days=7)} 는 응답 완료 · **배정 전** (직접 실행해 보세요) · {sunday + timedelta(days=14)} 는 응답 수집 중")
         print(f"두 번째 팀: {TEAM2_NAME} (코드 {team2.team_code}) · 매니저 m02 이상민 · 허재·m01·m03~m06 이 두 팀 소속 → 홈에서 '기본 팀으로 설정하기'")
         print(f"승인 대기 팀: {TEAM3_NAME} (m08 오세근 생성) — 승인 전이라 일정 기능이 잠겨 있어요")
         print(f"매니저 로그인: {MANAGER_EMAIL} / {PASSWORD}")

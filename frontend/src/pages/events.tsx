@@ -161,7 +161,12 @@ export function EventDetailPage() {
     onSuccess: refresh,
     onError: (e) => setMsg(errMsg(e, '응답하지 못했어요.')),
   })
-  const cancel = useMutation({ mutationFn: () => eventsApi.cancel(id), onSuccess: () => { refresh(); goBack('/') } })
+  const remove = useMutation({
+    mutationFn: () => eventsApi.remove(id),
+    // 지운 일정을 다시 불러오지 않도록 먼저 나가고, 이 일정의 캐시는 버린다
+    onSuccess: () => { goBack('/'); qc.removeQueries({ queryKey: ['events', id] }); refresh() },
+    onError: (e) => setMsg(errMsg(e, '일정을 지우지 못했어요.')),
+  })
   const closeRsvp = useMutation({ mutationFn: () => eventsApi.closeRsvp(id), onSuccess: refresh, onError: (e) => setMsg(errMsg(e, '마감하지 못했어요.')) })
   const removeGuest = useMutation({
     mutationFn: (pid: number) => eventsApi.removeGuest(id, pid),
@@ -194,8 +199,9 @@ export function EventDetailPage() {
 
   return (
     <Screen>
-      <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && e.status === 'OPEN' && (
-        <button className="mr-1 text-sm text-rose-300" onClick={() => confirm('일정을 취소할까요? 응답 기록은 남아요.') && cancel.mutate()}>취소</button>
+      {/* 경기 기록이 있는(DONE) 일정은 실력 지표의 근거라 지울 수 없다. 배정을 확정한 일정(CLOSED)은 지울 수 있다 */}
+      <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && (e.status === 'OPEN' || e.status === 'CLOSED') && (
+        <button className="mr-1 text-sm text-rose-300" disabled={remove.isPending} onClick={() => confirm('일정을 삭제할까요? 참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.') && remove.mutate()}>삭제</button>
       )} />
       <div className="bg-navy-800 px-4 pb-4 text-white">
         <p className="text-lg font-bold">{fmtEvent(e)}</p>

@@ -30,7 +30,7 @@ export const eventsApi = {
   get: (eventId: number) => api<EventView>(`/events/${eventId}`),
   update: (eventId: number, patch: Partial<EventCreateInput>) =>
     api<EventView>(`/events/${eventId}`, { method: 'PATCH', body: patch }),
-  cancel: (eventId: number) => api<void>(`/events/${eventId}`, { method: 'DELETE' }),
+  remove: (eventId: number) => api<void>(`/events/${eventId}`, { method: 'DELETE' }),  // 이력 없이 삭제 — 참석·배정·투표도 함께 지워진다
   closeRsvp: (eventId: number) => api<EventView>(`/events/${eventId}/rsvp:close`, { method: 'POST' }),
   respond: (eventId: number, status: AttendanceStatus, note?: string) =>
     api<AttendanceView>(`/events/${eventId}/attendance`, { method: 'PUT', body: { status, note } }),

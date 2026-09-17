@@ -1072,7 +1072,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/EventView'
     delete:
-      summary: 일정 취소
+      summary: 일정 삭제
       tags:
       - 일정 · 참석
       parameters:

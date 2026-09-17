@@ -135,17 +135,18 @@ def close_rsvp(db: DB, me: EventManager, event: Annotated[Event, Depends(get_eve
     return event_service.event_view(db, event_service.close_rsvp(db, event), me)
 
 
-@router.delete("/events/{event_id}", status_code=204, summary="일정 취소")
-def cancel_event(db: DB, me: EventManager, event: Annotated[Event, Depends(get_event_or_404)]):
-    """일정을 취소한다. 물리 삭제가 아니라 `status=CANCELED`.
+@router.delete("/events/{event_id}", status_code=204, summary="일정 삭제")
+def delete_event(db: DB, me: EventManager, event: Annotated[Event, Depends(get_event_or_404)]):
+    """일정을 지운다. 상태만 바꾸지 않고 행을 삭제하며 이력을 남기지 않는다.
 
     - **권한:** 팀 매니저 또는 ADMIN.
-    - **처리:** 응답·배정 이력은 보존된다. `DONE` 일정은 취소할 수 없다.
-    - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`, `400 VALIDATION_ERROR` — 이미 종료.
+    - **처리:** 참석 응답·배정 실행과 후보안·경기 후 투표가 함께 지워진다. 이 일정에만 불렀던 게스트도
+      다른 기록이 없으면 지운다(초대 이력은 남음). 경기 기록이 있는 `DONE` 일정은 지울 수 없다.
+    - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`, `400 VALIDATION_ERROR` — 경기 기록이 있음.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절, FR-08, 6.2절 `events.status`.
     """
-    event_service.cancel_event(db, event)
+    event_service.delete_event(db, event)
 
 
 @router.put(

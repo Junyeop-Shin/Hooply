@@ -203,3 +203,38 @@ def test_lineup_accepts_late_joiners_and_side_change(client, club, event):
     dup = _lineups(club, TOP5[:4], BOT5[:4]) + [{"player_id": guest_id, "side": "BLACK"}, {"player_id": guest_id, "side": "WHITE"}]
     r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 3, "black_score": 1, "white_score": 0, "lineups": dup}, headers=m)
     assert r.status_code == 400 and r.json()["code"] == "VALIDATION_ERROR"
+
+
+# 일정 삭제: 참석·배정·투표를 함께 지우고, 그 일정에만 온 게스트도 지운다. 경기 기록이 있으면 막는다
+def test_delete_event_removes_records_and_one_off_guests(client, club):
+    m, tid = club["manager"], club["team_id"]
+    regular = client.post(f"{API}/events/{_event(client, club, '2026-09-06')}/guests", json={"display_name": "단골 게스트", "force_new": True}, headers=m).json()["player"]["id"]
+
+    eid = _event(client, club, "2026-09-13")
+    one_off = client.post(f"{API}/events/{eid}/guests", json={"display_name": "한 번 온 게스트", "skill_grade": 3, "force_new": True}, headers=m)
+    assert one_off.status_code == 201, one_off.text
+    one_off_id = one_off.json()["player"]["id"]
+    assert client.post(f"{API}/events/{eid}/guests", json={"display_name": "단골 게스트", "existing_player_id": regular}, headers=m).status_code == 201
+    run = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2}, headers=m).json()
+    assert client.post(f"{API}/assignments/candidates/{run['candidates'][0]['id']}:adopt", headers=m).status_code == 200
+    # 끝난 일정이라 투표가 열려 있다 — 투표가 있어도 지워져야 한다
+    voter = club["members"][1]  # members[0] 은 매니저
+    targets = client.get(f"{API}/events/{eid}/post-game-survey", headers=voter).json()["candidates"]
+    assert client.post(f"{API}/events/{eid}/post-game-survey", json={"votes": [{"target_player_id": targets[0]["player"]["id"], "vote_type": "PLAY_AGAIN"}]}, headers=voter).status_code == 201
+
+    assert client.delete(f"{API}/events/{eid}", headers=m).status_code == 204
+    assert client.get(f"{API}/events/{eid}", headers=m).status_code == 404
+    assert client.get(f"{API}/assignments/runs/{run['id']}", headers=m).status_code == 404
+    names = [g["display_name"] for g in client.get(f"{API}/teams/{tid}/guests", headers=m).json()["items"]]
+    assert "단골 게스트" in names  # 다른 일정에도 온 게스트는 남는다
+    assert "한 번 온 게스트" not in names and all(g["id"] != one_off_id for g in client.get(f"{API}/teams/{tid}/guests", headers=m).json()["items"])
+
+    # 경기 기록이 있는 일정은 지울 수 없다
+    done = _event(client, club, "2026-09-14")
+    q = {"quarter_no": 1, "black_score": 10, "white_score": 8, "lineups": _lineups(club, TOP5, BOT5)}
+    assert client.post(f"{API}/events/{done}/quarters", json=q, headers=m).status_code == 201
+    r = client.delete(f"{API}/events/{done}", headers=m)
+    assert r.status_code == 400 and r.json()["code"] == "VALIDATION_ERROR"
+    assert client.get(f"{API}/events/{done}", headers=m).status_code == 200
+    # 팀원은 지울 수 없다
+    assert client.delete(f"{API}/events/{done}", headers=club["members"][1]).status_code == 403

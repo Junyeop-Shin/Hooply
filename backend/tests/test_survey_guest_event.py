@@ -203,9 +203,10 @@ def test_event_and_rsvp(client, signup, team):
     r = client.put(f"{API}/events/{eid}/attendances/{pid}", json={"status": "ABSENT"}, headers=m)
     assert r.status_code == 200 and r.json()["registered_by"] is not None
 
-    # 취소
+    # 삭제 — 상태만 바꾸지 않고 일정이 사라진다
     assert client.delete(f"{API}/events/{eid}", headers=m).status_code == 204
-    assert client.get(f"{API}/events/{eid}", headers=m).json()["status"] == "CANCELED"
+    assert client.get(f"{API}/events/{eid}", headers=m).status_code == 404
+    assert client.get(f"{API}/teams/{tid}/events", headers=m).json()["meta"]["total"] == 0
 
 
 # ---------------------------------------------------------------------------

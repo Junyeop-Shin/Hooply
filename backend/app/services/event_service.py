@@ -12,20 +12,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors
 from app.models import (
     AssignmentCandidate,
+    AssignmentConstraint,
     AssignmentRun,
     AssignmentSlot,
     AssignmentSquad,
     Event,
     EventAttendance,
     GuestInvitePreset,
+    ManagerRankingEntry,
     Player,
+    PostGameSurvey,
+    PostGameVote,
     Quarter,
+    QuarterLineup,
     Team,
     User,
 )
@@ -115,15 +120,54 @@ def update_event(db: Session, event: Event, body: EventUpdate) -> Event:
     return event
 
 
-def cancel_event(db: Session, event: Event) -> None:
-    if event.status == EventStatus.DONE:
-        raise errors.ValidationError("이미 끝난 일정은 취소할 수 없어요.")
-    event.status = EventStatus.CANCELED
-    from app.services import rating_service
+def delete_event(db: Session, event: Event) -> None:
+    """일정을 지운다. 이력으로 남기지 않는다.
 
-    db.flush()
-    rating_service.recompute_team(db, event.team_id)
+    참석 응답 · 배정 실행과 후보안 · 경기 후 투표는 DB 의 ON DELETE CASCADE 로 함께 사라진다.
+    이 일정에만 불렀던 게스트도 다른 기록이 없으면 함께 지운다 — 초대 이력(guest_invite_presets)은
+    남으므로 다음 일정에서 "이전에 초대한 사람" 으로 다시 부를 수 있다.
+    경기 기록(쿼터)이 있는 일정(DONE)은 실력 지표의 근거라서 지우지 않는다. 쿼터를 먼저 지우면 지울 수 있다.
+    """
+    if event.status == EventStatus.DONE:
+        raise errors.ValidationError("경기 기록이 있는 일정은 지울 수 없어요. 쿼터 기록을 먼저 지워 주세요.")
+    team_id = event.team_id
+    guest_ids = list(
+        db.scalars(
+            select(Player.id).join(EventAttendance, EventAttendance.player_id == Player.id)
+            .where(EventAttendance.event_id == event.id, Player.kind == PlayerKind.GUEST)
+        ).all()
+    )
+    had_votes = db.scalar(select(PostGameSurvey.id).where(PostGameSurvey.event_id == event.id).limit(1)) is not None
+    db.execute(delete(Event).where(Event.id == event.id))
+    db.expire_all()  # 지운 일정·참석 행이 세션에 남아 있지 않게
+    for gid in guest_ids:
+        _delete_guest_if_unused(db, gid)
+    if had_votes:
+        from app.services import peer_service
+
+        peer_service.recompute_team_chemistry(db, team_id)
     db.commit()
+
+
+def _delete_guest_if_unused(db: Session, player_id: int) -> None:
+    """어디에도 기록이 없는 게스트 행을 지운다. 하나라도 참조가 있으면 (다른 일정 참석·경기·투표·정렬·병합) 남긴다."""
+    guest = db.get(Player, player_id)
+    if guest is None or guest.kind != PlayerKind.GUEST or guest.merged_into_player_id is not None:
+        return
+    referenced = [
+        select(EventAttendance.id).where(or_(EventAttendance.player_id == player_id, EventAttendance.team_lock_request_player_id == player_id)),
+        select(QuarterLineup.id).where(QuarterLineup.player_id == player_id),
+        select(AssignmentSlot.id).where(AssignmentSlot.player_id == player_id),
+        select(AssignmentConstraint.id).where(AssignmentConstraint.player_id == player_id),
+        select(PostGameVote.id).where(PostGameVote.target_player_id == player_id),
+        select(PostGameSurvey.id).where(PostGameSurvey.respondent_player_id == player_id),
+        select(ManagerRankingEntry.id).where(ManagerRankingEntry.player_id == player_id),
+        select(Player.id).where(Player.merged_into_player_id == player_id),
+    ]
+    if any(db.scalar(q.limit(1)) is not None for q in referenced):
+        return
+    db.delete(guest)  # 프로필·포지션·실력 이력·케미·본인 확인 기록은 CASCADE, 초대 이력은 SET NULL
+    db.flush()
 
 
 def rsvp_open(event: Event) -> bool:
