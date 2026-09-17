@@ -3,11 +3,11 @@
  * 저장은 하지 않는다(데모 데이터를 건드리지 않기 위해). 저장 경로는 백엔드 테스트가 덮는다.
  */
 import { test, expect } from '@playwright/test'
-import { login, openEvent } from './helpers'
+import { EVENT, login, openEvent } from './helpers'
 
 test('쿼터 기록: 명단에 없던 사람을 반대 팀에 넣을 수 있다', async ({ page }) => {
   await login(page)
-  await openEvent(page, 1)
+  await openEvent(page, EVENT.LAST_WEEK)
   await page.getByRole('button', { name: /경기 기록 \d+쿼터/ }).click()
   await expect(page.getByRole('heading', { name: '경기 기록' })).toBeVisible()
 

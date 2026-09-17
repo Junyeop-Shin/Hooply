@@ -13,7 +13,7 @@ backend/
   alembic/versions/0003_*.py                설문 v2(활성) · 팀별 자기 위치 컬럼 · users.birth_year 삭제
   alembic/versions/0004_*.py                users.position_prefs (프로필 포지션 수정의 원본)
   alembic/versions/0005_*.py                guest_invite_presets (이전 초대 게스트 불러오기)
-  scripts/seed_demo.py                      데모 데이터 (20명 동호회 · 지난 5회차 배정/쿼터 · 피어 투표 · 이번 주 일정 · 두 번째 팀)
+  scripts/seed_demo.py                      데모 데이터 (21명 동호회 · 지난 10회차 배정/쿼터/투표 · 배정 전 일정 2건 · 실력 정렬 · 두 번째 팀)
   app/db/survey_seed.py                     설문 문항·선택지 시드 데이터 (v1 이력 + v2 현재)
   app/
     core/      config · errors(7.4절 에러 코드) · security(bcrypt/JWT)
@@ -48,18 +48,19 @@ npm run dev
 
 전부 도커로 띄우려면 `docker compose up --build` 후 http://localhost:5173 으로 접속합니다.
 
-데모 데이터(20명 동호회 + 이번 주 일요일 일정 + 참석/게스트):
+데모 데이터(21명 동호회 + 지난 10회차 기록 + 배정 전 일정 2건 + 게스트). 전 기능을 둘러보는 순서는 [docs/05-데모시나리오.md](docs/05-데모시나리오.md):
 
 ```bash
 docker compose exec api python -m scripts.seed_demo          # 이미 있으면 건너뜀. 다시 만들려면 --reset (전 데이터 삭제)
 # 관리자 콘솔: http://localhost:8000/admin  (admin@demo.com / demo1234)
-# 운영 DB 에 테스트용 데모 데이터를 잠시 올릴 때:  DATABASE_URL=<Neon> python -m scripts.seed_demo --no-admin   /  지울 때: python -m scripts.remove_demo
+# 운영 DB 에 데모 팀을 올릴 때:  DATABASE_URL=<Neon> python -m scripts.seed_demo --no-admin   /  지울 때: python -m scripts.remove_demo --yes
+# 날짜는 실행일 기준(이번 주 일요일)이라 시간이 지나면 '배정 전 일정'이 과거가 된다 → remove_demo 후 seed_demo 를 다시 실행 (팀 코드도 바뀜)
 #   --reset 은 로컬 DB 에서만 동작 (운영 DB 전체 삭제 방지)
 # 의존성 변경 시: cd backend && uv add <pkg> && uv export --no-dev --no-hashes --no-emit-project -o requirements.txt  (Render·Docker 는 requirements.txt 로 설치)
 # 카카오: 백엔드 KAKAO_CLIENT_ID(REST API 키)·KAKAO_CLIENT_SECRET·KAKAO_REDIRECT_URI(<프론트>/auth/kakao/callback), 프론트 VITE_KAKAO_JS_KEY(JavaScript 키, 공개용)
-# 운영 배포 전 확인: JWT_SECRET_KEY 교체 · DOCS_ENABLED=false · ADMIN_COOKIE_SECURE=true · CORS_ORIGINS/FRONTEND_BASE_URL 을 실제 도메인으로 · seed_demo 는 운영 DB 에 절대 실행하지 않기
-# 매니저: manager@demo.com / demo1234   팀원: m01@demo.com ~ m19@demo.com / demo1234
-# 게스트 불러오기 확인: m07@demo.com(게스트 허훈), manager@demo.com(게스트 송교창)
+# 운영 배포 전 확인: JWT_SECRET_KEY 교체 · DOCS_ENABLED=false · ADMIN_COOKIE_SECURE=true · CORS_ORIGINS/FRONTEND_BASE_URL 을 실제 도메인으로 · 운영 DB 에는 seed_demo 를 --no-admin 없이 실행하지 않기
+# 매니저: manager@demo.com / demo1234   팀원: m01@demo.com ~ m20@demo.com / demo1234 (m19 설문 전 · m20 게스트 출신 가입자)
+# 게스트 불러오기 확인: m04@demo.com(허웅·이승현), m07@demo.com(허훈), manager@demo.com(송교창)
 ```
 
 테스트 (docker의 Postgres를 그대로 사용하며 테이블을 비웁니다):

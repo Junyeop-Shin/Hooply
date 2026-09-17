@@ -18,11 +18,12 @@ test('플레이어에게는 남의 실력 등급이 보이지 않고 내 등급�
   await page.waitForTimeout(800)
   await page.goto('/teams/1/leaderboard')
   await page.waitForTimeout(800)
-  await page.goto('/events/6')           // 이번 주 일정: 참석자 목록
+  // 일정 id 는 시드 생성 순서: 지난 회차 10개(1~10) → 이번 주(11) (backend/scripts/seed_demo.py)
+  await page.goto('/events/11')           // 이번 주 일정: 참석자 목록
   await page.waitForTimeout(1000)
-  await page.goto('/events/5/assignment') // 지난주 확정 배정
+  await page.goto('/events/10/assignment') // 지난주 확정 배정
   await page.waitForTimeout(800)
-  await page.goto('/events/5/vote')       // 투표 후보
+  await page.goto('/events/10/vote')       // 투표 후보
   await page.waitForTimeout(800)
   await page.goto('/me')
   await page.waitForTimeout(800)

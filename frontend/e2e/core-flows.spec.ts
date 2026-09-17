@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { login, openEvent, PLAYER } from './helpers'
+import { EVENT, login, openEvent, PLAYER } from './helpers'
 
 test.describe('핵심 흐름', () => {
   test('로그인 → 홈에 팀과 다가오는 일정이 보인다', async ({ page }) => {
@@ -11,7 +11,7 @@ test.describe('핵심 흐름', () => {
   test('매니저: 팀 배정 실행 → 후보안 3개 → 확정', async ({ page }) => {
     page.on('dialog', (d) => d.accept())
     await login(page)
-    await openEvent(page, 0)
+    await openEvent(page, EVENT.THIS_WEEK)
     await page.getByRole('button', { name: /팀 배정하러 가기|재배정하기/ }).click()
     await expect(page.getByText('대기 칸')).toBeVisible()
     const run = page.getByRole('button', { name: '3가지 배정안 만들기' })
@@ -28,7 +28,7 @@ test.describe('핵심 흐름', () => {
 
   test('매니저: 지난 회차 경기 기록 화면에 쿼터가 보인다', async ({ page }) => {
     await login(page)
-    await openEvent(page, 1)
+    await openEvent(page, EVENT.LAST_WEEK)
     await page.getByRole('button', { name: /경기 기록 \d+쿼터/ }).click()
     await expect(page.getByRole('heading', { name: '경기 기록' })).toBeVisible()
     await expect(page.getByText('1쿼터', { exact: false }).first()).toBeVisible()
