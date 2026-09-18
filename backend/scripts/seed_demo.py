@@ -4,6 +4,7 @@
   cd backend && uv run python -m scripts.seed_demo          # 로컬
   docker compose exec api python -m scripts.seed_demo       # 도커
   DATABASE_URL=<운영> uv run python -m scripts.seed_demo --no-admin   # 운영 DB 에 데모 팀만 (관리자 계정 생략)
+  ... --anchor 2026-09-27                                              # '이번 주' 일요일을 지정 (기본: 다가오는 일요일)
 
 만드는 것
   - 팀 "일요 코트메이트" (회원 20명 + 게스트 4명). 19명은 설문 v2 + 팀 내 자기 위치까지 마쳤고,
@@ -154,6 +155,21 @@ def next_sunday(today: date | None = None) -> date:
     return today + timedelta(days=(6 - today.weekday()) % 7)
 
 
+def anchor_sunday() -> date:
+    """'이번 주' 로 삼을 일요일. 기본은 다가오는 일요일, `--anchor 2026-09-27` 로 지정할 수 있다.
+
+    포트폴리오처럼 며칠 뒤에 볼 사람을 위해 만들 때는 기준을 한 주 뒤로 두면 '배정 전 일정' 이 그때까지 남는다.
+    """
+    import sys
+
+    if "--anchor" in sys.argv:
+        d = date.fromisoformat(sys.argv[sys.argv.index("--anchor") + 1])
+        if d.weekday() != 6:
+            raise SystemExit("--anchor 는 일요일 날짜여야 해요")
+        return d
+    return next_sunday()
+
+
 def attendees_of(weeks_ago: int) -> list[int]:
     """그 회차 참석자의 ROSTER 인덱스 — 고정 10명 + 번갈아 4명. 회차마다 조합이 달라야 실력 추정이 된다 (9.3절)."""
     rot = [ROTATING[(weeks_ago * 4 + k) % len(ROTATING)] for k in range(4)]
@@ -257,7 +273,7 @@ def main() -> None:
             survey_service.set_self_rank(db, caller_player(db, u, team.id), SelfRankLevel(row[2]))
 
         players = [caller_player(db, u, team.id) for u in users]
-        sunday = next_sunday()
+        sunday = anchor_sunday()
         guest_ids: dict[str, int] = {}  # 이름 → players.id (재방문 시 재사용)
 
         rng = random.Random(SIM_SEED)  # 점수 노이즈 난수열 고정. 배정 결과가 실행 시각·id 에 따라 조금씩 달라서 지표 수치는 실행마다 약간 다르다
@@ -377,7 +393,8 @@ def main() -> None:
             adopted = assignment_service.adopted_candidate(db, ev)
             record_quarters(ev, adopted, 7 + weeks_ago % 3)
             db.commit()
-            if weeks_ago <= VOTE_WEEKS:
+            # 투표는 일정 종료 시각이 지나야 열린다 — 기준 일요일을 앞당겨 돌리면(--anchor) 아직 안 끝난 회차가 있을 수 있다
+            if weeks_ago <= VOTE_WEEKS and peer_service.is_open(ev):
                 cast_votes(ev, adopted, attend_idx, weeks_ago)
                 db.commit()
 

@@ -442,7 +442,7 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
           <h3 className="text-lg font-bold text-ink">{editing ? '게스트 수정' : '게스트 초대'}</h3>
           <button type="button" onClick={onClose} aria-label="닫기" className="-mr-1 -mt-1 flex size-9 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
         </div>
-        <p className="mb-4 text-xs text-muted">게스트는 이름만으로 등록돼요. 실력을 알면 등급을 넣어 주세요 — 팀 배정이 정확해져요.</p>
+        <p className="mb-4 text-xs text-muted">이름만 있으면 돼요. 실력을 알면 등급까지 넣어 주세요.</p>
         {!editing && !similar && presets.data && presets.data.items.length > 0 && (
           <div className="mb-4">
             <p className="mb-1.5 text-sm font-medium text-ink">이전에 초대한 사람 불러오기</p>
@@ -453,7 +453,7 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-[11px] text-muted">고르면 지난번에 입력한 값이 채워져요. 고친 뒤 추가하면 돼요.</p>
+            <p className="mt-1 text-[11px] text-muted">고르면 지난번 정보가 그대로 채워져요.</p>
           </div>
         )}
 
@@ -482,7 +482,7 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
               </div>
               <p className={`mt-1 text-[11px] ${grade === null ? 'text-warn-ink' : 'text-muted'}`}>
                 {grade === null
-                  ? '비워 두면 클럽 평균으로 잡혀서, 이 게스트가 뛴 쿼터의 실력 계산이 흐려져요. 대략이라도 골라 주세요 (1 초보 … 5 우리 팀 최상위).'
+                  ? '비워 두면 팀 평균으로 계산돼요. 대략이라도 고르면 배정이 정확해져요 (1 초보 … 5 최상위).'
                   : '1 초보 … 5 우리 팀 최상위. 나중에 바꿀 수 있어요.'}
               </p>
             </div>

@@ -405,9 +405,9 @@ export function GuestClaimCards({ teamId }: { teamId?: number } = {}) {
             <b>{c.team_name}</b>에 게스트 <b>{c.guest.display_name}</b>(으)로 참석 {c.events_attended}회 · 출전 {c.quarters_played}쿼터
             {c.last_event_date ? ` · 마지막 ${c.last_event_date.slice(5).replace('-', '/')}` : ''}
           </p>
-          <p className="mt-1 text-xs text-muted">맞다고 하면 그 기록이 내 계정으로 합쳐지고, 아니라고 하면 다시 묻지 않아요. 잘못 합쳤을 땐 매니저가 되돌릴 수 있어요.</p>
+          <p className="mt-1 text-xs text-muted">맞으면 그 기록이 내 계정으로 합쳐져요. 아니면 다시 묻지 않아요.</p>
           <div className="mt-3 flex gap-2">
-            <Button variant="ghost" className="min-h-10 text-sm" disabled={busy === c.guest.id} onClick={() => decide.mutate({ gid: c.guest.id, accept: false })}>아니에요</Button>
+            <Button variant="ghost" className="min-h-10 shrink-0 whitespace-nowrap text-sm" disabled={busy === c.guest.id} onClick={() => decide.mutate({ gid: c.guest.id, accept: false })}>아니에요</Button>
             <Button full className="min-h-10 text-sm" loading={busy === c.guest.id} onClick={() => confirm(`게스트 ${c.guest.display_name}의 기록을 내 계정으로 가져올까요?`) && decide.mutate({ gid: c.guest.id, accept: true })}>내 기록이에요</Button>
           </div>
         </Card>

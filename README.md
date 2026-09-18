@@ -54,7 +54,7 @@ npm run dev
 docker compose exec api python -m scripts.seed_demo          # 이미 있으면 건너뜀. 다시 만들려면 --reset (전 데이터 삭제)
 # 관리자 콘솔: http://localhost:8000/admin  (admin@demo.com / demo1234)
 # 운영 DB 에 데모 팀을 올릴 때:  DATABASE_URL=<Neon> python -m scripts.seed_demo --no-admin   /  지울 때: python -m scripts.remove_demo --yes
-# 날짜는 실행일 기준(이번 주 일요일)이라 시간이 지나면 '배정 전 일정'이 과거가 된다 → remove_demo 후 seed_demo 를 다시 실행 (팀 코드도 바뀜)
+# 날짜는 실행일 기준(이번 주 일요일)이라 시간이 지나면 '배정 전 일정'이 과거가 된다 → .github/workflows/demo-refresh.yml 이 매주 월요일 00:30(KST) 자동으로 지우고 다시 만든다 (수동: Actions → Demo data refresh, --anchor 로 기준 일요일 지정 가능)
 #   --reset 은 로컬 DB 에서만 동작 (운영 DB 전체 삭제 방지)
 # 의존성 변경 시: cd backend && uv add <pkg> && uv export --no-dev --no-hashes --no-emit-project -o requirements.txt  (Render·Docker 는 requirements.txt 로 설치)
 # 카카오: 백엔드 KAKAO_CLIENT_ID(REST API 키)·KAKAO_CLIENT_SECRET·KAKAO_REDIRECT_URI(<프론트>/auth/kakao/callback), 프론트 VITE_KAKAO_JS_KEY(JavaScript 키, 공개용)

@@ -53,7 +53,7 @@ export function RankingPage() {
       <TopBar title="실력 정렬" back={`/teams/${id}`} />
       <Content>
         <Alert kind="info">
-          <b>상위 ↑ / 하위 ↓</b> — 머릿속 순서대로 놓아 주세요. 12명이면 2분이면 충분해요. 이 순서는 설문과 반반으로 섞여 처음 실력에 반영돼요. 저장할 때마다 남아서 되돌릴 수 있어요.
+          잘하는 사람이 <b>위</b>로 오게 놓아 주세요. 설문과 반반 섞여 처음 실력이 되고, 저장본은 남아서 되돌릴 수 있어요.
           {latest.data && <span className="mt-1 block text-xs text-muted">지금 쓰는 순서: {new Date(latest.data.ranked_at).toLocaleDateString('ko-KR')} 저장본</span>}
         </Alert>
         {msg && <Alert>{msg}</Alert>}
@@ -89,7 +89,7 @@ export function RankingPage() {
       </Content>
       <BottomAction>
         <Button full loading={save.isPending} disabled={!order || order.length < 2} onClick={() => save.mutate()}>
-          이 순서로 저장 {latest.data ? '(새로 저장)' : ''}
+          이 순서로 저장
         </Button>
       </BottomAction>
     </Screen>

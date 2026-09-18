@@ -108,7 +108,7 @@ export function AssignPage() {
               <p className="text-sm font-semibold text-ink">아직 참석 응답을 받고 있어요</p>
               <p className="text-xs text-muted">지금 마감하면 인원이 확정되고 팀원은 응답을 바꿀 수 없어요.</p>
             </div>
-            <Button variant="secondary" className="min-h-10 text-sm" loading={closeRsvp.isPending} onClick={() => confirm('참석 응답을 지금 마감할까요?') && closeRsvp.mutate()}>응답 마감</Button>
+            <Button variant="secondary" className="min-h-10 shrink-0 whitespace-nowrap text-sm" loading={closeRsvp.isPending} onClick={() => confirm('참석 응답을 지금 마감할까요?') && closeRsvp.mutate()}>응답 마감</Button>
           </Card>
         )}
         {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 짠 배정안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
@@ -124,7 +124,7 @@ export function AssignPage() {
                 const group = locks[lockIndexOf(s.target.id)]  // 초대한 사람이 이미 묶여 있으면 그 묶음에 추가된다
                 return (
                   <Card key={s.guest.id} className={`flex items-center gap-3 py-3 ${off ? 'opacity-60' : ''}`}>
-                    <p className="min-w-0 flex-1 text-sm text-ink">
+                    <p className="min-w-0 flex-1 text-sm leading-snug text-ink">
                       {group
                         ? <><b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님 묶음({group.length}명)에 함께 넣을까요?</>
                         : <><b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님과 같은 팀으로 묶을까요?</>}
@@ -485,7 +485,7 @@ export function AdoptedPage() {
         <Card className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-ink">단체방에 팀 구성 보내기</p>
-            <p className="text-xs text-muted">{shareMsg ?? '두 팀 명단을 이미지로 만들어 카카오톡으로 보내요.'}</p>
+            <p className="text-xs text-muted">{shareMsg ?? '두 팀 명단을 이미지 한 장으로 보내요.'}</p>
           </div>
           <button
             onClick={() => share.mutate()} disabled={share.isPending || !ev.data}

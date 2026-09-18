@@ -595,7 +595,7 @@ def explain_manager(sc: Scored, strategy: Strategy, prep: Prepared) -> str:
     gap = max(means) - min(means)
     lines = [
         f"[{STRATEGY_LABEL[strategy]}] " + " · ".join(f"{names[i]} {len(sc.squads[i])}명" for i in range(len(means)))
-        + f" — 두 팀이 붙으면 한 쿼터에 약 {gap:.1f}점 차가 날 것으로 예상돼요 (0에 가까울수록 균형)."
+        + f" — 두 팀이 붙으면 한 쿼터에 약 {gap:.2f}점 차가 날 것으로 예상돼요 (0에 가까울수록 균형)."  # 결과 화면 상단 카드(skill_spread 소수 둘째 자리)와 같은 자릿수
     ]
     if sc.hard_ok:
         lines.append("양 팀 모두 1번(볼 운반)·5번(골밑) 가능 인원을 확보했어요.")

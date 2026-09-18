@@ -108,7 +108,7 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
       </Content>
       <BottomAction>
         <div className="flex gap-2">
-          <Button variant="ghost" onClick={() => setStep(step - 1)} disabled={step === 0}>이전</Button>
+          <Button variant="ghost" className="shrink-0 whitespace-nowrap px-4" onClick={() => setStep(step - 1)} disabled={step === 0}>이전</Button>
           {last ? (
             <Button full disabled={!stepDone} loading={submit.isPending} onClick={() => submit.mutate()}>제출하기</Button>
           ) : (

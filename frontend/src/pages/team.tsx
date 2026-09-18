@@ -6,7 +6,6 @@ import { ApiError } from '../api/client'
 import { teamsApi } from '../api/teams'
 import { eventsApi } from '../api/events'
 import { EventRow, GuestClaimCards, useMe } from './home'
-import { fmtEvent } from '../lib/format'
 import { SHARE_DONE, shareText } from '../lib/kakao'
 import { AdoptedSummary } from './assignment'
 import { surveyApi } from '../api/survey'
@@ -212,7 +211,7 @@ export function TeamDetailPage() {
                   <div key={e.id}>
                     {e.survey_open && e.status !== 'CANCELED' && e.my_attendance === 'ATTEND' && !e.my_survey_submitted && (
                       <button onClick={() => nav(`/events/${e.id}/vote`)} className="mb-1 flex w-full items-center justify-between rounded-2xl bg-court-500 px-4 py-2.5 text-left text-sm font-semibold text-white">
-                        <span>{fmtEvent(e)} - 경기 후 투표하기</span><span>→</span>
+                        <span>{Number(e.event_date.slice(5, 7))}/{Number(e.event_date.slice(8, 10))} 경기 어땠어요? 같이 뛰고 싶은 사람 뽑기 (30초)</span><span>→</span>
                       </button>
                     )}
                     <EventRow e={e} withDetail={!!e.adopted_candidate_id && e.event_date >= today} past={e.event_date < today} />
@@ -398,7 +397,21 @@ export function MembersPage() {
               <p className="text-xs text-muted">팀 코드</p>
               <p className="font-mono text-xl font-black tracking-[0.25em] text-ink">{t.team_code}</p>
             </div>
-            <Button variant="ghost" className="min-h-10 text-sm" loading={regen.isPending} onClick={() => confirm('기존 코드는 더 이상 쓸 수 없어요. 재발급할까요?') && regen.mutate()}>재발급</Button>
+            <Button variant="ghost" className="min-h-10 shrink-0 text-sm" loading={regen.isPending} onClick={() => confirm('기존 코드는 더 이상 쓸 수 없어요. 재발급할까요?') && regen.mutate()}>재발급</Button>
+          </Card>
+        )}
+        {t && (
+          <Card className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-ink">팀원 초대하기</p>
+              <p className="text-xs text-muted">링크를 받은 사람은 코드 입력 없이 바로 가입해요.</p>
+            </div>
+            <button
+              className="min-h-10 shrink-0 whitespace-nowrap rounded-xl bg-[#FEE500] px-3 text-sm font-semibold text-[#191919] active:brightness-95"
+              onClick={async () => { const { text, url } = teamInviteText(t.name, t.team_code); const r = SHARE_DONE[await shareText(text, url)]; setMsg(r ? { kind: 'info', text: r } : null) }}
+            >
+              카카오톡 초대
+            </button>
           </Card>
         )}
         <Card className="flex items-center justify-between">
@@ -468,7 +481,7 @@ export function MembersPage() {
         {candidates.data && candidates.data.items.length > 0 && (
           <section>
             <SectionTitle>기록 이어받기 제안</SectionTitle>
-            <Alert kind="info">게스트로 오던 사람이 회원가입한 것 같아요. 같은 사람이 맞으면 병합해 과거 기록을 이어 주세요. (이름만 같은 다른 사람일 수도 있어요)</Alert>
+            <Alert kind="info">같은 이름의 게스트 기록이 있어요. 같은 사람이면 병합해 기록을 이어 주세요. 동명이인일 수 있으니 확인 후 눌러 주세요.</Alert>
             <div className="mt-2 space-y-2">
               {candidates.data.items.map((c) => (
                 <Card key={`${c.guest.id}-${c.member.id}`} className="flex items-center gap-3 py-3">

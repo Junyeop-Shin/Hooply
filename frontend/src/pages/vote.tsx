@@ -126,7 +126,7 @@ export function VotePage() {
       <Content>
         <div className="px-1">
           {ev.data && <p className="text-xs font-semibold text-muted">{fmtEvent(ev.data)}</p>}
-          <p className="mt-2 text-sm leading-relaxed text-ink">같이 농구를 한 사람 중 다음에 같은 팀으로 뛰고 싶은 사람을 골라 주세요. {hasTeams ? '우리 팀 최대 2명, 상대 팀 최대 2명까지 고를 수 있어요.' : `최대 ${MAX_PER_SIDE * 2}명까지 고를 수 있어요.`}</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink">다음에 또 같은 팀으로 뛰고 싶은 사람을 골라 주세요. {hasTeams ? '우리 팀·상대 팀에서 2명씩' : `최대 ${MAX_PER_SIDE * 2}명`} 고를 수 있고, 다음 팀을 짤 때 반영돼요.</p>
         </div>
         {msg && <Alert>{msg}</Alert>}
 
