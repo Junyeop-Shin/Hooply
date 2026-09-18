@@ -19,7 +19,11 @@ jobs:
           DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
           if [ -z "$DATABASE_URL" ]; then echo "BACKUP_DATABASE_URL 시크릿이 없어요"; exit 1; fi
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null
+          # Neon 은 PostgreSQL 18 이라 러너 기본 클라이언트(16)로는 pg_dump 가 버전 불일치로 멈춘다 → PGDG 저장소에서 18 설치
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-common >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-18 >/dev/null
+          pg_dump --version
           pg_dump --format=custom --no-owner --no-privileges "$DATABASE_URL" -f hooply.dump
           ls -la hooply.dump
       - uses: actions/upload-artifact@v4
