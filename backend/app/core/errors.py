@@ -1,3 +1,5 @@
+import logging
+
 """7.4절 에러 코드 체계.
 
 형식 오류 400 · 인증 401 · 권한 403 · 없음 404 · 상태 충돌 409 · 도메인 규칙 위반 422.
@@ -226,6 +228,13 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _app_error(_: Request, exc: AppError) -> JSONResponse:
         body = ErrorResponse(code=exc.code, message=exc.message, details=exc.details)
         return JSONResponse(status_code=exc.status_code, content=body.model_dump())
+
+    @app.exception_handler(Exception)
+    async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
+        # 예상 못한 예외는 스택을 로그에 남기고 클라이언트에는 고정 문구만 (스택·SQL 이 새지 않게)
+        logging.getLogger("hooply").exception("처리되지 않은 오류: %s %s", request.method, request.url.path)
+        body = ErrorResponse(code="INTERNAL_ERROR", message=InternalError.message, details=[])
+        return JSONResponse(status_code=500, content=body.model_dump())
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:

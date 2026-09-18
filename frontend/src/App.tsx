@@ -66,6 +66,7 @@ export default function App() {
         <Route path="/teams/:teamId/self-rank" element={<SelfRankPage />} /> {/* 구 E3 — 팀 가입 직후 */}
         <Route path="/teams/:teamId/events/new" element={<EventCreatePage />} /> {/* S-09 */}
         <Route path="/events/:eventId" element={<EventDetailPage />} />       {/* S-10 · S-11 */}
+        <Route path="/events/:eventId/edit" element={<EventCreatePage />} />  {/* S-09 수정 모드 */}
         <Route path="/teams/:teamId/ranking" element={<RankingPage />} />  {/* S-19 */}
         <Route path="/events/:eventId/assign" element={<AssignPage />} />  {/* S-12 */}
         <Route path="/assignments/runs/:runId" element={<RunResultPage />} /> {/* S-13 */}

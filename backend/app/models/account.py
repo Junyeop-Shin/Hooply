@@ -26,6 +26,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -131,3 +132,18 @@ class UserAvatar(Base):
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     cache_key: Mapped[str] = mapped_column(String(16), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RevokedToken(Base):
+    """로그아웃하거나 회전(refresh)으로 버려진 refresh 토큰의 `jti`.
+
+    refresh 토큰은 14일짜리라 로그아웃 뒤에도 유효하면 기기 분실 시 위험하다. 폐기 목록에 있는 jti 로는
+    재발급을 거부한다. `expires_at` 이 지난 행은 어차피 서명 만료로 막히므로 지워도 된다.
+    """
+
+    __tablename__ = "revoked_tokens"
+
+    jti: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=sa_text("now()"))

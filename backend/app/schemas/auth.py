@@ -78,6 +78,19 @@ class KakaoLinkRequest(BaseModel):
     redirect_uri: str | None = Field(default=None, description="login-url 때 보낸 것과 같은 값")
 
 
+class LogoutRequest(BaseModel):
+    """로그아웃 — `POST /auth/logout`. 보낸 refresh 토큰을 폐기한다 (access 는 30분 뒤 스스로 만료)."""
+
+    refresh_token: str
+
+
+class ChangePasswordRequest(BaseModel):
+    """비밀번호 변경 — `POST /me/password` (로그인 상태). 현재 비밀번호를 다시 확인한다."""
+
+    current_password: SecretStr
+    new_password: SecretStr = Field(min_length=8, max_length=72, description="새 비밀번호. 제약은 SignupRequest.password와 동일")
+
+
 class RefreshRequest(BaseModel):
     """`POST /auth/refresh` 요청. 만료·위조·type 불일치면 401 TOKEN_EXPIRED."""
 

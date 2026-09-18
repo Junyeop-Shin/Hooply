@@ -27,13 +27,18 @@ from app.core import errors
 from app.core.security import (
     create_access_token,
     create_refresh_token,
-    decode_token,
+    decode_refresh,
     hash_password,
     verify_password,
 )
-from app.models import AuthIdentity, User
-from app.models.enums import AuthProvider
+from app.models import AuthIdentity, Player, RevokedToken, User, UserAvatar
+from app.models.enums import AuthProvider, PlayerKind, PlayerStatus, TeamRole
 from app.schemas.auth import LoginRequest, SignupRequest, TokenPair
+
+
+def normalize_email(email: str) -> str:
+    """이메일은 대소문자를 구분하지 않는다. 저장·조회 모두 소문자로 (0016 마이그레이션이 기존 행도 맞췄다)."""
+    return email.strip().lower()
 
 
 def _issue_tokens(user: User) -> TokenPair:
@@ -65,17 +70,18 @@ def signup(db: Session, req: SignupRequest) -> TokenPair:
     참고: soft delete된 계정(`deleted_at` 설정)도 이메일 UNIQUE 제약에 걸리므로
     같은 이메일로 재가입은 현재 불가하다. 재가입 정책은 아직 미정.
     """
-    if db.scalar(select(User).where(User.email == req.email)):
+    email = normalize_email(req.email)
+    if db.scalar(select(User).where(User.email == email)):
         raise errors.EmailDuplicated()
     user = User(
-        email=req.email,
+        email=email,
         password_hash=hash_password(req.password.get_secret_value()),
         name=req.name,
         nickname=req.nickname,
         height_cm=req.height_cm,
     )
     user.identities.append(
-        AuthIdentity(provider=AuthProvider.LOCAL, provider_uid=req.email, linked_at=datetime.now(UTC))
+        AuthIdentity(provider=AuthProvider.LOCAL, provider_uid=email, linked_at=datetime.now(UTC))
     )
     db.add(user)
     db.commit()
@@ -98,7 +104,7 @@ def login(db: Session, req: LoginRequest) -> TokenPair:
     부수 효과: 없음 (읽기 전용, 커밋 없음).
     에러: `401 INVALID_CREDENTIALS`.
     """
-    user = db.scalar(select(User).where(User.email == req.email, User.deleted_at.is_(None)))
+    user = db.scalar(select(User).where(User.email == normalize_email(req.email), User.deleted_at.is_(None)))
     if user is None or user.password_hash is None:
         raise errors.InvalidCredentials()
     if not verify_password(req.password.get_secret_value(), user.password_hash):
@@ -115,14 +121,91 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
 
     입력: refresh 토큰 문자열
     출력: `TokenPair` (access·refresh 모두 새로 발급 — 회전 방식)
-    부수 효과: 없음. 이전 refresh 토큰을 폐기하는 블랙리스트는 아직 없다.
-    에러: `401 TOKEN_EXPIRED` (무효·만료·타입 불일치·삭제된 계정 모두).
+    부수 효과: 쓴 refresh 토큰의 jti 를 폐기 목록에 넣는다 (같은 토큰을 두 번 쓰면 401).
+    에러: `401 TOKEN_EXPIRED` (무효·만료·타입 불일치·폐기됨·삭제된 계정 모두).
     """
-    user_id = decode_token(refresh_token, "refresh")
-    user = db.get(User, user_id) if user_id else None
-    if user is None or user.deleted_at is not None:
+    decoded = decode_refresh(refresh_token)
+    if decoded is None:
         raise errors.TokenExpired()
+    user_id, jti, exp = decoded
+    user = db.get(User, user_id)
+    if user is None or user.deleted_at is not None or db.get(RevokedToken, jti) is not None:
+        raise errors.TokenExpired()
+    db.add(RevokedToken(jti=jti, user_id=user.id, expires_at=exp))
+    db.commit()
     return _issue_tokens(user)
+
+
+def logout(db: Session, refresh_token: str) -> None:
+    """refresh 토큰을 폐기한다. 이미 무효한 토큰이면 조용히 넘어간다 (로그아웃은 항상 성공해야 한다)."""
+    decoded = decode_refresh(refresh_token)
+    if decoded is None:
+        return
+    user_id, jti, exp = decoded
+    if db.get(RevokedToken, jti) is None:
+        db.add(RevokedToken(jti=jti, user_id=user_id, expires_at=exp))
+        db.commit()
+
+
+def change_password(db: Session, user: User, current: str, new: str) -> None:
+    """로그인 상태에서 비밀번호 교체. 현재 비밀번호가 맞아야 한다 (기기를 빌린 사람이 바꿔 버리지 못하게)."""
+    if user.password_hash is None:
+        raise errors.ValidationError("이메일 비밀번호가 없는 계정이에요. 로그인 화면의 '비밀번호 찾기'로 먼저 만들어 주세요.")
+    if not verify_password(current, user.password_hash):
+        raise errors.InvalidCredentials("현재 비밀번호가 맞지 않아요.")
+    user.password_hash = hash_password(new)
+    db.commit()
+
+
+def delete_account(db: Session, user: User) -> None:
+    """계정 삭제 (soft delete + 개인정보 비식별화).
+
+    행은 남긴다 — 경기 기록·배정·투표가 players 를 참조하기 때문. 대신 이메일·비밀번호·이름·사진·키·로그인 수단을
+    지우고 이름을 '탈퇴한 회원' 으로 바꾼다. 소속 팀에서는 LEFT 처리. 팀에 다른 활성 회원이 있는데 본인이 유일한
+    매니저면 먼저 권한을 넘기라고 거부한다 (매니저 없는 팀이 생기지 않게).
+    이메일이 비워지므로 같은 이메일로 다시 가입할 수 있다.
+    """
+    from app.services import team_service
+
+    players = db.scalars(select(Player).where(Player.user_id == user.id, Player.status == PlayerStatus.ACTIVE)).all()
+    for p in players:
+        if p.role != TeamRole.MANAGER:
+            continue
+        others = db.scalar(
+            select(Player.id).where(Player.team_id == p.team_id, Player.status == PlayerStatus.ACTIVE, Player.kind == PlayerKind.MEMBER, Player.id != p.id).limit(1)
+        )
+        other_mgr = db.scalar(
+            select(Player.id).where(Player.team_id == p.team_id, Player.status == PlayerStatus.ACTIVE, Player.role == TeamRole.MANAGER, Player.id != p.id).limit(1)
+        )
+        if others is not None and other_mgr is None:
+            raise errors.CannotDemoteLastManager(f"'{p.team.name}' 팀의 유일한 매니저예요. 다른 팀원에게 매니저를 넘긴 뒤 탈퇴해 주세요.")
+    now = datetime.now(UTC)
+    for p in players:
+        p.status = PlayerStatus.LEFT
+        p.display_name = "탈퇴한 회원"
+        team = p.team
+        if team.owner_user_id == user.id:
+            heir = db.scalar(
+                select(Player).where(Player.team_id == team.id, Player.status == PlayerStatus.ACTIVE, Player.role == TeamRole.MANAGER, Player.id != p.id).order_by(Player.id)
+            )
+            if heir is not None:
+                team.owner_user_id = heir.user_id
+        db.flush()
+        team_service.refresh_team_status(db, team)
+    user.deleted_at = now
+    user.email = None
+    user.password_hash = None
+    user.name = "탈퇴한 회원"
+    user.nickname = None
+    user.profile_image_url = None
+    user.height_cm = None
+    user.position_prefs = None
+    user.primary_team_id = None
+    user.identities.clear()
+    avatar = db.get(UserAvatar, user.id)
+    if avatar is not None:
+        db.delete(avatar)
+    db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +226,7 @@ def forgot_password(db: Session, email: str) -> None:
     from app.models import PasswordResetToken
     from app.services import mail_service
 
-    user = db.scalar(select(User).where(User.email == email, User.deleted_at.is_(None)))
+    user = db.scalar(select(User).where(User.email == normalize_email(email), User.deleted_at.is_(None)))
     if user is None:
         return
     raw, digest = generate_reset_token()

@@ -21,21 +21,24 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser
 from app.api.v1._docs import errors
 from app.core import errors as E
+from app.core import ratelimit
 from app.models import Player, Team
 from app.models.enums import PlayerKind, PlayerStatus
 from app.schemas.auth import (
     AvatarIn,
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     KakaoLinkRequest,
     KakaoLoginUrl,
     KakaoTokenPair,
     LoginRequest,
+    LogoutRequest,
     RefreshRequest,
     ResetPasswordRequest,
     SignupRequest,
@@ -51,7 +54,7 @@ router = APIRouter(tags=["인증 · 프로필"])
 
 
 @router.post(
-    "/auth/signup", status_code=201, response_model=TokenPair,
+    "/auth/signup", dependencies=[Depends(ratelimit.SIGNUP)], status_code=201, response_model=TokenPair,
     responses=errors(_409="EMAIL_DUPLICATED"), summary="이메일 회원가입",
 )
 def signup(db: DB, body: SignupRequest):
@@ -69,10 +72,11 @@ def signup(db: DB, body: SignupRequest):
 
 
 @router.post(
-    "/auth/login", response_model=TokenPair,
+    "/auth/login", dependencies=[Depends(ratelimit.LOGIN)], response_model=TokenPair,
     responses=errors(_401="INVALID_CREDENTIALS"), summary="이메일 로그인",
 )
 def login(db: DB, body: LoginRequest):
+    ratelimit.LOGIN.by_email(body.email)
     """이메일/비밀번호를 검증하고 토큰 쌍을 발급한다.
 
     - **권한:** 비회원 (인증 불필요).
@@ -166,8 +170,19 @@ def refresh(db: DB, body: RefreshRequest):
     return auth_service.refresh(db, body.refresh_token)
 
 
+@router.post("/auth/logout", status_code=204, summary="로그아웃 (refresh 토큰 폐기)")
+def logout(db: DB, body: LogoutRequest):
+    """보낸 refresh 토큰을 폐기해 이 기기에서 더는 재발급받지 못하게 한다. access 토큰은 30분 안에 스스로 만료된다.
+
+    - **권한:** 누구나 (토큰이 무효해도 204 — 로그아웃은 실패하지 않는다).
+    - **상태:** `구현됨`.
+    """
+    auth_service.logout(db, body.refresh_token)
+    return Response(status_code=204)
+
+
 @router.post(
-    "/auth/password/forgot", status_code=status.HTTP_202_ACCEPTED,
+    "/auth/password/forgot", dependencies=[Depends(ratelimit.PASSWORD)], status_code=status.HTTP_202_ACCEPTED,
     summary="비밀번호 재설정 요청",
 )
 def forgot_password(db: DB, body: ForgotPasswordRequest):
@@ -186,7 +201,7 @@ def forgot_password(db: DB, body: ForgotPasswordRequest):
 
 
 @router.post(
-    "/auth/password/reset",
+    "/auth/password/reset", dependencies=[Depends(ratelimit.PASSWORD)],
     responses=errors(_400="TOKEN_INVALID_OR_EXPIRED"),
     summary="비밀번호 재설정",
 )
@@ -247,6 +262,29 @@ def update_me(db: DB, user: CurrentUser, body: UserUpdate):
         setattr(user, k, v)
     db.commit()
     return user
+
+
+@router.post("/me/password", status_code=204, responses=errors(_401="INVALID_CREDENTIALS", _400="VALIDATION_ERROR"), summary="비밀번호 변경")
+def change_password(db: DB, user: CurrentUser, body: ChangePasswordRequest):
+    """로그인 상태에서 현재 비밀번호를 확인하고 새 비밀번호로 바꾼다.
+
+    - **오류:** `401 INVALID_CREDENTIALS` — 현재 비밀번호 불일치. `400 VALIDATION_ERROR` — 카카오 전용 계정(비밀번호 없음).
+    - **상태:** `구현됨`.
+    """
+    auth_service.change_password(db, user, body.current_password.get_secret_value(), body.new_password.get_secret_value())
+    return Response(status_code=204)
+
+
+@router.delete("/me", status_code=204, responses=errors(_422="CANNOT_DEMOTE_LAST_MANAGER"), summary="계정 삭제")
+def delete_me(db: DB, user: CurrentUser):
+    """계정을 삭제한다. 행은 남기되 이메일·비밀번호·이름·사진·로그인 수단을 지우고, 소속 팀에서 나간다.
+
+    - **처리:** 경기 기록은 '탈퇴한 회원' 이름으로 남는다. 같은 이메일로 다시 가입할 수 있다.
+    - **오류:** `422 CANNOT_DEMOTE_LAST_MANAGER` — 다른 팀원이 있는 팀의 유일한 매니저.
+    - **상태:** `구현됨`.
+    """
+    auth_service.delete_account(db, user)
+    return Response(status_code=204)
 
 
 @router.post("/me/avatar", response_model=UserDetail, responses=errors(_400="VALIDATION_ERROR"), summary="프로필 사진 등록 · 교체")

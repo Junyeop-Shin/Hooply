@@ -1,5 +1,7 @@
 """FastAPI 앱 팩토리 — 라우터·CORS·에러 핸들러 조립과 OpenAPI 메타데이터 (7.1절 공통 규약)."""
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -134,6 +136,8 @@ OPENAPI_TAGS = [
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # 배포 환경(Render)은 stdout 을 그대로 로그로 모은다. 처리되지 않은 예외의 스택이 여기로 나온다 (core/errors.py)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",

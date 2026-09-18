@@ -31,6 +31,7 @@ def approval_off():
     from app.core.config import get_settings
 
     get_settings().team_approval_required = False
+    get_settings().rate_limit_enabled = False  # 픽스처가 가입·로그인을 수십 번 부른다. 제한 자체는 test_account_security 가 켜서 검증
     yield
 
 

@@ -241,6 +241,18 @@ def update_role(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_
     return player_service.to_card(target, include_grade=True)
 
 
+@router.post("/teams/{team_id}:leave", status_code=204, responses=errors(_422="CANNOT_DEMOTE_LAST_MANAGER"), summary="팀 나가기")
+def leave_team(db: DB, me: TeamMember, team: Annotated[Team, Depends(get_team_or_404)]):
+    """내가 팀에서 나간다. 기록은 남고 `status=LEFT`. 팀 코드로 다시 들어오면 복원된다.
+
+    - **오류:** `422 CANNOT_DEMOTE_LAST_MANAGER` — 다른 팀원이 있는데 유일한 매니저. `403 NOT_A_MEMBER` — 비소속 ADMIN.
+    - **상태:** `구현됨`.
+    """
+    if me.id is None:
+        raise E.NotAMember("이 팀에 속해 있지 않아요.")
+    team_service.leave_team(db, team, me)
+
+
 @router.delete(
     "/teams/{team_id}/players/{player_id}", status_code=204,
     responses=errors(_403="FORBIDDEN_ROLE"), summary="팀원 제외",

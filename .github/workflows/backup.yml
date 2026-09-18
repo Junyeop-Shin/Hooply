@@ -1,0 +1,29 @@
+# 운영 DB 일일 백업 — Neon 무료 플랜은 시점 복원이 6시간뿐이고 스냅샷 예약을 지원하지 않는다.
+# 매일 새벽(KST 04:00) pg_dump 를 떠서 GitHub Actions 아티팩트로 30일 보관한다.
+# 필요한 것: 저장소 Settings → Secrets → BACKUP_DATABASE_URL (Neon 연결 문자열, postgresql://...).
+# 복원: 아티팩트를 내려받아  pg_restore --clean --if-exists -d "<DATABASE_URL>" hooply.dump
+name: DB backup
+
+on:
+  schedule:
+    - cron: "0 19 * * *"  # UTC 19:00 = KST 04:00
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    if: ${{ vars.BACKUP_ENABLED != 'false' }}
+    steps:
+      - name: pg_dump
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "BACKUP_DATABASE_URL 시크릿이 없어요"; exit 1; fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null
+          pg_dump --format=custom --no-owner --no-privileges "$DATABASE_URL" -f hooply.dump
+          ls -la hooply.dump
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hooply-db-${{ github.run_id }}
+          path: hooply.dump
+          retention-days: 30

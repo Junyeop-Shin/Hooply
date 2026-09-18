@@ -12,7 +12,7 @@ import { MarginTrend, QuarterList } from '../components/stats'
 import { surveyApi } from '../api/survey'
 import { POSITIONS, SELF_RANK_LABEL, localISODate, type EventView, type Position, type UserDetail } from '../api/types'
 import { useAuthStore } from '../store/auth'
-import { Avatar, Badge, Button, Card, EmptyState, GradeDot, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
+import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { fmtEvent } from '../lib/format'
 import { startKakao } from './auth'
@@ -245,12 +245,62 @@ export function ProfilePage() {
               </section>
             )}
 
-            <Button variant="danger" full onClick={() => { logout(); nav('/login', { replace: true }) }}>로그아웃</Button>
+            <AccountSection user={u} onLoggedOut={() => { logout(); nav('/login', { replace: true }) }} />
           </>
         )}
       </Content>
       <TabBar />
     </Screen>
+  )
+}
+
+/** 계정 관리 — 비밀번호 변경(이메일 로그인 계정만), 로그아웃, 계정 삭제 */
+function AccountSection({ user, onLoggedOut }: { user: UserDetail; onLoggedOut: () => void }) {
+  const hasPassword = user.identities.some((i) => i.provider === 'LOCAL')
+  const [open, setOpen] = useState(false)
+  const [cur, setCur] = useState('')
+  const [nw, setNw] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+  const change = useMutation({
+    mutationFn: () => authApi.changePassword(cur, nw),
+    onSuccess: () => { setMsg('비밀번호를 바꿨어요.'); setOpen(false); setCur(''); setNw('') },
+    onError: (e) => setMsg(e instanceof ApiError ? e.message : '바꾸지 못했어요.'),
+  })
+  const remove = useMutation({
+    mutationFn: authApi.deleteMe,
+    onSuccess: () => { alert('계정을 삭제했어요. 그동안 고마웠어요.'); onLoggedOut() },
+    onError: (e) => setMsg(e instanceof ApiError ? e.message : '삭제하지 못했어요.'),
+  })
+  return (
+    <section className="space-y-2">
+      <SectionTitle>계정</SectionTitle>
+      {msg && <Alert kind={msg.includes('바꿨어요') ? 'info' : 'error'}>{msg}</Alert>}
+      {hasPassword ? (
+        <Card className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-ink">비밀번호 변경</p>
+            <Button variant="ghost" className="min-h-10 text-sm" onClick={() => setOpen((o) => !o)}>{open ? '닫기' : '바꾸기'}</Button>
+          </div>
+          {open && (
+            <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); change.mutate() }}>
+              <Field label="현재 비밀번호" type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" required />
+              <Field label="새 비밀번호" type="password" value={nw} onChange={(e) => setNw(e.target.value)} autoComplete="new-password" minLength={8} maxLength={72} required hint="8자 이상" />
+              <Button type="submit" full loading={change.isPending} disabled={cur.length === 0 || nw.length < 8}>저장</Button>
+            </form>
+          )}
+        </Card>
+      ) : (
+        <Card><p className="text-sm text-muted">카카오로만 로그인하는 계정이에요. 이메일 비밀번호를 만들려면 로그인 화면의 '비밀번호 찾기'를 써 주세요.</p></Card>
+      )}
+      <Button variant="danger" full onClick={onLoggedOut}>로그아웃</Button>
+      <button
+        className="w-full py-2 text-center text-xs text-faint underline underline-offset-2"
+        disabled={remove.isPending}
+        onClick={() => confirm('계정을 삭제할까요? 이메일·이름·사진이 지워지고 팀에서 나가요. 경기 기록은 "탈퇴한 회원"으로 남아요.') && confirm('되돌릴 수 없어요. 정말 삭제할까요?') && remove.mutate()}
+      >
+        계정 삭제
+      </button>
+    </section>
   )
 }
 

@@ -254,3 +254,31 @@ def set_approval(db: Session, team: Team, admin: User | None, approved: bool) ->
     refresh_team_status(db, team)
     db.commit()
     return team
+
+
+def leave_team(db: Session, team: Team, me: Player) -> None:
+    """팀에서 스스로 나간다 (`POST /teams/{id}:leave`). 기록은 남고 `status=LEFT`.
+
+    유일한 매니저는 다른 활성 회원이 있으면 나갈 수 없다 (매니저 없는 팀 방지). 팀장이 나가면 남은 매니저 중
+    가장 먼저 매니저가 된 사람에게 팀장이 넘어간다. 마지막 남은 사람이 나가면 팀은 PENDING 이 된다. commit 까지.
+    """
+    if me.status != PlayerStatus.ACTIVE:
+        raise errors.NotAMember("이미 이 팀에 속해 있지 않아요.")
+    others_active = db.scalar(
+        select(Player.id).where(Player.team_id == team.id, Player.status == PlayerStatus.ACTIVE, Player.kind == PlayerKind.MEMBER, Player.id != me.id).limit(1)
+    )
+    if me.role == TeamRole.MANAGER:
+        heir = db.scalar(
+            select(Player).where(Player.team_id == team.id, Player.status == PlayerStatus.ACTIVE, Player.role == TeamRole.MANAGER, Player.id != me.id).order_by(Player.id)
+        )
+        if heir is None and others_active is not None:
+            raise errors.CannotDemoteLastManager("유일한 매니저는 나갈 수 없어요. 먼저 다른 팀원을 매니저로 지정해 주세요.")
+        if heir is not None and team.owner_user_id == me.user_id:
+            team.owner_user_id = heir.user_id
+    me.status = PlayerStatus.LEFT
+    user = db.get(User, me.user_id) if me.user_id else None
+    if user is not None and user.primary_team_id == team.id:
+        user.primary_team_id = None
+    db.flush()
+    refresh_team_status(db, team)
+    db.commit()

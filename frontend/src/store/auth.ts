@@ -23,7 +23,14 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       setTokens: (pair) => set({ accessToken: pair.access_token, refreshToken: pair.refresh_token }),
       login: (pair) => { queryClient.clear(); set({ accessToken: pair.access_token, refreshToken: pair.refresh_token }) },
-      logout: () => { queryClient.clear(); set({ accessToken: null, refreshToken: null }) },
+      logout: () => {
+        const refresh = useAuthStore.getState().refreshToken
+        if (refresh) {
+          const origin = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+          fetch(`${origin}/api/v1/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: refresh }), keepalive: true }).catch(() => {})
+        }
+        queryClient.clear(); set({ accessToken: null, refreshToken: null })
+      },
     }),
     { name: 'hooply-auth' },
   ),

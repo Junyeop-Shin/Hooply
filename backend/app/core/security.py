@@ -30,6 +30,7 @@ DB 에는 원문이 아니라 SHA-256 해시만 저장한다 (`password_reset_to
 
 import hashlib
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
@@ -72,6 +73,8 @@ def _create_token(subject: int, token_type: str, expires: timedelta) -> str:
     s = get_settings()
     now = datetime.now(UTC)
     payload = {"sub": str(subject), "type": token_type, "iat": now, "exp": now + expires}
+    if token_type == "refresh":
+        payload["jti"] = str(uuid.uuid4())  # 폐기 목록(revoked_tokens)의 키. 로그아웃·회전 때 이 값을 기록한다
     return jwt.encode(payload, s.jwt_secret_key, algorithm=s.jwt_algorithm)
 
 
@@ -108,6 +111,21 @@ def decode_token(token: str, expected_type: str) -> int | None:
     try:
         return int(payload["sub"])
     except (KeyError, ValueError):
+        return None
+
+
+def decode_refresh(token: str) -> tuple[int, str, datetime] | None:
+    """refresh 토큰 → (user_id, jti, 만료 시각). 서명·만료·type 이 어긋나거나 jti 가 없으면 None."""
+    s = get_settings()
+    try:
+        payload = jwt.decode(token, s.jwt_secret_key, algorithms=[s.jwt_algorithm])
+    except JWTError:
+        return None
+    if payload.get("type") != "refresh" or not payload.get("jti"):
+        return None
+    try:
+        return int(payload["sub"]), str(payload["jti"]), datetime.fromtimestamp(int(payload["exp"]), tz=UTC)
+    except (KeyError, ValueError, TypeError):
         return None
 
 

@@ -14,6 +14,7 @@ export const teamsApi = {
     api<{ items: (PlayerCard | PlayerCardDetailed)[] }>(`/teams/${teamId}/players?sort=${sort}`),
   setRole: (teamId: number, playerId: number, role: TeamRole) =>
     api<PlayerCard>(`/teams/${teamId}/players/${playerId}/role`, { method: 'PATCH', body: { role } }),
+  leave: (teamId: number) => api<void>(`/teams/${teamId}:leave`, { method: 'POST' }),
   remove: (teamId: number, playerId: number) =>
     api<void>(`/teams/${teamId}/players/${playerId}`, { method: 'DELETE' }),
 

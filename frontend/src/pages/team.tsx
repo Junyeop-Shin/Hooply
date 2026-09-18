@@ -233,10 +233,34 @@ export function TeamDetailPage() {
               <span>리더보드 <span className="ml-1 text-[11px] font-normal text-muted">참여율 · 출전 쿼터{isManager ? ' · 기여 점수' : ''}</span></span><span>→</span>
             </button>
             {players.data?.items.map((p) => <PlayerRow key={p.id} p={p} isMe={p.id === t.my_player_id} />)}
+            <LeaveTeamButton teamId={id} teamName={t.name} />
           </div>
         )}
       </Content>
     </Screen>
+  )
+}
+
+/** 팀 나가기 — 기록은 남고, 팀 코드로 다시 들어올 수 있다. 유일한 매니저는 서버가 거부한다 */
+function LeaveTeamButton({ teamId, teamName }: { teamId: number; teamName: string }) {
+  const nav = useNavigate()
+  const qc = useQueryClient()
+  const [msg, setMsg] = useState<string | null>(null)
+  const leave = useMutation({
+    mutationFn: () => teamsApi.leave(teamId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['profile'] }); nav('/', { replace: true }) },
+    onError: (e) => setMsg(errMsg(e, '나가지 못했어요.')),
+  })
+  return (
+    <div className="pt-2">
+      {msg && <Alert>{msg}</Alert>}
+      <button
+        className="w-full py-2 text-center text-xs text-faint underline underline-offset-2" disabled={leave.isPending}
+        onClick={() => confirm(`'${teamName}' 팀에서 나갈까요? 기록은 남고, 팀 코드로 다시 들어올 수 있어요.`) && leave.mutate()}
+      >
+        팀 나가기
+      </button>
+    </div>
   )
 }
 

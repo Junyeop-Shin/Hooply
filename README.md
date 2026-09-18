@@ -58,7 +58,8 @@ docker compose exec api python -m scripts.seed_demo          # 이미 있으면 
 #   --reset 은 로컬 DB 에서만 동작 (운영 DB 전체 삭제 방지)
 # 의존성 변경 시: cd backend && uv add <pkg> && uv export --no-dev --no-hashes --no-emit-project -o requirements.txt  (Render·Docker 는 requirements.txt 로 설치)
 # 카카오: 백엔드 KAKAO_CLIENT_ID(REST API 키)·KAKAO_CLIENT_SECRET·KAKAO_REDIRECT_URI(<프론트>/auth/kakao/callback), 프론트 VITE_KAKAO_JS_KEY(JavaScript 키, 공개용)
-# 운영 배포 전 확인: JWT_SECRET_KEY 교체 · DOCS_ENABLED=false · ADMIN_COOKIE_SECURE=true · CORS_ORIGINS/FRONTEND_BASE_URL 을 실제 도메인으로 · 운영 DB 에는 seed_demo 를 --no-admin 없이 실행하지 않기
+# 운영 배포 전 확인: JWT_SECRET_KEY 교체 · DOCS_ENABLED=false · ADMIN_COOKIE_SECURE=true · CORS_ORIGINS/FRONTEND_BASE_URL 을 실제 도메인으로 · RATE_LIMIT_ENABLED 는 기본 true(단일 인스턴스 메모리 기준) ·
+# DB 백업: .github/workflows/backup.yml 이 매일 04:00(KST) pg_dump 를 아티팩트로 30일 보관 — 저장소 Secrets 에 BACKUP_DATABASE_URL 필요. 처리되지 않은 오류는 스택과 함께 서버 로그(Render Logs)에 남는다 · 운영 DB 에는 seed_demo 를 --no-admin 없이 실행하지 않기
 # 매니저: manager@demo.com / demo1234   팀원: m01@demo.com ~ m20@demo.com / demo1234 (m19 설문 전 · m20 게스트 출신 가입자)
 # 게스트 불러오기 확인: m04@demo.com(허웅·이승현), m07@demo.com(허훈), manager@demo.com(송교창)
 ```
@@ -74,7 +75,7 @@ cd backend && uv run pytest -q
 | 구분 | 상태 |
 | --- | --- |
 | 스키마 / 마이그레이션 | 완료 (upgrade/downgrade 왕복 검증) |
-| 인증(이메일) · /me · 팀 생성(관리자 승인 후 활성화)/가입/활성화/정보 수정 · 팀원 목록/권한(팀장만 부여·회수, 팀장 자진 해제 시 승계)/제외(마지막 매니저 보호) | 구현 |
+| 인증(이메일, 대소문자 무시) · 로그아웃(refresh 폐기·회전) · 로그인/가입/비밀번호 경로 요청 제한(429) · 비밀번호 변경 · 계정 삭제(비식별화) · /me · 팀 생성(관리자 승인 후 활성화)/가입/나가기/활성화/정보 수정 · 팀원 목록/권한(팀장만 부여·회수, 팀장 자진 해제 시 승계)/제외(마지막 매니저 보호) | 구현 |
 | 온보딩 설문 v2 (11문항, 1인 1회, 팀 내 z-score → prior) + 팀 가입 후 "동호회 내 내 위치" | 구현 |
 | 일정 등록(지난 일정 불러오기: 날짜·마감 +7일)·목록·상세·수정·삭제(참석·배정·투표 함께, 경기 기록 있으면 불가)·응답 미리 마감 · RSVP · 참석 현황/포지션 요약/경고 · 지난 기록 추가(과거 일정 + 참석 + 쿼터) | 구현 |
 | 게스트: 회차별 등록(팀원 누구나, 키 포함)·수정·삭제 권한·동명이인·재사용·묶기 요청·병합 후보·병합/되돌리기·**본인 확인 병합**(같은 이름의 회원이 가입하면 홈에서 직접 확인해 기록 승계) | 구현 |

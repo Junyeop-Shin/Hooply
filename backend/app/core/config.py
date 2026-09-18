@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     team_approval_required: bool = True
     # --- 배포 ---
     docs_enabled: bool = True  # 운영에서는 False 로 두면 /docs, /openapi.json 이 닫힌다
+    rate_limit_enabled: bool = True  # 로그인·가입·비밀번호 경로 요청 제한 (core/ratelimit.py). 테스트에서는 끈다
     admin_cookie_secure: bool = False  # HTTPS 배포에서는 True (SQLAdmin 세션 쿠키 https_only + same_site=lax)
 
     # --- 실력 지표 ---

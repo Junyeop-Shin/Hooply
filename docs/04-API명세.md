@@ -121,6 +121,10 @@
 | GET | `/events/{event_id}` | 일정 상세 조회 | 200 |
 | PATCH | `/events/{event_id}` | 일정 수정 | 200 |
 | DELETE | `/events/{event_id}` | 일정 삭제 (참석·배정·투표 함께 삭제, 경기 기록이 있으면 400) | 204 |
+| POST | `/auth/logout` | refresh 토큰 폐기 (토큰이 무효해도 204) | 204 |
+| POST | `/me/password` | 비밀번호 변경 (현재 비밀번호 확인) | 204 · 401 |
+| DELETE | `/me` | 계정 삭제 (비식별화, 팀 LEFT, 유일한 매니저면 422) | 204 · 422 |
+| POST | `/teams/{team_id}:leave` | 팀 나가기 (유일한 매니저면 422) | 204 · 422 |
 | POST | `/events/{event_id}/rsvp:close` | 응답 미리 마감 | 200 |
 | PUT | `/events/{event_id}/attendance` | 내 참석 응답 | 200 |
 | PUT | `/events/{event_id}/attendances/{player_id}` | 매니저 대리 참석 등록 | 200 · 403 |

@@ -2,7 +2,7 @@
  * S-09 일정 등록 · S-10 일정 상세/RSVP · S-11 참석자 현황·게스트 등록 (F4, F13, guest-feature-spec 6절).
  * 게스트 등록 바텀시트는 플레이어(S-10)와 매니저(S-11)가 같은 컴포넌트를 쓴다.
  */
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
@@ -38,11 +38,25 @@ const DEFAULT_DURATION_MIN = 120
 const EMPTY_EVENT = { title: '', event_date: '', start_time: '20:00', end_time: '22:00', venue: '', rsvp_date: '', rsvp_time: '', memo: '' }
 
 export function EventCreatePage() {
-  const { teamId } = useParams()
-  const id = Number(teamId)
+  const { teamId, eventId } = useParams()
+  const editId = eventId ? Number(eventId) : null  // /events/:eventId/edit — 같은 폼을 수정에 쓴다
+  const existing = useQuery({ queryKey: ['events', editId], queryFn: () => eventsApi.get(editId!), enabled: editId !== null })
+  const id = editId !== null ? (existing.data?.team_id ?? 0) : Number(teamId)
   const nav = useNavigate()
   const qc = useQueryClient()
   const [f, setF] = useState(EMPTY_EVENT)
+  const [prefilled, setPrefilled] = useState(false)
+  useEffect(() => {
+    if (!existing.data || prefilled) return
+    const e = existing.data
+    const dl = e.rsvp_deadline ? new Date(e.rsvp_deadline) : null
+    const pad = (n: number) => String(n).padStart(2, '0')
+    setF({
+      title: e.title ?? '', event_date: e.event_date, start_time: e.start_time?.slice(0, 5) ?? '', end_time: e.end_time?.slice(0, 5) ?? '',
+      venue: e.venue ?? '', rsvp_date: dl ? localISODate(dl) : '', rsvp_time: dl ? `${pad(dl.getHours())}:${pad(dl.getMinutes())}` : '', memo: e.memo ?? '',
+    })
+    setPrefilled(true)
+  }, [existing.data, prefilled])
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((prev) => ({ ...prev, [k]: e.target.value }))
   // 시작 시각을 바꾸면 종료도 같은 간격만큼 따라온다. 기본 2시간이고, 종료를 직접 고치거나 지난 일정을 채우면
   // 그 길이를 기억해 이후 시작 변경에도 유지한다 (3시간짜리 모임이 2시간으로 줄어들지 않게)
@@ -64,7 +78,7 @@ export function EventCreatePage() {
   }
 
   // 지난 일정 불러오기: 제목·시작/종료·장소·메모는 그대로, 날짜와 응답 마감은 그 일정 기준 +7일. 입력만 채우고 저장은 하지 않는다
-  const recent = useQuery({ queryKey: ['events', 'team', id, 'all', 50], queryFn: () => eventsApi.list(id, { size: 50 }) })
+  const recent = useQuery({ queryKey: ['events', 'team', id, 'all', 50], queryFn: () => eventsApi.list(id, { size: 50 }), enabled: editId === null && id > 0 })
   const lastEvent = (recent.data?.items ?? []).filter((e) => e.status !== 'CANCELED').sort((a, b) => b.event_date.localeCompare(a.event_date) || b.id - a.id)[0]
   const [loadedFrom, setLoadedFrom] = useState<string | null>(null)
   const loadFromLast = () => {
@@ -89,24 +103,25 @@ export function EventCreatePage() {
     setLoadedFrom(fmtEvent(lastEvent))
   }
 
+  const payload = () => ({
+    title: f.title || undefined, event_date: f.event_date, start_time: f.start_time || undefined, end_time: f.end_time || undefined,
+    venue: f.venue || undefined,
+    rsvp_deadline: f.rsvp_date ? new Date(`${f.rsvp_date}T${f.rsvp_time || '22:00'}`).toISOString() : undefined,
+    memo: f.memo || undefined,
+  })
   const m = useMutation({
-    mutationFn: () =>
-      eventsApi.create(id, {
-        title: f.title || undefined, event_date: f.event_date, start_time: f.start_time || undefined, end_time: f.end_time || undefined,
-        venue: f.venue || undefined,
-        rsvp_deadline: f.rsvp_date ? new Date(`${f.rsvp_date}T${f.rsvp_time || '22:00'}`).toISOString() : undefined,
-        memo: f.memo || undefined,
-      }),
+    mutationFn: () => (editId !== null ? eventsApi.update(editId, payload()) : eventsApi.create(id, payload())),
     onSuccess: (ev) => { qc.invalidateQueries({ queryKey: ['events'] }); nav(`/events/${ev.id}`, { replace: true }) },
   })
 
   return (
     <Screen>
-      <TopBar title="일정 등록" back={`/teams/${id}`} />
+      <TopBar title={editId !== null ? '일정 수정' : '일정 등록'} back={editId !== null ? `/events/${editId}` : `/teams/${id}`} />
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); m.mutate() }} className="flex flex-1 flex-col">
         <Content>
+          {editId !== null && <Alert kind="info">응답은 그대로 남아요. 날짜나 시간을 바꿨다면 팀원에게 알려 주세요.</Alert>}
           {loadedFrom && <Alert kind="info">{loadedFrom} 일정으로 채웠어요. 날짜와 응답 마감은 일주일 뒤예요.</Alert>}
-          {lastEvent && !loadedFrom && (
+          {editId === null && lastEvent && !loadedFrom && (
             <Card className="space-y-3 border-brand-line bg-brand-soft">
               <div>
                 <p className="text-sm font-bold text-ink">지난 일정과 같게 채우기</p>
@@ -134,9 +149,9 @@ export function EventCreatePage() {
           </div>
           <p className="-mt-2 px-1 text-xs text-muted">마감 후에는 팀원이 응답을 바꿀 수 없어요. 매니저는 대신 바꿀 수 있어요.</p>
           <Field label="메모 (선택)" value={f.memo} onChange={set('memo')} placeholder="회비, 준비물, 주차 안내 등" />
-          {m.isError && <Alert>{errMsg(m.error, '일정을 만들지 못했어요.')}</Alert>}
+          {m.isError && <Alert>{errMsg(m.error, editId !== null ? '일정을 고치지 못했어요.' : '일정을 만들지 못했어요.')}</Alert>}
         </Content>
-        <BottomAction><Button type="submit" full loading={m.isPending} disabled={!f.event_date}>등록하고 응답 받기</Button></BottomAction>
+        <BottomAction><Button type="submit" full loading={m.isPending} disabled={!f.event_date || (editId !== null && !prefilled)}>{editId !== null ? '수정 저장' : '등록하고 응답 받기'}</Button></BottomAction>
       </form>
     </Screen>
   )
@@ -201,7 +216,10 @@ export function EventDetailPage() {
     <Screen>
       {/* 경기 기록이 있는(DONE) 일정은 실력 지표의 근거라 지울 수 없다. 배정을 확정한 일정(CLOSED)은 지울 수 있다 */}
       <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && (e.status === 'OPEN' || e.status === 'CLOSED') && (
-        <button className="mr-1 text-sm text-rose-300" disabled={remove.isPending} onClick={() => confirm('일정을 삭제할까요? 참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.') && remove.mutate()}>삭제</button>
+        <span className="mr-1 flex gap-3 text-sm">
+          <button className="text-court-300" onClick={() => nav(`/events/${id}/edit`)}>수정</button>
+          <button className="text-rose-300" disabled={remove.isPending} onClick={() => confirm('일정을 삭제할까요? 참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.') && remove.mutate()}>삭제</button>
+        </span>
       )} />
       <div className="bg-navy-800 px-4 pb-4 text-white">
         <p className="text-lg font-bold">{fmtEvent(e)}</p>
@@ -462,7 +480,11 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
                   <button key={g} type="button" onClick={() => setGrade(grade === g ? null : g)} className={`min-h-11 rounded-xl border text-sm font-bold ${grade === g ? 'border-court-500 bg-court-500 text-white' : 'border-line bg-surface text-ink'}`}>{g}</button>
                 ))}
               </div>
-              <p className="mt-1 text-[11px] text-muted">1 초보 … 5 우리 팀 최상위. 모르면 비워 두면 클럽 평균으로 계산해요.</p>
+              <p className={`mt-1 text-[11px] ${grade === null ? 'text-warn-ink' : 'text-muted'}`}>
+                {grade === null
+                  ? '비워 두면 클럽 평균으로 잡혀서, 이 게스트가 뛴 쿼터의 실력 계산이 흐려져요. 대략이라도 골라 주세요 (1 초보 … 5 우리 팀 최상위).'
+                  : '1 초보 … 5 우리 팀 최상위. 나중에 바꿀 수 있어요.'}
+              </p>
             </div>
             <div>
               <p className="mb-1.5 text-sm font-medium text-ink">선호 포지션 <span className="text-faint">(선택)</span></p>
