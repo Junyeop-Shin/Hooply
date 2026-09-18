@@ -26,6 +26,7 @@ from datetime import datetime
 from decimal import Decimal
 from statistics import mean, pstdev
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -316,12 +317,34 @@ def enumerate_partitions(prep: Prepared):
 # ---------------------------------------------------------------------------
 
 
+def _squads_of(prep: Prepared, partition: tuple[int, ...]) -> list[list[RosterPlayer]]:
+    squads: list[list[RosterPlayer]] = [[] for _ in range(prep.team_count)]
+    for node, sq in enumerate(partition):
+        for pid in prep.supernodes[node]:
+            squads[sq].append(prep.roster[pid])
+    return squads
+
+
 @dataclass
 class Scored:
     partition: tuple[int, ...]
-    squads: list[list[RosterPlayer]]
     terms: dict[str, float]
     hard_ok: bool
+    # 팀별 명단은 처음 읽을 때 만든다 — 분할 수천 개를 채점해도 실제로 쓰는 건 후보안 3개뿐이다
+    _squads: list[list[RosterPlayer]] | None = field(default=None, repr=False)
+    _prep: Prepared | None = field(default=None, repr=False)
+
+    @property
+    def squads(self) -> list[list[RosterPlayer]]:
+        if self._squads is None:
+            if self._prep is None:
+                raise RuntimeError("Scored 에 명단도 준비 정보도 없어요")
+            self._squads = _squads_of(self._prep, self.partition)
+        return self._squads
+
+    @squads.setter
+    def squads(self, value: list[list[RosterPlayer]]) -> None:
+        self._squads = value  # 수동 교체(exchange)는 채점 뒤 명단을 바꿔 넣는다
 
     def total(self, w: dict[str, float]) -> float:
         j = (
@@ -375,10 +398,8 @@ def _skill_sd(prep: Prepared) -> float:
 
 
 def score_partition(prep: Prepared, partition: tuple[int, ...], pref_pairs: dict, recent_pairs: set) -> Scored:
-    squads: list[list[RosterPlayer]] = [[] for _ in range(prep.team_count)]
-    for node, sq in enumerate(partition):
-        for pid in prep.supernodes[node]:
-            squads[sq].append(prep.roster[pid])
+    """분할 하나를 채점한다. 읽기 쉬운 기준 구현 — 완전 탐색은 같은 식을 행렬로 푸는 `score_partitions` 를 쓴다."""
+    squads = _squads_of(prep, partition)
     if not prep.skill_sd:
         prep.skill_sd = _skill_sd(prep)
     means = [sum(r.skill for r in s) / len(s) if s else 0.0 for s in squads]
@@ -430,7 +451,102 @@ def score_partition(prep: Prepared, partition: tuple[int, ...], pref_pairs: dict
     gcounts = [sum(1 for r in s if r.is_guest) for s in squads]
     guest = (max(gcounts) - min(gcounts)) / max(1, sum(gcounts)) if sum(gcounts) else 0.0
 
-    return Scored(partition=partition, squads=squads, terms={"skill": skill, "position": position, "pref": pref, "role": role, "fair": fair, "guest": guest, "means": means}, hard_ok=hard_ok)
+    return Scored(partition=partition, _squads=squads, terms={"skill": skill, "position": position, "pref": pref, "role": role, "fair": fair, "guest": guest, "means": means}, hard_ok=hard_ok)
+
+
+def score_partitions(prep: Prepared, partitions: list[tuple[int, ...]], pref_pairs: dict, recent_pairs: set) -> list[Scored]:
+    """분할 전부를 한 번에 채점한다 — `score_partition` 과 같은 값을 내지만 파이썬 루프 대신 행렬 연산이다.
+
+    2팀 기준 분할은 슈퍼노드마다 0/1 이므로, 분할 × 노드 행렬 A 하나로 팀 0 의 인원·실력 합·포지션 수를
+    A·(노드별 값) 으로, 팀 1 은 (1−A) 로 얻는다. 같은 팀 쌍의 선호·반복 합은 노드 쌍 행렬 U 로
+    aᵀUa + (1−a)ᵀU(1−a) 다. 6천 개 분할이 파이썬으로 수백 ms 걸리던 것을 수 ms 로 줄인다.
+    """
+    if prep.team_count != 2 or not partitions:
+        return [score_partition(prep, part, pref_pairs, recent_pairs) for part in partitions]
+    if not prep.skill_sd:
+        prep.skill_sd = _skill_sd(prep)
+    n_nodes = len(prep.supernodes)
+    n_roster = max(1, len(prep.roster))
+    positions = list(Position)
+    pos_idx = {pos: i for i, pos in enumerate(positions)}
+
+    size = np.zeros(n_nodes)
+    skill_sum = np.zeros(n_nodes)
+    handle = np.zeros(n_nodes)
+    big = np.zeros(n_nodes)
+    guest = np.zeros(n_nodes)
+    prim = np.zeros((n_nodes, len(positions)))
+    members: list[list[int]] = []
+    for i, ids in enumerate(prep.supernodes):
+        rs = [prep.roster[pid] for pid in ids]
+        members.append(list(ids))
+        size[i] = len(rs)
+        skill_sum[i] = sum(r.skill for r in rs)
+        handle[i] = float(any(r.can_handle for r in rs))
+        big[i] = float(any(r.can_big for r in rs))
+        guest[i] = sum(1 for r in rs if r.is_guest)
+        for r in rs:
+            if r.primary:
+                prim[i, pos_idx[r.primary]] += 1
+
+    # 노드 쌍 (i<j) 사이의 선호 합 · 최근 같은 팀 쌍 수. 노드 안의 쌍은 어느 분할에서도 같은 팀이라 상수
+    pref_u = np.zeros((n_nodes, n_nodes))
+    rec_u = np.zeros((n_nodes, n_nodes))
+    pref_const = 0.0
+    rec_const = 0
+    if pref_pairs or recent_pairs:
+        def pair_terms(ids_a: list[int], ids_b: list[int] | None) -> tuple[float, int]:
+            pairs = itertools.combinations(sorted(ids_a), 2) if ids_b is None else ((min(a, b), max(a, b)) for a in ids_a for b in ids_b)
+            pv, rc = 0.0, 0
+            for key in pairs:
+                pv += pref_pairs.get(key, 0.0)
+                if key in recent_pairs:
+                    rc += 1
+            return pv, rc
+
+        for i in range(n_nodes):
+            pv, rc = pair_terms(members[i], None)
+            pref_const += pv
+            rec_const += rc
+            for j in range(i + 1, n_nodes):
+                pref_u[i, j], rec_u[i, j] = pair_terms(members[i], members[j])
+
+    A = np.asarray(partitions, dtype=float)  # 1 = 팀 1(화이트), 0 = 팀 0(블랙)
+    A0 = 1.0 - A  # 팀 0 소속 여부
+    s0, s1 = A0 @ size, A @ size
+    m0 = (A0 @ skill_sum) / np.maximum(s0, 1)
+    m1 = (A @ skill_sum) / np.maximum(s1, 1)
+    m0[s0 == 0] = 0.0
+    m1[s1 == 0] = 0.0
+    skill = np.abs(m0 - m1) / max(prep.skill_sd, 0.5)
+
+    missing = ((A0 @ handle) == 0).astype(int) + ((A @ handle) == 0).astype(int) + ((A0 @ big) == 0).astype(int) + ((A @ big) == 0).astype(int)
+    c0, c1 = A0 @ prim, A @ prim
+    imbalance = np.abs(c0 - c1).sum(axis=1) / n_roster
+    position = missing + imbalance
+
+    slots0 = np.where(s0 <= 5, 1, 2)[:, None]
+    slots1 = np.where(s1 <= 5, 1, 2)[:, None]
+    role = (np.maximum(0, c0 - slots0).sum(axis=1) + np.maximum(0, c1 - slots1).sum(axis=1)) / n_roster
+
+    pref_sum = np.einsum("pi,ij,pj->p", A0, pref_u, A0) + np.einsum("pi,ij,pj->p", A, pref_u, A) + pref_const
+    pref = -pref_sum / max(1, n_roster / 2)
+    repeats = np.einsum("pi,ij,pj->p", A0, rec_u, A0) + np.einsum("pi,ij,pj->p", A, rec_u, A) + rec_const
+    fair = repeats / max(1, len(recent_pairs)) if recent_pairs else np.zeros(len(partitions))
+
+    g0, g1 = A0 @ guest, A @ guest
+    gsum = g0 + g1
+    guest_term = np.where(gsum > 0, np.abs(g0 - g1) / np.maximum(gsum, 1), 0.0)
+
+    out = []
+    for k, part in enumerate(partitions):
+        out.append(Scored(
+            partition=part,
+            terms={"skill": float(skill[k]), "position": float(position[k]), "pref": float(pref[k]), "role": float(role[k]),
+                   "fair": float(fair[k]), "guest": float(guest_term[k]), "means": [float(m0[k]), float(m1[k])]},
+            hard_ok=bool(missing[k] == 0), _prep=prep,
+        ))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -562,7 +678,7 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
     ids = [r.id for r in roster]
     pref_pairs = _load_pref_pairs(db, ids)
     recent = _load_recent_pairs(db, event)
-    scored = [score_partition(prep, part, pref_pairs, recent) for part in enumerate_partitions(prep)]
+    scored = score_partitions(prep, list(enumerate_partitions(prep)), pref_pairs, recent)
     if any(s.hard_ok for s in scored):
         pool = [s for s in scored if s.hard_ok]
     else:
