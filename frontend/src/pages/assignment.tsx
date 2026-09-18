@@ -16,6 +16,10 @@ import { eventsApi } from '../api/events'
 import { POSITIONS, type AttendanceView, type CandidateView, type ConstraintSet, type PlayerCard, type SquadView, type Strategy } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, GradeDot, SectionTitle, Spinner } from '../components/ui'
 import { inSameLock, mergeLock } from '../lib/locks'
+import { SHARE_DONE, shareImage } from '../lib/kakao'
+import { fmtEvent } from '../lib/format'
+import { renderSquadImage } from '../lib/squad-image'
+import { teamsApi } from '../api/teams'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
@@ -441,6 +445,19 @@ export function AdoptedPage() {
   const nav = useNavigate()
   const ev = useQuery({ queryKey: ['events', id], queryFn: () => eventsApi.get(id) })
   const view = useQuery({ queryKey: ['events', id, 'adopted'], queryFn: () => assignmentsApi.adopted(id), retry: false })
+  const team = useQuery({ queryKey: ['team', ev.data?.team_id], queryFn: () => teamsApi.get(ev.data!.team_id), enabled: !!ev.data })
+  const [shareMsg, setShareMsg] = useState<string | null>(null)
+  // 구성표 이미지 → 카카오톡. 실력 정보는 이미지에 넣지 않으므로 팀원 누구나 보낼 수 있다
+  const share = useMutation({
+    mutationFn: async () => {
+      const v = view.data!, e = ev.data!
+      const eventLine = `${fmtEvent(e)}${e.venue ? ` · ${e.venue}` : ''}`
+      const img = await renderSquadImage({ teamName: team.data?.name ?? '팀 배정', eventLine, squads: v.squads }, `팀배정-${e.event_date}.png`)
+      return shareImage(img.file, { title: `${team.data?.name ?? '팀 배정'} · ${fmtEvent(e)}`, description: `팀 배정 결과예요. ${v.squads.map((s) => `${s.squad_name} ${s.members.length}명`).join(' · ')}`, url: `${location.origin}/events/${id}/assignment`, width: img.width, height: img.height })
+    },
+    onSuccess: (r) => setShareMsg(SHARE_DONE[r]),
+    onError: (e) => setShareMsg(e instanceof Error ? e.message : '공유하지 못했어요.'),
+  })
   if (view.isLoading) return <Screen><TopBar title="팀 배정 결과" back={`/events/${id}`} /><Spinner /></Screen>
   if (!view.data) return <Screen><TopBar title="팀 배정 결과" back={`/events/${id}`} /><Content><Alert kind="info">아직 확정된 배정이 없어요.</Alert></Content></Screen>
   const v = view.data
@@ -465,6 +482,18 @@ export function AdoptedPage() {
       </div>
       <Content>
         <Card><p className="text-sm text-ink-2 whitespace-pre-line">{v.explanation}</p></Card>
+        <Card className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-ink">단체방에 팀 구성 보내기</p>
+            <p className="text-xs text-muted">{shareMsg ?? '두 팀 명단을 이미지로 만들어 카카오톡으로 보내요.'}</p>
+          </div>
+          <button
+            onClick={() => share.mutate()} disabled={share.isPending || !ev.data}
+            className="min-h-10 shrink-0 rounded-xl bg-[#FEE500] px-3 text-sm font-semibold text-[#191919] disabled:opacity-50"
+          >
+            {share.isPending ? '만드는 중…' : '카카오톡 공유'}
+          </button>
+        </Card>
         {mine && (
           <section>
             <SectionTitle>내 팀 · 팀 {mine.squad_name}</SectionTitle>

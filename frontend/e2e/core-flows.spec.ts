@@ -24,6 +24,13 @@ test.describe('핵심 흐름', () => {
     await page.getByRole('button', { name: '이 배정안으로 확정' }).click()
     await expect(page.getByRole('heading', { name: '팀 배정 결과' })).toBeVisible()
     await expect(page.getByText(/팀 블랙/).first()).toBeVisible()
+
+    // 구성표 이미지 공유 — 카카오 키·OS 공유 시트가 없는 CI 브라우저에서는 PNG 내려받기로 떨어진다
+    const download = page.waitForEvent('download')
+    await page.getByRole('button', { name: '카카오톡 공유' }).click()
+    const file = await download
+    expect(file.suggestedFilename()).toMatch(/^팀배정-\d{4}-\d{2}-\d{2}\.png$/)
+    await expect(page.getByText('이미지를 저장했어요. 카카오톡에 첨부해 주세요.')).toBeVisible()
   })
 
   test('매니저: 지난 회차 경기 기록 화면에 쿼터가 보인다', async ({ page }) => {

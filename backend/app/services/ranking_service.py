@@ -25,7 +25,7 @@ def _load(db: Session, ranking: ManagerRanking) -> RankingView:
     players = {
         p.id: p
         for p in db.scalars(
-            select(Player).where(Player.id.in_(ids)).options(selectinload(Player.profile), selectinload(Player.positions))
+            select(Player).where(Player.id.in_(ids)).options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
         ).all()
     }
     return RankingView(

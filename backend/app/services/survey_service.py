@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from statistics import mean, pstdev
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors
@@ -373,7 +373,13 @@ def _members_with_features(db: Session, team_id: int) -> list[tuple[Player, Surv
 
 
 def survey_sample_size(db: Session, team_id: int) -> int:
-    return len(_members_with_features(db, team_id))
+    """팀에서 설문에 응답한 활성 회원 수. `_members_with_features` 와 같은 조건이지만 응답 본문은 읽지 않는다
+    (내 프로필 화면이 팀마다 부르므로 COUNT 한 번이어야 한다)."""
+    return db.scalar(
+        select(func.count()).select_from(Player)
+        .join(SurveyResponse, SurveyResponse.user_id == Player.user_id)
+        .where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE)
+    ) or 0
 
 
 def _active_ranking_z(db: Session, team_id: int) -> dict[int, float]:

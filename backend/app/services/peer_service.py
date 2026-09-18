@@ -226,10 +226,10 @@ def recompute_team_chemistry(db: Session, team_id: int) -> int:
     함께 참석한 회차 수로 나눠 0~1 로 클립. 양방향(a→b, b→a) 평균이 pref_score, 둘 다 한 번이라도 지목했으면 mutual.
     BEST_PERFORMER 는 여기에 들어가지 않는다 (표시 전용, 4.2절). flush 까지.
     """
-    events = db.scalars(
-        select(Event).where(Event.team_id == team_id, Event.status != EventStatus.CANCELED).order_by(Event.event_date.desc(), Event.id.desc())
+    events = db.execute(
+        select(Event.id, Event.event_date).where(Event.team_id == team_id, Event.status != EventStatus.CANCELED).order_by(Event.event_date.desc(), Event.id.desc())
     ).all()
-    event_ids = [e.id for e in events]
+    event_ids = [eid for eid, _ in events]
     if not event_ids:
         return 0
     att_rows = db.execute(
@@ -269,7 +269,7 @@ def recompute_team_chemistry(db: Session, team_id: int) -> int:
         if key not in kept:
             row.pref_score = None
             row.pref_mutual = False
-    _recompute_best_scores(db, team_id, event_ids)
+    _recompute_best_scores(db, team_id, [(eid, d) for eid, d in events])
     db.flush()
     return len(pairs)
 
@@ -280,10 +280,11 @@ def _directional_pref(common_events_desc: list[int], voted_events: set[int]) -> 
     return min(1.0, s / max(len(common_events_desc), 1))
 
 
-def _recompute_best_scores(db: Session, team_id: int, event_ids: list[int]) -> None:
-    """player_profiles.peer_vote_score = 최근 90일 BEST_PERFORMER 지목 수. **표시 전용** — 실력 산출에 쓰지 않는다."""
+def _recompute_best_scores(db: Session, team_id: int, events: list[tuple[int, date]]) -> None:
+    """player_profiles.peer_vote_score = 최근 90일 BEST_PERFORMER 지목 수. **표시 전용** — 실력 산출에 쓰지 않는다.
+    `events` 는 (id, 날짜) 목록 — 호출자가 이미 읽은 것을 다시 조회하지 않는다."""
     since = datetime.now(ZoneInfo(get_settings().timezone)).date().toordinal() - BEST_WINDOW_DAYS
-    recent = [e.id for e in db.scalars(select(Event).where(Event.id.in_(event_ids))).all() if e.event_date.toordinal() >= since]
+    recent = [eid for eid, d in events if d.toordinal() >= since]
     counts: dict[int, int] = defaultdict(int)
     if recent:
         for pid, n in db.execute(

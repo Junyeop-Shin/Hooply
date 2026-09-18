@@ -172,6 +172,7 @@ class Prepared:
     pin_list: list[PinConstraint]
     violations: list[ConstraintViolation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    skill_sd: float = 0.0  # 명단 전체 실력 표준편차 — 분할 수천 개를 채점할 때 매번 다시 구하지 않는다
 
 
 def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
@@ -345,23 +346,32 @@ def _load_pref_pairs(db: Session, player_ids: list[int]) -> dict[tuple[int, int]
 
 
 def _load_recent_pairs(db: Session, event: Event, limit_events: int = 3) -> set[tuple[int, int]]:
-    """최근 회차에서 같은 팀이었던 쌍 (w_fair)."""
-    prev = db.scalars(
-        select(Event).where(Event.team_id == event.team_id, Event.id != event.id, Event.event_date <= event.event_date)
+    """최근 회차에서 같은 팀이었던 쌍 (w_fair). 회차 수와 무관하게 쿼리 두 번."""
+    prev_ids = list(db.scalars(
+        select(Event.id).where(Event.team_id == event.team_id, Event.id != event.id, Event.event_date <= event.event_date)
         .order_by(Event.event_date.desc(), Event.id.desc()).limit(limit_events)
+    ).all())
+    if not prev_ids:
+        return set()
+    rows = db.execute(
+        select(AssignmentSquad.id, AssignmentSlot.player_id)
+        .join(AssignmentSlot, AssignmentSlot.squad_id == AssignmentSquad.id)
+        .join(AssignmentCandidate, AssignmentCandidate.id == AssignmentSquad.candidate_id)
+        .join(AssignmentRun, AssignmentRun.id == AssignmentCandidate.run_id)
+        .where(AssignmentRun.event_id.in_(prev_ids), AssignmentCandidate.is_adopted.is_(True))
     ).all()
+    by_squad: dict[int, list[int]] = defaultdict(list)
+    for squad_id, pid in rows:
+        by_squad[squad_id].append(pid)
     pairs: set[tuple[int, int]] = set()
-    for e in prev:
-        cand = db.scalar(
-            select(AssignmentCandidate).join(AssignmentRun).where(AssignmentRun.event_id == e.id, AssignmentCandidate.is_adopted.is_(True))
-            .options(selectinload(AssignmentCandidate.squads).selectinload(AssignmentSquad.slots))
-        )
-        if cand is None:
-            continue
-        for sq in cand.squads:
-            ids = sorted(s.player_id for s in sq.slots)
-            pairs.update(itertools.combinations(ids, 2))
+    for ids in by_squad.values():
+        pairs.update(itertools.combinations(sorted(ids), 2))
     return pairs
+
+
+def _skill_sd(prep: Prepared) -> float:
+    skills = [r.skill for r in prep.roster.values()]
+    return pstdev(skills) if len(skills) > 1 else 0.0
 
 
 def score_partition(prep: Prepared, partition: tuple[int, ...], pref_pairs: dict, recent_pairs: set) -> Scored:
@@ -369,11 +379,11 @@ def score_partition(prep: Prepared, partition: tuple[int, ...], pref_pairs: dict
     for node, sq in enumerate(partition):
         for pid in prep.supernodes[node]:
             squads[sq].append(prep.roster[pid])
-    all_skills = [r.skill for r in prep.roster.values()]
-    sd = pstdev(all_skills) if len(all_skills) > 1 else 0.0
-    means = [mean(r.skill for r in s) if s else 0.0 for s in squads]
+    if not prep.skill_sd:
+        prep.skill_sd = _skill_sd(prep)
+    means = [sum(r.skill for r in s) / len(s) if s else 0.0 for s in squads]
     # skill: 팀 평균 차이를 실력 표준편차로 정규화 (0 = 완전 균형)
-    skill = (max(means) - min(means)) / max(sd, 0.5)
+    skill = (max(means) - min(means)) / max(prep.skill_sd, 0.5)
 
     # position: 하드 제약 결손 + 포지션 분포 불균형
     hard_ok = True
@@ -402,19 +412,18 @@ def score_partition(prep: Prepared, partition: tuple[int, ...], pref_pairs: dict
         role += sum(max(0, cnt - slots) for cnt in c.values())
     role /= max(1, len(prep.roster))
 
-    # pref: 팀 내 선호 조합 합 (클수록 좋음 → 음수로)
+    # pref: 팀 내 선호 조합 합 (클수록 좋음 → 음수로) · fair: 최근 회차 같은 팀 반복 쌍 비율
+    # 둘 다 같은 팀 쌍을 훑으므로 한 번에 돈다. 자료가 없으면 아예 훑지 않는다
     pref = 0.0
-    for s in squads:
-        ids = sorted(r.id for r in s)
-        for a, b in itertools.combinations(ids, 2):
-            pref += pref_pairs.get((a, b), 0.0)
-    pref = -pref / max(1, len(prep.roster) / 2)
-
-    # fair: 최근 회차 같은 팀 반복 쌍 비율
     repeats = 0
-    for s in squads:
-        ids = sorted(r.id for r in s)
-        repeats += sum(1 for pair in itertools.combinations(ids, 2) if pair in recent_pairs)
+    if pref_pairs or recent_pairs:
+        for s in squads:
+            ids = sorted(r.id for r in s)
+            for pair in itertools.combinations(ids, 2):
+                pref += pref_pairs.get(pair, 0.0)
+                if pair in recent_pairs:
+                    repeats += 1
+    pref = -pref / max(1, len(prep.roster) / 2)
     fair = repeats / max(1, len(recent_pairs)) if recent_pairs else 0.0
 
     # guest: 게스트(특히 데이터 없는) 편중
@@ -506,8 +515,10 @@ def explain_player(sc: Scored, positions: dict[int, Position | None]) -> str:
 
 
 def validate(db: Session, event: Event, body: AssignmentRunRequest) -> ValidateResult:
-    roster = build_roster(db, event)
-    prep = prepare(roster, body)
+    return _validate_prepared(prepare(build_roster(db, event), body))
+
+
+def _validate_prepared(prep: Prepared) -> ValidateResult:
     if prep.violations:
         return ValidateResult(feasible=False, violations=prep.violations, warnings=prep.warnings)
     # 분할 가능성: 해가 하나라도 있는지
@@ -534,19 +545,20 @@ def _raise_violations(vr: ValidateResult) -> None:
     raise cls(first.message, details=[ErrorDetail(field=str(v.player_ids) if v.player_ids else None, reason=v.message) for v in vr.violations])
 
 
-def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> AssignmentRun:
-    """배정 실행: 검증 → 완전 탐색 → 전략별 후보안 저장.
+def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tuple[AssignmentRun, list[str]]:
+    """배정 실행: 검증 → 완전 탐색 → 전략별 후보안 저장. 반환: (저장된 실행, 경고 문구).
 
     실행 기록을 쌓아 두지 않는다. 확정하지 않고 흘려보낸 지난 실행은 여기서 지우고, 확정한 편성만
     `adopt()` 때까지 남긴다 — 그래야 새 안을 짜 보는 동안에도 플레이어에게 직전 배정이 계속 보인다.
+    돌려주는 실행은 후보안·팀·슬롯·제약까지 다 읽어 둔 상태라, 응답을 만들 때 관계를 하나씩 다시 읽지 않는다.
     """
     if event.status == EventStatus.CANCELED:
         raise errors.ValidationError("취소된 일정은 배정할 수 없어요.")
-    vr = validate(db, event, body)
-    if not vr.feasible:
-        _raise_violations(vr)
     roster = build_roster(db, event)
     prep = prepare(roster, body)
+    vr = _validate_prepared(prep)
+    if not vr.feasible:
+        _raise_violations(vr)
     ids = [r.id for r in roster]
     pref_pairs = _load_pref_pairs(db, ids)
     recent = _load_recent_pairs(db, event)
@@ -586,8 +598,15 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> Assi
         used.add(pick.partition)
         _persist_candidate(db, run_row, strategy, pick, prep)
     db.commit()
-    db.refresh(run_row)
-    return run_row
+    loaded = db.get(
+        AssignmentRun, run_row.id,
+        options=[
+            selectinload(AssignmentRun.constraints),
+            selectinload(AssignmentRun.candidates).selectinload(AssignmentCandidate.squads).selectinload(AssignmentSquad.slots),
+        ],
+        populate_existing=True,
+    )
+    return loaded, prep.warnings
 
 
 def _drop_unadopted_runs(db: Session, event: Event) -> None:
@@ -602,26 +621,26 @@ def _drop_unadopted_runs(db: Session, event: Event) -> None:
 
 
 def _persist_candidate(db: Session, run_row: AssignmentRun, strategy: Strategy, sc: Scored, prep: Prepared) -> AssignmentCandidate:
+    """후보안 하나를 팀·슬롯까지 객체 그래프로 만들어 flush 한 번에 저장한다 (팀마다 따로 INSERT 하지 않는다)."""
     positions: dict[int, Position | None] = {}
-    cand = AssignmentCandidate(
-        run_id=run_row.id, strategy=strategy, total_score=Decimal(str(round(sc.total(STRATEGY_WEIGHTS[strategy]), 3))),
-        metrics=metrics_of(sc), explanation=explain_manager(sc, strategy, prep),
-    )
-    db.add(cand)
-    db.flush()
+    squads = []
     for i, s in enumerate(sc.squads):
         pos = assign_positions(s)
         positions.update(pos)
-        squad = AssignmentSquad(candidate_id=cand.id, squad_no=i + 1, squad_name=SQUAD_NAMES[i], avg_skill=Decimal(str(round(sc.terms["means"][i], 1))))
-        db.add(squad)
-        db.flush()
-        for r in s:
-            db.add(AssignmentSlot(squad_id=squad.id, player_id=r.id, assigned_position=pos.get(r.id)))
-    cand.metrics = {
-        **cand.metrics, "player_explanation": explain_player(sc, positions),
-        # 수동 수정 초기화용 원본 편성 (squad_no → player_ids)
-        "original_squads": {str(i + 1): [r.id for r in s] for i, s in enumerate(sc.squads)},
-    }
+        squads.append(AssignmentSquad(
+            squad_no=i + 1, squad_name=SQUAD_NAMES[i], avg_skill=Decimal(str(round(sc.terms["means"][i], 1))),
+            slots=[AssignmentSlot(player_id=r.id, assigned_position=pos.get(r.id)) for r in s],
+        ))
+    cand = AssignmentCandidate(
+        run_id=run_row.id, strategy=strategy, total_score=Decimal(str(round(sc.total(STRATEGY_WEIGHTS[strategy]), 3))),
+        metrics={
+            **metrics_of(sc), "player_explanation": explain_player(sc, positions),
+            # 수동 수정 초기화용 원본 편성 (squad_no → player_ids)
+            "original_squads": {str(i + 1): [r.id for r in s] for i, s in enumerate(sc.squads)},
+        },
+        explanation=explain_manager(sc, strategy, prep), squads=squads,
+    )
+    db.add(cand)
     db.flush()
     return cand
 
@@ -650,9 +669,11 @@ def _avg_height(players: list[Player]) -> float | None:
     return round(mean(hs), 1) if hs else None
 
 
-def squad_views(db: Session, cand: AssignmentCandidate, *, mask: bool) -> list[SquadView]:
+def squad_views(db: Session, cand: AssignmentCandidate, *, mask: bool, players: dict[int, Player] | None = None) -> list[SquadView]:
+    """`players` 를 주면 참가자 조회를 건너뛴다 — 한 실행의 후보안 3개는 같은 사람들이라 한 번만 읽으면 된다."""
     ids = [s.player_id for sq in cand.squads for s in sq.slots]
-    players = _players_of(db, ids)
+    if players is None:
+        players = _players_of(db, ids)
     out = []
     for sq in sorted(cand.squads, key=lambda x: x.squad_no):
         rows = [players[s.player_id] for s in sq.slots if s.player_id in players]
@@ -683,18 +704,20 @@ def constraints_of(run_row: AssignmentRun) -> ConstraintSet:
     return ConstraintSet(lock_groups=list(locks.values()), separate_groups=list(seps.values()), pins=pins)
 
 
-def candidate_view(db: Session, cand: AssignmentCandidate, *, mask: bool = False) -> CandidateView:
+def candidate_view(db: Session, cand: AssignmentCandidate, *, mask: bool = False, players: dict[int, Player] | None = None) -> CandidateView:
     return CandidateView(
         id=cand.id, strategy=cand.strategy, total_score=cand.total_score, metrics=cand.metrics,
         explanation=cand.metrics.get("player_explanation") if mask else cand.explanation,
-        is_adopted=cand.is_adopted, squads=squad_views(db, cand, mask=mask),
+        is_adopted=cand.is_adopted, squads=squad_views(db, cand, mask=mask, players=players),
     )
 
 
 def run_view(db: Session, run_row: AssignmentRun, warnings: list[str] | None = None) -> AssignmentRunView:
+    ids = list({s.player_id for c in run_row.candidates for sq in c.squads for s in sq.slots})
+    players = _players_of(db, ids) if ids else {}
     return AssignmentRunView(
         id=run_row.id, event_id=run_row.event_id, team_count=run_row.team_count, created_at=run_row.created_at,
-        constraints=constraints_of(run_row), candidates=[candidate_view(db, c) for c in run_row.candidates],
+        constraints=constraints_of(run_row), candidates=[candidate_view(db, c, players=players) for c in run_row.candidates],
         warnings=warnings or [],
     )
 

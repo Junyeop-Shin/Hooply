@@ -85,8 +85,7 @@ def run_assignment(db: DB, me: EventManager, user: CurrentUser, event: Annotated
     - **상태:** `구현됨`.
     - **설계서:** 9.5절 알고리즘, 9.6절 제약, 9.7절 완전 탐색, FR-16 ~ FR-21, FR-33, S-12.
     """
-    run_row = assignment_service.run(db, event, user, body)
-    warnings = assignment_service.validate(db, event, body).warnings
+    run_row, warnings = assignment_service.run(db, event, user, body)
     return assignment_service.run_view(db, run_row, warnings)
 
 
