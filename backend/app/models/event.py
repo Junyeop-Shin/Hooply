@@ -79,6 +79,6 @@ class EventAttendance(Base):
     registered_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))  # 게스트 등록자 / 대리 응답한 매니저
     # 게스트 기능 설계: "이 게스트를 이 player 와 같은 팀으로 배정해 달라" 는 **요청**. 게스트 행에만 값이
     # 들어가며 강제 제약이 아니다. 매니저가 S-12 배정 화면에서 "묶기 제안" 으로 보고 승인해야 LOCK 제약이 된다.
-    team_lock_request_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
+    team_lock_request_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"), index=True)
 
     event: Mapped[Event] = relationship(back_populates="attendances")

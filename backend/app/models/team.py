@@ -56,7 +56,7 @@ class Team(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     # 초대용 코드 8자리(대문자+숫자). 카카오톡으로 공유되며 재발급(code:regenerate) 가능
     team_code: Mapped[str] = mapped_column(String(8), unique=True, nullable=False)  # 대문자+숫자
-    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)  # 팀 생성자
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)  # 팀 생성자
     status: Mapped[TeamStatus] = mapped_column(
         db_enum(TeamStatus, 10), default=TeamStatus.PENDING, server_default="PENDING", nullable=False
     )
@@ -167,7 +167,7 @@ class GuestInvitePreset(CreatedAtMixin, Base):
     preferred_position: Mapped[str | None] = mapped_column(String(2))
     playable_positions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     team_lock_request: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
-    last_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"))  # 마지막 게스트 레코드
+    last_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"), index=True)  # 마지막 게스트 레코드
     use_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

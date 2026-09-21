@@ -12,26 +12,34 @@ native ENUM 타입을 쓰지 않는 이유는, 값을 하나 추가할 때마다
 각 enum 이 어느 테이블·컬럼에 쓰이는지는 멤버 옆 주석과 해당 모델 파일을 참조한다.
 """
 
+import re
 from enum import StrEnum
 
 from sqlalchemy import Enum as SAEnum
 
 
-def db_enum(enum_cls: type[StrEnum], length: int) -> SAEnum:
-    """VARCHAR(length) + CHECK 제약. 값 추가 시 Alembic 마이그레이션으로 CHECK만 갱신하면 된다.
+def enum_type_name(enum_cls: type[StrEnum]) -> str:
+    """StrEnum 클래스 → PostgreSQL 타입 이름. `TeamStatus` → `team_status_enum` (0017 마이그레이션의 ENUMS 키와 같다)."""
+    snake = re.sub(r"(?<!^)(?=[A-Z0-9])", "_", enum_cls.__name__).lower()
+    return snake.replace("_1_0", "10").replace("_3_0", "30") + "_enum"
 
-    - native_enum=False   : PostgreSQL ENUM 타입 대신 VARCHAR(length) 로 생성
-    - create_constraint   : 허용값 CHECK 제약을 함께 만든다 (이름은 `ck_<enum소문자>`)
+
+def db_enum(enum_cls: type[StrEnum], length: int) -> SAEnum:
+    """PostgreSQL ENUM 타입 컬럼 (0017 마이그레이션부터). 타입은 마이그레이션이 만들고, ORM 은 이름으로만 참조한다.
+
+    - native_enum=True    : VARCHAR + CHECK 가 아니라 전용 ENUM 타입. 스키마만 봐도 열거형임이 드러난다
+    - create_type=False   : metadata.create_all 이 타입을 만들려 하지 않는다 — 생성·변경은 Alembic 만 한다
     - validate_strings    : 문자열을 직접 바인딩해도 허용값이 아니면 파이썬 단계에서 거부
-    `length` 는 설계서 ERD 의 VARCHAR 길이(예: TeamStatus 10, Position 2)와 맞춘다.
+    값을 추가할 때는 이 클래스와 마이그레이션(`ALTER TYPE ... ADD VALUE`, 트랜잭션 밖)을 함께 바꾼다.
+    `length` 는 예전 VARCHAR 길이 — 되돌리기(downgrade) 문서용으로만 남긴다.
     """
     return SAEnum(
         enum_cls,
-        native_enum=False,
-        length=length,
-        create_constraint=True,
+        native_enum=True,
+        create_type=False,
         validate_strings=True,
-        name=f"ck_{enum_cls.__name__.lower()}",
+        name=enum_type_name(enum_cls),
+        length=length,
     )
 
 

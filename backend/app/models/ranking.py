@@ -57,7 +57,7 @@ class ManagerRankingEntry(Base):
     ranking_id: Mapped[int] = mapped_column(
         ForeignKey("manager_rankings.id", ondelete="CASCADE"), nullable=False
     )
-    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False, index=True)
     rank_no: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1 = 최상위
 
     ranking: Mapped[ManagerRanking] = relationship(back_populates="entries")

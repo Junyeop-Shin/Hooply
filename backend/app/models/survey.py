@@ -147,7 +147,7 @@ class SurveyAnswer(Base):
     response_id: Mapped[int] = mapped_column(
         ForeignKey("survey_responses.id", ondelete="CASCADE"), nullable=False
     )
-    question_id: Mapped[int] = mapped_column(ForeignKey("survey_questions.id"), nullable=False)
+    question_id: Mapped[int] = mapped_column(ForeignKey("survey_questions.id"), nullable=False, index=True)
     selected_option_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
     numeric_value: Mapped[Decimal | None] = mapped_column(Numeric(6, 1))
 

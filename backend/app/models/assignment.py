@@ -100,7 +100,7 @@ class AssignmentConstraint(Base):
     )
     type: Mapped[ConstraintType] = mapped_column(db_enum(ConstraintType, 10), nullable=False)  # LOCK/SEPARATE/PIN
     group_no: Mapped[int | None] = mapped_column(SmallInteger)  # LOCK/SEPARATE: 같은 번호 = 같은 그룹. PIN 은 NULL
-    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False, index=True)
     squad_no: Mapped[int | None] = mapped_column(SmallInteger)  # PIN: 배치할 팀 번호(1=블랙). 그 외 NULL
 
     run: Mapped[AssignmentRun] = relationship(back_populates="constraints")

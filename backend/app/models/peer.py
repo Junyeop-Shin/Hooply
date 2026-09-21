@@ -48,7 +48,7 @@ class PostGameSurvey(Base):
 
     id: Mapped[BigPK]
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
-    respondent_player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False)  # 회원만 (서비스 검증)
+    respondent_player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False, index=True)  # 회원만 (서비스 검증)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)  # 제출 시각(앱 설정)
 
     # 최대 8행: (잘한 사람 / 또 뛰고 싶은 사람) × (같은 팀 2명 / 상대 팀 2명)

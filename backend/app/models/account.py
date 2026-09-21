@@ -64,7 +64,7 @@ class User(TimestampMixin, Base):
     )
     # FR-03: 온보딩 설문(POST /surveys/onboarding/responses) 제출 시 true. 미완료면 설문 화면으로 유도
     # 여러 팀에 속했을 때 프로필이 우선 보여줄 팀 (홈 "메인으로"). 팀이 지워지면 NULL
-    primary_team_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("teams.id", ondelete="SET NULL"))
+    primary_team_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("teams.id", ondelete="SET NULL"), index=True)
     onboarding_completed: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
@@ -144,6 +144,6 @@ class RevokedToken(Base):
     __tablename__ = "revoked_tokens"
 
     jti: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=sa_text("now()"))

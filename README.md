@@ -13,6 +13,8 @@ backend/
   alembic/versions/0003_*.py                설문 v2(활성) · 팀별 자기 위치 컬럼 · users.birth_year 삭제
   alembic/versions/0004_*.py                users.position_prefs (프로필 포지션 수정의 원본)
   alembic/versions/0005_*.py                guest_invite_presets (이전 초대 게스트 불러오기)
+  alembic/versions/0016_*.py                revoked_tokens(로그아웃 토큰 폐기) · 이메일 소문자 정규화
+  alembic/versions/0017_*.py                상태값 21종을 PostgreSQL ENUM 타입으로 · 조회·삭제 경로의 외래키 인덱스 9개
   scripts/seed_demo.py                      데모 데이터 (21명 동호회 · 지난 10회차 배정/쿼터/투표 · 배정 전 일정 2건 · 실력 정렬 · 두 번째 팀)
   app/db/survey_seed.py                     설문 문항·선택지 시드 데이터 (v1 이력 + v2 현재)
   app/
