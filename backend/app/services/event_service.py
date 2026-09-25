@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import String, delete, func, literal_column, or_, select, union_all
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors
@@ -198,41 +198,34 @@ def _bulk_stats(db: Session, event_ids: list[int], me: Player | None) -> dict[in
         "attend_count": 0, "my_status": None, "adopted_candidate_id": None, "my_squad_name": None, "my_position": None,
         "run_count": 0, "quarter_count": 0, "survey_total": 0, "survey_responded": 0, "my_survey_submitted": False,
     } for eid in event_ids}
-    for eid, n in db.execute(
-        select(EventAttendance.event_id, func.count()).where(EventAttendance.event_id.in_(event_ids), EventAttendance.status == AttendanceStatus.ATTEND)
-        .group_by(EventAttendance.event_id)
-    ).all():
-        out[eid]["attend_count"] = n
-    for eid, n in db.execute(
-        select(EventAttendance.event_id, func.count()).join(Player, Player.id == EventAttendance.player_id)
-        .where(EventAttendance.event_id.in_(event_ids), EventAttendance.status == AttendanceStatus.ATTEND, Player.kind == PlayerKind.MEMBER)
-        .group_by(EventAttendance.event_id)
-    ).all():
-        out[eid]["survey_total"] = n
-    for eid, n in db.execute(
-        select(PostGameSurvey.event_id, func.count()).where(PostGameSurvey.event_id.in_(event_ids)).group_by(PostGameSurvey.event_id)
-    ).all():
-        out[eid]["survey_responded"] = n
-    for eid, cid in db.execute(
-        select(AssignmentRun.event_id, AssignmentCandidate.id).join(AssignmentRun, AssignmentRun.id == AssignmentCandidate.run_id)
-        .where(AssignmentRun.event_id.in_(event_ids), AssignmentCandidate.is_adopted.is_(True))
-    ).all():
-        out[eid]["adopted_candidate_id"] = cid
-    for eid, n in db.execute(
-        select(AssignmentRun.event_id, func.count()).where(AssignmentRun.event_id.in_(event_ids)).group_by(AssignmentRun.event_id)
-    ).all():
-        out[eid]["run_count"] = n
-    for eid, n in db.execute(
-        select(Quarter.event_id, func.count()).where(Quarter.event_id.in_(event_ids)).group_by(Quarter.event_id)
-    ).all():
-        out[eid]["quarter_count"] = n
+    # 팀 단위 지표 5개를 (event_id, 지표 이름, 값) 행으로 한 번에 받는다 — 운영 DB 왕복이 한 번이면 된다
+    lit = literal_column
+    metrics = union_all(
+        select(EventAttendance.event_id, lit("'attend'"), func.count()).where(EventAttendance.event_id.in_(event_ids), EventAttendance.status == AttendanceStatus.ATTEND).group_by(EventAttendance.event_id),
+        select(EventAttendance.event_id, lit("'survey_total'"), func.count()).join(Player, Player.id == EventAttendance.player_id)
+        .where(EventAttendance.event_id.in_(event_ids), EventAttendance.status == AttendanceStatus.ATTEND, Player.kind == PlayerKind.MEMBER).group_by(EventAttendance.event_id),
+        select(PostGameSurvey.event_id, lit("'survey_responded'"), func.count()).where(PostGameSurvey.event_id.in_(event_ids)).group_by(PostGameSurvey.event_id),
+        select(AssignmentRun.event_id, lit("'adopted'"), func.max(AssignmentCandidate.id)).join(AssignmentRun, AssignmentRun.id == AssignmentCandidate.run_id)
+        .where(AssignmentRun.event_id.in_(event_ids), AssignmentCandidate.is_adopted.is_(True)).group_by(AssignmentRun.event_id),
+        select(AssignmentRun.event_id, lit("'runs'"), func.count()).where(AssignmentRun.event_id.in_(event_ids)).group_by(AssignmentRun.event_id),
+        select(Quarter.event_id, lit("'quarters'"), func.count()).where(Quarter.event_id.in_(event_ids)).group_by(Quarter.event_id),
+    )
+    key = {"attend": "attend_count", "survey_total": "survey_total", "survey_responded": "survey_responded", "adopted": "adopted_candidate_id", "runs": "run_count", "quarters": "quarter_count"}
+    for eid, name, value in db.execute(metrics).all():
+        out[eid][key[name]] = value
     if me is not None and me.id:
         for eid in event_ids:
             out[eid]["my_status"] = AttendanceStatus.PENDING
-        for eid, st in db.execute(
-            select(EventAttendance.event_id, EventAttendance.status).where(EventAttendance.event_id.in_(event_ids), EventAttendance.player_id == me.id)
-        ).all():
-            out[eid]["my_status"] = st
+        # 내 응답 상태 + 내 투표 제출 여부도 한 번에
+        mine = union_all(
+            select(EventAttendance.event_id, lit("'status'"), EventAttendance.status.cast(String)).where(EventAttendance.event_id.in_(event_ids), EventAttendance.player_id == me.id),
+            select(PostGameSurvey.event_id, lit("'survey'"), lit("'1'")).where(PostGameSurvey.event_id.in_(event_ids), PostGameSurvey.respondent_player_id == me.id),
+        )
+        for eid, name, value in db.execute(mine).all():
+            if name == "status":
+                out[eid]["my_status"] = AttendanceStatus(value)
+            else:
+                out[eid]["my_survey_submitted"] = True
         # 확정된 배정이 있으면 내 팀·포지션을 카드에 바로 보여준다 (팀 상세 일정 탭, 홈)
         for eid, name, pos in db.execute(
             select(AssignmentRun.event_id, AssignmentSquad.squad_name, AssignmentSlot.assigned_position)
@@ -242,10 +235,6 @@ def _bulk_stats(db: Session, event_ids: list[int], me: Player | None) -> dict[in
             .where(AssignmentRun.event_id.in_(event_ids), AssignmentCandidate.is_adopted.is_(True), AssignmentSlot.player_id == me.id)
         ).all():
             out[eid]["my_squad_name"], out[eid]["my_position"] = name, pos
-        for (eid,) in db.execute(
-            select(PostGameSurvey.event_id).where(PostGameSurvey.event_id.in_(event_ids), PostGameSurvey.respondent_player_id == me.id)
-        ).all():
-            out[eid]["my_survey_submitted"] = True
     return out
 
 

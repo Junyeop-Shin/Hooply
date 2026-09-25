@@ -45,7 +45,9 @@ def test_hot_endpoints_stay_within_query_budget(client, club, sql_count):
         ("GET", "/me/profile"): 12,
         ("GET", f"/teams/{tid}/rankings/latest"): 10,
         ("GET", f"/teams/{tid}/players"): 10,
+        ("GET", f"/events/{eid}"): 7,  # 일정 하나: 집계 5개 + 내 상태를 UNION ALL 로 한 번에
         ("GET", f"/events/{eid}/attendances"): 12,
+        ("GET", f"/players/{next(iter(club['pid'].values()))}/stats"): 12,
         ("GET", f"/events/{eid}/assignment/adopted"): 14,
         ("GET", f"/assignments/runs/{run['id']}"): 12,
         ("POST", f"/events/{eid}/assignments"): 45,  # 실행·저장 포함. 후보안 3개가 참석자를 각자 다시 읽지 않아야 한다

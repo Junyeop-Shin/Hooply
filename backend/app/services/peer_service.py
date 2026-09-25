@@ -407,11 +407,19 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
                 losses=sum(1 for l in lus if l.raw_margin < 0),
             )
         )
-    attended = db.scalar(
+    # 참석 회차 · 받은 지목 수 · 상호 지목 수를 스칼라 서브쿼리 세 개로 한 번에 읽는다 (왕복 1번)
+    attended_q = (
         select(func.count()).select_from(EventAttendance).join(Event, Event.id == EventAttendance.event_id)
         .where(EventAttendance.player_id.in_(ids), EventAttendance.status == AttendanceStatus.ATTEND, Event.status != EventStatus.CANCELED,
                Event.event_date <= datetime.now(ZoneInfo(get_settings().timezone)).date())
-    ) or 0
+    ).scalar_subquery()
+    received_q = select(func.count()).select_from(PostGameVote).where(PostGameVote.target_player_id.in_(ids), PostGameVote.vote_type == VoteType.PLAY_AGAIN).scalar_subquery()
+    mutual_q = (
+        select(func.count()).select_from(ChemistryScore)
+        .where(((ChemistryScore.player_a_id == player.id) | (ChemistryScore.player_b_id == player.id)), ChemistryScore.pref_mutual.is_(True))
+    ).scalar_subquery()
+    attended, received, mutual = db.execute(select(attended_q, received_q, mutual_q)).one()
+    attended = attended or 0
     stats = PlayerStats(
         # 이 API 는 본인 또는 매니저만 부를 수 있으므로 등급은 항상 보여 준다. 수치·근거는 아래에서 매니저에게만 붙인다
         player=to_card(player, include_grade=True), events_attended=attended, quarters_played=len(records),
@@ -438,13 +446,8 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
         mine = next((e for e in entries if e.player_id == player.id), None)
         if mine:
             stats.manager_rank = RankInfo(rank_no=mine.rank_no, total=len(entries), ranked_at=active.created_at)
-    stats.play_again_received = db.scalar(
-        select(func.count()).select_from(PostGameVote).where(PostGameVote.target_player_id.in_(ids), PostGameVote.vote_type == VoteType.PLAY_AGAIN)
-    ) or 0
-    stats.play_again_mutual = db.scalar(
-        select(func.count()).select_from(ChemistryScore)
-        .where(((ChemistryScore.player_a_id == player.id) | (ChemistryScore.player_b_id == player.id)), ChemistryScore.pref_mutual.is_(True))
-    ) or 0
+    stats.play_again_received = received or 0
+    stats.play_again_mutual = mutual or 0
     hist = db.scalars(
         select(SkillRatingHistory).where(SkillRatingHistory.player_id.in_(ids)).order_by(SkillRatingHistory.created_at.desc(), SkillRatingHistory.id.desc()).limit(200)
     ).all()

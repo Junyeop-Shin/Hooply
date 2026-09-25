@@ -18,9 +18,10 @@
 이 모듈에는 포함되어 있지 않다.
 """
 
+import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core import errors
@@ -124,6 +125,7 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
     부수 효과: 쓴 refresh 토큰의 jti 를 폐기 목록에 넣는다 (같은 토큰을 두 번 쓰면 401).
     에러: `401 TOKEN_EXPIRED` (무효·만료·타입 불일치·폐기됨·삭제된 계정 모두).
     """
+    maybe_cleanup_tokens(db)
     decoded = decode_refresh(refresh_token)
     if decoded is None:
         raise errors.TokenExpired()
@@ -136,8 +138,47 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
     return _issue_tokens(user)
 
 
+_last_cleanup: float = 0.0
+CLEANUP_INTERVAL_SEC = 3600
+
+
+def cleanup_expired_tokens(db: Session) -> dict[str, int]:
+    """만료된 폐기 토큰과 다 쓴(또는 하루 지난) 비밀번호 재설정 토큰을 지운다. 반환: 지운 행 수.
+
+    폐기 목록은 서명 만료가 지나면 어차피 막히므로 남길 이유가 없다. 재설정 토큰은 1회용이라 사용 뒤엔 의미가 없다.
+    """
+    from datetime import timedelta
+
+    from app.models import PasswordResetToken
+
+    now = datetime.now(UTC)
+    revoked = db.execute(delete(RevokedToken).where(RevokedToken.expires_at < now)).rowcount
+    reset = db.execute(
+        delete(PasswordResetToken).where((PasswordResetToken.used_at.is_not(None)) | (PasswordResetToken.expires_at < now - timedelta(days=1)))
+    ).rowcount
+    db.commit()
+    return {"revoked_tokens": revoked, "password_reset_tokens": reset}
+
+
+def maybe_cleanup_tokens(db: Session) -> None:
+    """토큰 경로(refresh·logout·forgot)에서 한 시간에 한 번만 청소를 돌린다. 별도 스케줄러 없이 쓰레기가 쌓이지 않게."""
+    global _last_cleanup
+    import time
+
+    now = time.monotonic()
+    if now - _last_cleanup < CLEANUP_INTERVAL_SEC:
+        return
+    _last_cleanup = now
+    try:
+        cleanup_expired_tokens(db)
+    except Exception:
+        db.rollback()
+        logging.getLogger("hooply").exception("만료 토큰 청소 실패")
+
+
 def logout(db: Session, refresh_token: str) -> None:
     """refresh 토큰을 폐기한다. 이미 무효한 토큰이면 조용히 넘어간다 (로그아웃은 항상 성공해야 한다)."""
+    maybe_cleanup_tokens(db)
     decoded = decode_refresh(refresh_token)
     if decoded is None:
         return

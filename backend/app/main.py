@@ -1,6 +1,7 @@
 """FastAPI 앱 팩토리 — 라우터·CORS·에러 핸들러 조립과 OpenAPI 메타데이터 (7.1절 공통 규약)."""
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -134,6 +135,20 @@ OPENAPI_TAGS = [
 ]
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # 시작할 때 만료 토큰을 한 번 치운다. 이후에는 토큰 경로에서 한 시간에 한 번 (auth_service.maybe_cleanup_tokens)
+    try:
+        from app.db.session import SessionLocal
+        from app.services.auth_service import cleanup_expired_tokens
+
+        with SessionLocal() as db:
+            logging.getLogger("hooply").info("만료 토큰 청소: %s", cleanup_expired_tokens(db))
+    except Exception:
+        logging.getLogger("hooply").exception("시작 시 토큰 청소 실패")
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     # 배포 환경(Render)은 stdout 을 그대로 로그로 모은다. 처리되지 않은 예외의 스택이 여기로 나온다 (core/errors.py)
@@ -145,6 +160,7 @@ def create_app() -> FastAPI:
         openapi_tags=OPENAPI_TAGS,
         docs_url="/docs" if settings.docs_enabled else None,
         openapi_url="/openapi.json" if settings.docs_enabled else None,
+        lifespan=_lifespan,
     )
     # 팀원 목록·참석 현황 같은 JSON 은 수십 KB 가 되기도 한다. 체육관 통신이 느린 상황을 고려해 압축해 보낸다
     app.add_middleware(GZipMiddleware, minimum_size=1024)
