@@ -19,15 +19,19 @@ test('쿼터 기록: 명단에 없던 사람을 반대 팀에 넣을 수 있다'
   const whiteCount = async () => Number((await page.getByText(/^화이트 \d+명$/).innerText()).match(/\d+/)![0])
   const before = await whiteCount()
 
-  await page.getByRole('button', { name: '명단 고치기' }).click()
+  // 새 멤버 추가는 쿼터 카드 맨 아래, 두 팀 공통
+  await page.getByRole('button', { name: '＋ 새 멤버 추가' }).first().click()
   await expect(page.getByLabel('명단에 넣을 사람 찾기')).toBeVisible()
-  // 화이트에 없는 사람 하나를 화이트로 넣는다
+  // 화이트에 없는 사람 하나를 화이트 명단에 넣는다
   await page.getByRole('button', { name: '＋화이트' }).first().click()
   expect(await whiteCount()).toBe(before + 1)
 
-  // 넣은 사람은 화이트 출전 체크 그리드에도 바로 나온다
-  const white = page.locator('div').filter({ hasText: /^화이트 출전 \d\/5/ }).last()
-  await expect(white.locator('input[type=checkbox]')).toHaveCount(before + 1)
+  // 넣은 사람은 첫 쿼터의 화이트 '자기 팀' 칸에 바로 나온다
+  const whiteOwn = page.locator('[data-roster="white-own"]').first()
+  await expect(whiteOwn.locator('input[type=checkbox]')).toHaveCount(before + 1)
+  // 팀을 옮긴 경우를 대비해 다른 팀 사람이 그 아래에 있다
+  await expect(page.locator('[data-roster="white-other"]').first()).toBeVisible()
+  await expect(page.getByText('다른 팀 · 옮겼으면 여기서 체크').first()).toBeVisible()
 
   // 처음 온 게스트 입력칸도 있다 (등록은 백엔드 테스트가 덮는다)
   await expect(page.getByLabel('새 게스트 이름')).toBeVisible()

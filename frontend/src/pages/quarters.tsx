@@ -2,8 +2,9 @@
  * S-15 쿼터 기록 (F8). 설계서 2.4절·2.5절: 기록은 매니저가 **활동이 끝난 뒤** 한 번에 입력한다.
  *
  * - 쿼터 카드 세로 누적형: 카드마다 스코어 스테퍼 2개 + 사이드별 출전 5명 체크 그리드 + 쿼터 길이(기본 8분, 1~10분).
- * - 출전 명단은 확정 배정을 기본값으로 삼되 그날 실제로 온 사람에 맞춰 고칠 수 있다: 늦게 합류한 회원,
- *   당일 부른 게스트, 한 경기 뒤 팀을 옮긴 사람 모두 명단에 넣을 수 있다 (2.5절 "인원이 매번 가변").
+ * - 체크 그리드 순서: 그 팀에 배정된 사람이 맨 위, 그 아래에 **다른 팀 사람**(경기 중 팀을 옮긴 경우 여기서 바로 체크),
+ *   카드 맨 아래에 두 팀 공통의 "새 멤버 추가" (늦게 온 회원 · 당일 처음 온 게스트).
+ * - 출전 명단은 확정 배정을 기본값으로 삼되 그날 실제로 온 사람에 맞춰 고칠 수 있다 (2.5절 "인원이 매번 가변").
  *   어느 쿼터에 이미 체크된 사람은 그 사이드 명단에서 자동으로 유지된다 — 옮겨도 지난 쿼터 기록이 깨지지 않는다.
  * - "+ 쿼터 추가" 는 직전 쿼터의 라인업을 복사한다 (로테이션 1~2명만 바꾸면 되도록).
  * - 저장 전 입력은 localStorage 에 임시 저장한다 (5.4절 네트워크 오류 대비).
@@ -53,7 +54,8 @@ export function QuartersPage() {
   const [extra, setExtra] = useState<Extra>(emptyExtra)
   const [msg, setMsg] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
-  const [editRoster, setEditRoster] = useState(false)
+  const [editRoster, setEditRoster] = useState(false)  // 상단 명단 카드: 잘못 넣은 사람 빼기
+  const [addFor, setAddFor] = useState<number | null>(null)  // 새 멤버 추가 패널이 열린 쿼터 카드 index
 
   const isManager = ev.data?.my_role === 'MANAGER'
   const teamId = ev.data?.team_id
@@ -216,16 +218,8 @@ export function QuartersPage() {
               </div>
             </div>
           ))}
-          {!editRoster && <p className="text-[11px] text-muted">늦게 온 사람이나 게스트가 있으면 명단을 고쳐서 넣으세요. 팀을 옮긴 사람은 새 팀에 넣으면 돼요.</p>}
+          {!editRoster && <p className="text-[11px] text-muted">늦게 온 사람이나 게스트는 쿼터 카드 아래 <b>새 멤버 추가</b>로 넣고, 팀을 옮긴 사람은 그 쿼터에서 다른 팀 칸을 체크하면 돼요.</p>}
         </Card>
-        {editRoster && (
-          <RosterEditor
-            eventId={id} people={people} pool={pool} attendIds={attendIds}
-            onAdd={addToSide}
-            onError={(m) => setMsg(m)}
-            onGuestAdded={() => { qc.invalidateQueries({ queryKey: ['events', id, 'attendances'] }); qc.invalidateQueries({ queryKey: ['team', teamId, 'guests'] }) }}
-          />
-        )}
 
         {quarters.map((q, i) => (
           <Card key={q.quarter_no} className="space-y-3">
@@ -250,26 +244,48 @@ export function QuartersPage() {
               {(['black', 'white'] as const).map((side) => {
                 const list = q[side]
                 const ok = list.length === 5
+                const otherSide: SideKey = side === 'black' ? 'white' : 'black'
+                const ownIds = new Set(pool[side].map((p) => p.id))
+                const others = pool[otherSide].filter((p) => !ownIds.has(p.id))  // 팀을 옮긴 경우를 대비해 아래에 둔다
+                const row = (p: PlayerCard, dim: boolean) => {
+                  const on = list.includes(p.id)
+                  const blocked = q[otherSide].includes(p.id)
+                  return (
+                    <label key={p.id} className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm ${on ? (side === 'black' ? 'bg-court-500 text-white' : 'bg-court-100') : dim ? 'opacity-60' : ''} ${blocked ? 'opacity-30' : ''}`}>
+                      <input type="checkbox" checked={on} disabled={blocked} onChange={() => toggle(i, side, p.id)} className="accent-brand" />
+                      <span className="truncate">{p.display_name}</span>
+                      {p.kind === 'GUEST' && <span className="text-[10px] opacity-60">G</span>}
+                    </label>
+                  )
+                }
                 return (
                   <div key={side} className={`rounded-xl border p-2 ${side === 'black' ? 'border-team-black bg-team-black text-team-black-ink [color-scheme:dark]' : 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]'}`}>
                     <p className={`mb-1 text-[11px] font-bold ${ok ? '' : 'text-rose-400'}`}>{side === 'black' ? '블랙' : '화이트'} 출전 {list.length}/5</p>
-                    <div className="space-y-0.5">
-                      {pool[side].map((p) => {
-                        const on = list.includes(p.id)
-                        const blocked = (side === 'black' ? q.white : q.black).includes(p.id)
-                        return (
-                          <label key={p.id} className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm ${on ? (side === 'black' ? 'bg-court-500 text-white' : 'bg-court-100') : ''} ${blocked ? 'opacity-30' : ''}`}>
-                            <input type="checkbox" checked={on} disabled={blocked} onChange={() => toggle(i, side, p.id)} className="accent-brand" />
-                            <span className="truncate">{p.display_name}</span>
-                            {p.kind === 'GUEST' && <span className="text-[10px] opacity-60">G</span>}
-                          </label>
-                        )
-                      })}
-                    </div>
+                    <div className="space-y-0.5" data-roster={`${side}-own`}>{pool[side].map((p) => row(p, false))}</div>
+                    {others.length > 0 && (
+                      <>
+                        <p className="mb-0.5 mt-2 border-t border-current/20 pt-1.5 text-[10px] font-semibold opacity-60">다른 팀 · 옮겼으면 여기서 체크</p>
+                        <div className="space-y-0.5" data-roster={`${side}-other`}>{others.map((p) => row(p, true))}</div>
+                      </>
+                    )}
                   </div>
                 )
               })}
             </div>
+            <button
+              type="button" onClick={() => setAddFor((v) => (v === i ? null : i))}
+              className="flex min-h-10 w-full items-center justify-center rounded-xl border border-dashed border-line-strong text-sm font-semibold text-ink-2"
+            >
+              {addFor === i ? '닫기' : '＋ 새 멤버 추가'}
+            </button>
+            {addFor === i && (
+              <RosterEditor
+                eventId={id} people={people} pool={pool} attendIds={attendIds}
+                onAdd={addToSide}
+                onError={(m) => setMsg(m)}
+                onGuestAdded={() => { qc.invalidateQueries({ queryKey: ['events', id, 'attendances'] }); qc.invalidateQueries({ queryKey: ['team', teamId, 'guests'] }) }}
+              />
+            )}
           </Card>
         ))}
         <Button variant="ghost" full onClick={addQuarter}>+ 쿼터 추가 (앞 쿼터 명단 그대로)</Button>
@@ -286,7 +302,7 @@ export function QuartersPage() {
   )
 }
 
-/** 출전 명단 편집 — 팀 회원·게스트를 사이드에 넣고, 당일 처음 온 게스트는 여기서 바로 등록한다 */
+/** 새 멤버 추가 — 팀 회원·게스트를 어느 팀 명단에 넣을지 고르고, 당일 처음 온 게스트는 여기서 바로 등록한다. 두 팀 공통 */
 function RosterEditor({
   eventId, people, pool, attendIds, onAdd, onError, onGuestAdded,
 }: {
@@ -306,7 +322,8 @@ function RosterEditor({
   const rows = [...people.values()]
     .filter((p) => !inBlack.has(p.id) || !inWhite.has(p.id))
     .filter((p) => !q.trim() || p.display_name.includes(q.trim()))
-    .sort((a, b) => Number(attend.has(b.id)) - Number(attend.has(a.id)) || a.display_name.localeCompare(b.display_name, 'ko'))
+    // 아직 어느 명단에도 없는 사람(늦게 온 회원·게스트)이 먼저, 그다음 참석 응답자, 그다음 이름순
+    .sort((a, b) => Number(inBlack.has(b.id) || inWhite.has(b.id)) - Number(inBlack.has(a.id) || inWhite.has(a.id)) || Number(attend.has(b.id)) - Number(attend.has(a.id)) || a.display_name.localeCompare(b.display_name, 'ko'))
     .slice(0, 40)
 
   const addGuest = useMutation({
@@ -320,7 +337,8 @@ function RosterEditor({
   })
 
   return (
-    <Card className="space-y-3">
+    <div className="space-y-3 rounded-xl bg-surface-2 p-3">
+      <p className="text-xs text-muted">넣으면 그 팀 명단에 올라와요. 출전은 위에서 체크하세요.</p>
       <div>
         <input
           value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름으로 찾기" aria-label="명단에 넣을 사람 찾기"
@@ -368,7 +386,7 @@ function RosterEditor({
         </div>
         <p className="mt-1 text-[11px] text-faint">이 일정 참석자로도 함께 등록돼요. 실력 등급은 나중에 참석자 화면에서 지정할 수 있어요.</p>
       </div>
-    </Card>
+    </div>
   )
 }
 
