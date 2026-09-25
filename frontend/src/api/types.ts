@@ -513,6 +513,8 @@ export interface PlayerStats {
   skill_confidence: string | null
   cumulative_residual: string | null
   skill_axes: Record<string, string | null>
+  /** 축별 팀 내 상대 위치. level 이 null 이면 비교 인원 부족 */
+  skill_axes_rank: Record<string, { level: 'HIGH' | 'MID' | 'LOW' | null; percentile: number | null; sample: number }>
   manager_rank: { rank_no: number; total: number; ranked_at: string } | null
   play_again_received: number | null
   play_again_mutual: number | null

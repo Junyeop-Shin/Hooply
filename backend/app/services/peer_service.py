@@ -357,6 +357,37 @@ def compatible(db: Session, player: Player) -> list[CompatiblePlayer]:
 # ---------------------------------------------------------------------------
 
 
+AXIS_RANK_MIN_SAMPLE = 4  # 이보다 적으면 "상위/하위" 를 말하지 않는다 — 3명 중 2등은 정보가 아니다
+_AXIS_COLUMNS = ("shooting", "ball_handling", "passing", "defense", "rebound_post", "stamina")
+
+
+def _axis_ranks(db: Session, player: Player, mine: dict[str, Decimal | None]) -> dict:
+    """세부 능력 6축의 팀 내 상대 위치. 축마다 값의 분포가 달라(골밑은 키 때문에 0·10 이 거의 안 나온다)
+    절대 점수는 오독되므로, 같은 팀 활동 참가자 중 나보다 낮은 비율(백분위)과 3단계 위치로 바꿔 준다."""
+    from app.models import PlayerProfile
+    from app.schemas.peer import AxisRank
+
+    rows = db.execute(
+        select(*[getattr(PlayerProfile, f"skill_{c}") for c in _AXIS_COLUMNS])
+        .join(Player, Player.id == PlayerProfile.player_id)
+        .where(Player.team_id == player.team_id, Player.status == PlayerStatus.ACTIVE, Player.merged_into_player_id.is_(None))
+    ).all()
+    out: dict[str, AxisRank] = {}
+    for i, axis in enumerate(_AXIS_COLUMNS):
+        me = mine.get(axis)
+        values = [float(r[i]) for r in rows if r[i] is not None]
+        if me is None or len(values) < AXIS_RANK_MIN_SAMPLE:
+            out[axis] = AxisRank(level=None, percentile=None, sample=len(values))
+            continue
+        v = float(me)
+        below = sum(1 for x in values if x < v)
+        ties = sum(1 for x in values if x == v) - 1  # 본인 제외
+        pct = round(100 * (below + 0.5 * max(ties, 0)) / max(len(values) - 1, 1))
+        level = "HIGH" if pct >= 67 else "LOW" if pct <= 33 else "MID"
+        out[axis] = AxisRank(level=level, percentile=pct, sample=len(values))
+    return out
+
+
 def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
     """참여 이력·쿼터 기록·마진 추이. `detailed`(매니저/ADMIN)면 실력 수치·사전값·정렬 순위·투표 수·변동 이력까지.
 
@@ -440,6 +471,7 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
             "shooting": prof.skill_shooting, "ball_handling": prof.skill_ball_handling, "passing": prof.skill_passing,
             "defense": prof.skill_defense, "rebound_post": prof.skill_rebound_post, "stamina": prof.skill_stamina,
         }
+        stats.skill_axes_rank = _axis_ranks(db, player, stats.skill_axes)
     active = db.scalar(select(ManagerRanking).where(ManagerRanking.team_id == player.team_id, ManagerRanking.is_active.is_(True)))
     if active:
         entries = db.scalars(select(ManagerRankingEntry).where(ManagerRankingEntry.ranking_id == active.id)).all()

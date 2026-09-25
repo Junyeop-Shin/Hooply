@@ -161,8 +161,10 @@ export function ProfilePage() {
   const u = me.data
   const p = profile.data
   const [chosen, setChosen] = useState<number | null>(null)
-  const teams = [...(p?.teams ?? [])].sort((a, b) => Number(b.team_id === u?.primary_team_id) - Number(a.team_id === u?.primary_team_id))  // 기본 팀이 가장 왼쪽
-  const current = teams.find((t) => t.team_id === (chosen ?? u?.primary_team_id)) ?? teams[0]
+  // 기록이 있는 팀을 먼저, 그 안에서는 기본 팀을 먼저 — 기본 팀에 아직 쿼터가 없으면 빈 화면 대신 기록 있는 팀이 먼저 보인다
+  const teams = [...(p?.teams ?? [])].sort((a, b) =>
+    (Number(b.quarters_played > 0) - Number(a.quarters_played > 0)) || (Number(b.team_id === u?.primary_team_id) - Number(a.team_id === u?.primary_team_id)))
+  const current = teams.find((t) => t.team_id === chosen) ?? teams[0]
   return (
     <Screen>
       <TopBar title="내 프로필" />

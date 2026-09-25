@@ -15,6 +15,7 @@
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -106,6 +107,14 @@ class RankInfo(BaseModel):
     ranked_at: datetime
 
 
+class AxisRank(BaseModel):
+    """세부 능력 한 축의 팀 내 상대 위치. 절대 점수(0~10)는 축마다 계산식이 달라 비교가 안 되므로 위치로 보여 준다."""
+
+    level: Literal["HIGH", "MID", "LOW"] | None = Field(description="상위 1/3 · 중간 · 하위 1/3. 비교 인원이 부족하면 None")
+    percentile: int | None = Field(description="0~100. 팀에서 이 값보다 낮은 사람의 비율 (높을수록 상위)")
+    sample: int = Field(description="비교에 쓴 팀원 수 (본인 포함)")
+
+
 class RatingChange(BaseModel):
     """skill_rating_history 한 줄 (매니저 전용)."""
 
@@ -134,6 +143,7 @@ class PlayerStats(BaseModel):
     skill_confidence: Decimal | None = None
     cumulative_residual: Decimal | None = None
     skill_axes: dict[str, Decimal | None] = Field(default={})
+    skill_axes_rank: dict[str, AxisRank] = Field(default={}, description="축별 팀 내 상대 위치 (설문 기준). 매니저/ADMIN 전용")
     manager_rank: RankInfo | None = None
     play_again_received: int | None = Field(default=None, description="'다음에 같이 뛰고 싶은 사람'으로 지목받은 횟수")
     play_again_mutual: int | None = Field(default=None, description="상호 지목 쌍 수")

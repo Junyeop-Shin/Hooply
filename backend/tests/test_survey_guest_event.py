@@ -307,9 +307,10 @@ def test_guest_ownership_and_reuse(client, team, event):
 # 검증: FR-13 + 사용자 요청 — 게스트와 같은 이름으로 가입한 회원을 병합 후보로 보여주고, 매니저가 병합·되돌리기
 def test_merge_candidates_and_merge(client, signup, team, event):
     m, p1 = team["manager"], team["members"][0]
-    gid = client.post(f"{API}/events/{event}/guests", json={"display_name": "최단골", "skill_grade": 3}, headers=p1).json()["player"]["id"]
+    # 예전 습관대로 "게스트 " 접두어를 붙여 등록했어도 제안은 잡혀야 한다
+    gid = client.post(f"{API}/events/{event}/guests", json={"display_name": "게스트 최단골", "skill_grade": 3}, headers=p1).json()["player"]["id"]
     # 같은 이름으로 회원가입 후 팀 가입
-    newbie = signup("choi@t.com", name="최단골")
+    newbie = signup("choi@t.com", name="최 단골")
     client.post(f"{API}/teams/join", json={"team_code": team["code"]}, headers=newbie)
     new_pid = _player_id(client, newbie, team["team_id"])
 

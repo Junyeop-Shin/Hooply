@@ -16,6 +16,7 @@ const SOURCE_LABEL: Record<string, string> = {
 }
 const PRIOR_LABEL: Record<string, string> = { SURVEY: '설문으로 정함', MANAGER: '매니저가 정함', DEFAULT: '팀 평균 (아직 정보 없음)' }
 const AXIS_LABEL: Record<string, string> = { shooting: '슛', ball_handling: '드리블', passing: '패스', defense: '수비', rebound_post: '골밑', stamina: '체력' }
+const AXIS_LEVEL: Record<'HIGH' | 'MID' | 'LOW', string> = { HIGH: '팀 상위', MID: '팀 중간', LOW: '팀 하위' }
 
 export function PlayerDetailPage() {
   const { teamId, playerId } = useParams()
@@ -25,7 +26,6 @@ export function PlayerDetailPage() {
   if (!q.data) return <Screen><TopBar title="실력 자세히 보기" back={`/teams/${teamId}/members`} /><Content><Alert>불러오지 못했어요. 매니저만 볼 수 있어요.</Alert></Content></Screen>
   const s = q.data
   const p = s.player
-  const num = (v: string | null | undefined, digits = 1) => (v === null || v === undefined ? '—' : Number(v).toFixed(digits))
   const signed = (v: string | null | undefined) => (v === null || v === undefined ? '—' : `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(1)}`)
   const conf = s.skill_confidence === null ? 0 : Number(s.skill_confidence)
   const wins = s.margin_trend.reduce((a, m) => a + m.wins, 0)
@@ -94,11 +94,29 @@ export function PlayerDetailPage() {
 
         {Object.keys(s.skill_axes).length > 0 && (
           <section>
-            <SectionTitle>세부 능력 (설문 기준)</SectionTitle>
-            <Card className="grid grid-cols-3 gap-2 text-center">
-              {Object.entries(s.skill_axes).map(([k, v]) => (
-                <div key={k} className="rounded-lg bg-surface-2 py-2"><p className="text-[10px] text-muted">{AXIS_LABEL[k] ?? k}</p><p className="text-sm font-bold text-ink">{num(v)}</p></div>
-              ))}
+            <SectionTitle>세부 능력 · 팀 내 위치 (설문 기준)</SectionTitle>
+            <Card className="space-y-2">
+              {Object.keys(s.skill_axes).map((k) => {
+                const r = s.skill_axes_rank?.[k]
+                const pct = r?.percentile ?? null
+                const tone = r?.level === 'HIGH' ? 'bg-brand' : r?.level === 'LOW' ? 'bg-faint' : 'bg-navy-800'
+                return (
+                  <div key={k} className="flex items-center gap-3">
+                    <span className="w-9 shrink-0 text-xs font-semibold text-ink">{AXIS_LABEL[k] ?? k}</span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-sunken">
+                      {pct !== null && <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.max(pct, 4)}%` }} />}
+                    </div>
+                    <span className={`w-16 shrink-0 text-right text-[11px] font-semibold ${r?.level === 'HIGH' ? 'text-brand-ink' : r?.level === 'LOW' ? 'text-faint' : 'text-muted'}`}>
+                      {r?.level ? AXIS_LEVEL[r.level] : '비교 인원 부족'}
+                    </span>
+                  </div>
+                )
+              })}
+              <p className="pt-1 text-[11px] text-muted">
+                {Object.values(s.skill_axes_rank ?? {}).some((r) => r.level)
+                  ? `같은 팀 ${Object.values(s.skill_axes_rank)[0]?.sample ?? 0}명의 설문과 비교한 위치예요. 막대가 길수록 팀에서 앞쪽이에요.`
+                  : '설문에 답한 팀원이 4명 이상이면 팀 내 위치가 보여요.'}
+              </p>
             </Card>
           </section>
         )}

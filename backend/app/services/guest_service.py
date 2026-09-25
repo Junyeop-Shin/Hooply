@@ -272,14 +272,14 @@ def merge_candidates(db: Session, team_id: int) -> list[tuple[Player, Player]]:
         .where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE)
         .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user), selectinload(Player.user))
     ).all()
+    # 회원 본인 확인(pending_claims)과 같은 정규화를 쓴다 — "게스트 허웅" 으로 등록된 게스트도 "허웅" 회원과 짝지어진다
     by_name: dict[str, list[Player]] = {}
     for m in members:
-        for name in {m.display_name, m.user.name if m.user else None, m.user.nickname if m.user else None}:
-            if name:
-                by_name.setdefault(name.strip().lower(), []).append(m)
+        for key in {_norm_name(m.display_name), _norm_name(m.user.name if m.user else None), _norm_name(m.user.nickname if m.user else None)} - {""}:
+            by_name.setdefault(key, []).append(m)
     pairs = []
     for g in guests:
-        for m in by_name.get(g.display_name.strip().lower(), []):
+        for m in by_name.get(_norm_name(g.display_name), []):
             pairs.append((g, m))
     return pairs
 
