@@ -3,7 +3,8 @@
  *
  * - 쿼터 카드 세로 누적형: 카드마다 스코어 스테퍼 2개 + 사이드별 출전 5명 체크 그리드 + 쿼터 길이(기본 8분, 1~10분).
  * - 체크 그리드 순서: 그 팀에 배정된 사람이 맨 위, 그 아래에 **다른 팀 사람**(경기 중 팀을 옮긴 경우 여기서 바로 체크),
- *   카드 맨 아래에 두 팀 공통의 "새 멤버 추가" (늦게 온 회원 · 당일 처음 온 게스트).
+ *   카드 맨 아래에 두 팀 공통의 "새 멤버 추가" (늦게 온 회원 · 당일 처음 온 게스트). 잘못 넣은 사람도 그 패널에서 뺀다.
+ *   별도의 명단 요약 섹션은 두지 않는다 — 확정 배정은 일정 화면에서 보고, 여기서는 체크 칸 자체가 명단이다.
  * - 출전 명단은 확정 배정을 기본값으로 삼되 그날 실제로 온 사람에 맞춰 고칠 수 있다 (2.5절 "인원이 매번 가변").
  *   어느 쿼터에 이미 체크된 사람은 그 사이드 명단에서 자동으로 유지된다 — 옮겨도 지난 쿼터 기록이 깨지지 않는다.
  * - "+ 쿼터 추가" 는 직전 쿼터의 라인업을 복사한다 (로테이션 1~2명만 바꾸면 되도록).
@@ -19,7 +20,7 @@ import { eventsApi } from '../api/events'
 import { quartersApi } from '../api/quarters'
 import { teamsApi } from '../api/teams'
 import type { PlayerCard, QuarterIn, Side } from '../api/types'
-import { Alert, Badge, Button, Card, SectionTitle, Spinner } from '../components/ui'
+import { Alert, Badge, Button, Card, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 
 type Draft = { quarter_no: number; black_score: number; white_score: number; duration_min: number; black: number[]; white: number[] }
@@ -54,7 +55,6 @@ export function QuartersPage() {
   const [extra, setExtra] = useState<Extra>(emptyExtra)
   const [msg, setMsg] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
-  const [editRoster, setEditRoster] = useState(false)  // 상단 명단 카드: 잘못 넣은 사람 빼기
   const [addFor, setAddFor] = useState<number | null>(null)  // 새 멤버 추가 패널이 열린 쿼터 카드 index
 
   const isManager = ev.data?.my_role === 'MANAGER'
@@ -198,29 +198,6 @@ export function QuartersPage() {
         {!hasAssignment && <Alert kind="warn">확정된 팀 배정이 없어 참석자 전원이 양쪽에 보여요. 팀마다 5명씩 골라 주세요.</Alert>}
         {msg && <Alert>{msg}</Alert>}
 
-        <SectionTitle action={<button className="text-xs font-semibold text-brand-ink" onClick={() => setEditRoster((v) => !v)}>{editRoster ? '닫기' : '명단 고치기'}</button>}>
-          오늘 출전 명단
-        </SectionTitle>
-        <Card className="space-y-2">
-          {(['black', 'white'] as const).map((side) => (
-            <div key={side} className="text-xs">
-              <p className="font-bold text-ink">{side === 'black' ? '블랙' : '화이트'} {pool[side].length}명</p>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {pool[side].map((p) => (
-                  <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-0.5 text-ink-2">
-                    {p.display_name}{p.kind === 'GUEST' && <span className="text-[10px] text-faint">G</span>}
-                    {editRoster && removable(side, p.id) && (
-                      <button aria-label={`${p.display_name} 명단에서 빼기`} className="text-faint" onClick={() => dropFromSide(side, p.id)}>×</button>
-                    )}
-                  </span>
-                ))}
-                {pool[side].length === 0 && <span className="text-faint">아직 없어요</span>}
-              </div>
-            </div>
-          ))}
-          {!editRoster && <p className="text-[11px] text-muted">늦게 온 사람이나 게스트는 쿼터 카드 아래 <b>새 멤버 추가</b>로 넣고, 팀을 옮긴 사람은 그 쿼터에서 다른 팀 칸을 체크하면 돼요.</p>}
-        </Card>
-
         {quarters.map((q, i) => (
           <Card key={q.quarter_no} className="space-y-3">
             <div className="flex items-center justify-between">
@@ -281,7 +258,7 @@ export function QuartersPage() {
             {addFor === i && (
               <RosterEditor
                 eventId={id} people={people} pool={pool} attendIds={attendIds}
-                onAdd={addToSide}
+                onAdd={addToSide} removable={removable} onRemove={dropFromSide}
                 onError={(m) => setMsg(m)}
                 onGuestAdded={() => { qc.invalidateQueries({ queryKey: ['events', id, 'attendances'] }); qc.invalidateQueries({ queryKey: ['team', teamId, 'guests'] }) }}
               />
@@ -304,13 +281,16 @@ export function QuartersPage() {
 
 /** 새 멤버 추가 — 팀 회원·게스트를 어느 팀 명단에 넣을지 고르고, 당일 처음 온 게스트는 여기서 바로 등록한다. 두 팀 공통 */
 function RosterEditor({
-  eventId, people, pool, attendIds, onAdd, onError, onGuestAdded,
+  eventId, people, pool, attendIds, onAdd, removable, onRemove, onError, onGuestAdded,
 }: {
   eventId: number
   people: Map<number, PlayerCard>
   pool: Record<SideKey, PlayerCard[]>
   attendIds: number[]
   onAdd: (side: SideKey, pid: number) => void
+  /** 매니저가 넣었고 아직 어느 쿼터에도 체크되지 않은 사람만 뺄 수 있다 */
+  removable: (side: SideKey, pid: number) => boolean
+  onRemove: (side: SideKey, pid: number) => void
   onError: (m: string) => void
   onGuestAdded: () => void
 }) {
@@ -320,7 +300,7 @@ function RosterEditor({
   const inWhite = new Set(pool.white.map((p) => p.id))
   const attend = new Set(attendIds)
   const rows = [...people.values()]
-    .filter((p) => !inBlack.has(p.id) || !inWhite.has(p.id))
+    .filter((p) => !inBlack.has(p.id) || !inWhite.has(p.id) || removable('black', p.id) || removable('white', p.id))
     .filter((p) => !q.trim() || p.display_name.includes(q.trim()))
     // 아직 어느 명단에도 없는 사람(늦게 온 회원·게스트)이 먼저, 그다음 참석 응답자, 그다음 이름순
     .sort((a, b) => Number(inBlack.has(b.id) || inWhite.has(b.id)) - Number(inBlack.has(a.id) || inWhite.has(a.id)) || Number(attend.has(b.id)) - Number(attend.has(a.id)) || a.display_name.localeCompare(b.display_name, 'ko'))
@@ -354,12 +334,14 @@ function RosterEditor({
               </span>
               {(['black', 'white'] as const).map((side) => {
                 const already = side === 'black' ? inBlack.has(p.id) : inWhite.has(p.id)
+                const canRemove = already && removable(side, p.id)
                 return (
                   <button
-                    key={side} disabled={already} onClick={() => onAdd(side, p.id)}
-                    className={`min-h-8 rounded-lg px-2 text-xs font-semibold ${already ? 'bg-sunken text-faint' : side === 'black' ? 'bg-team-black text-team-black-ink' : 'border border-line-strong text-ink'}`}
+                    key={side} disabled={already && !canRemove} onClick={() => (canRemove ? onRemove(side, p.id) : onAdd(side, p.id))}
+                    aria-label={canRemove ? `${p.display_name} ${side === 'black' ? '블랙' : '화이트'} 명단에서 빼기` : undefined}
+                    className={`min-h-8 rounded-lg px-2 text-xs font-semibold ${canRemove ? 'border border-danger-line text-danger-ink' : already ? 'bg-sunken text-faint' : side === 'black' ? 'bg-team-black text-team-black-ink' : 'border border-line-strong text-ink'}`}
                   >
-                    {already ? '있음' : side === 'black' ? '＋블랙' : '＋화이트'}
+                    {canRemove ? (side === 'black' ? '블랙 빼기' : '화이트 빼기') : already ? '있음' : side === 'black' ? '＋블랙' : '＋화이트'}
                   </button>
                 )
               })}
