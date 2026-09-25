@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { CompatiblePlayer, PlayerStats, ShareMessage, VoteIn, VoteTargets } from './types'
+import type { BadgeView, CompatiblePlayer, PlayerStats, ShareMessage, VoteIn, VoteTargets } from './types'
 
 /** 경기 후 피어 투표 (S-16) · 잘 맞는 참여자 (S-17). 종료 전에는 403 SURVEY_NOT_OPEN 이 온다 */
 export const peerApi = {
@@ -9,4 +9,6 @@ export const peerApi = {
   shareMessage: (eventId: number) => api<ShareMessage>(`/events/${eventId}/post-game-survey/share-message`),
   stats: (playerId: number) => api<PlayerStats>(`/players/${playerId}/stats`),
   compatible: (playerId: number) => api<{ items: CompatiblePlayer[] }>(`/players/${playerId}/compatible`),
+  /** 내 배지 — 부를 때마다 서버가 다시 판정한다 (기록 탭) */
+  myBadges: () => api<{ items: BadgeView[] }>('/me/badges'),
 }

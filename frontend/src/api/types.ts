@@ -522,6 +522,34 @@ export interface PlayerStats {
 }
 
 // --- 팀 리더보드 ---
+// --- 기록 탭: 월간 코트 마진 · 배지 ---
+export interface MonthlyMarginEntry {
+  rank: number | null
+  player: PlayerCard
+  avg_margin: string
+  total_margin: string
+  quarters: number
+  wins: number
+  eligible: boolean
+}
+export interface MonthlyMarginView {
+  period: string
+  total_quarters: number
+  threshold_quarters: number
+  min_share: number
+  items: MonthlyMarginEntry[]
+}
+export type BadgeGroup = 'START' | 'ACTIVITY' | 'RELATION'
+export interface BadgeView {
+  code: string
+  group: BadgeGroup
+  title: string
+  description: string
+  threshold: number
+  progress: number
+  earned_at: string | null
+}
+
 export type LeaderboardMetric = 'attendance' | 'quarters' | 'residual'
 export interface LeaderboardEntry {
   rank: number

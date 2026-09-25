@@ -14,6 +14,8 @@
 - GET  /players/{player_id}/compatible                     나와 잘 맞는 참여자 (구현됨)
 - GET  /players/{player_id}/stats                          참여 이력·쿼터 기록·마진 추이 (+매니저: 실력 지표 근거) (구현됨)
 - GET  /teams/{team_id}/stats/leaderboard                  팀 리더보드 (구현됨)
+- GET  /teams/{team_id}/stats/monthly-margin               월간 코트 마진 랭킹 — 기록 탭 (구현됨)
+- GET  /me/badges                                          내 배지 (획득·진행도) — 기록 탭 (구현됨)
 """
 
 from typing import Annotated, Literal
@@ -35,14 +37,16 @@ from app.core import errors as E
 from app.models import Event, Player, Team
 from app.schemas.common import ItemList
 from app.schemas.peer import (
+    BadgeView,
     CompatiblePlayer,
     LeaderboardEntry,
+    MonthlyMarginView,
     PlayerStats,
     PostGameSurveyIn,
     ShareMessage,
     VoteTargets,
 )
-from app.services import guest_service, peer_service
+from app.services import badge_service, guest_service, peer_service
 
 _PLAYER_LOAD = [selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user)]
 
@@ -176,6 +180,40 @@ def leaderboard_periods(db: DB, me: TeamMember, team: Annotated[Team, Depends(ge
     - **설계서:** 7.3절, S-08 리더보드.
     """
     return ItemList(items=peer_service.leaderboard_periods(db, team.id))
+
+
+@router.get(
+    "/teams/{team_id}/stats/monthly-margin", response_model=MonthlyMarginView,
+    responses=errors(_400="VALIDATION_ERROR"), summary="월간 코트 마진 랭킹",
+)
+def monthly_margin(
+    db: DB, me: TeamMember, team: Annotated[Team, Depends(get_team_or_404)],
+    period: Annotated[str, Query(description="달. 예: 2026-09", pattern=r"^\d{4}-\d{2}$")],
+):
+    """그 달 출전 쿼터의 10분 환산 코트 마진 **평균** 순위. 팀원 전원이 볼 수 있다 (실력 지표가 아니라 그 달의 결과).
+
+    - **권한:** 팀원 또는 ADMIN.
+    - **처리:** 출전이 그 달 팀 전체 쿼터의 `margin_rank_min_share`(기본 30%) 미만이면 `rank=null · eligible=false` 로
+      목록 아래에 둔다. 그 달 출전이 0인 사람은 목록에 없다. 병합된 게스트 기록은 회원 쪽으로 합산한다.
+    - **오류:** `400 VALIDATION_ERROR`(달 형식), `404 NOT_FOUND`, `403 NOT_A_MEMBER`.
+    - **상태:** `구현됨`.
+    - **설계서:** 9.1절 (원시 마진은 실력이 아니라 결과), 기록 탭.
+    """
+    return peer_service.monthly_margin(db, team.id, period)
+
+
+@router.get("/me/badges", response_model=ItemList[BadgeView], summary="내 배지")
+def my_badges(db: DB, user: CurrentUser):
+    """배지 전체 목록 — 획득한 것은 `earned_at`, 아직인 것은 `progress/threshold` 로 진행도를 보여 준다.
+
+    - **권한:** 로그인 사용자.
+    - **처리:** 부를 때마다 행동 지표(팀 가입·설문·참석 응답·출전·참석·연속 참석·투표·지목·상호 지목·게스트 전환)를
+      다시 세어 새로 충족한 배지를 저장한다. 기준을 나중에 올려도 이미 얻은 배지는 회수하지 않는다.
+    - **오류:** `401 TOKEN_EXPIRED`.
+    - **상태:** `구현됨`.
+    - **설계서:** 기록 탭 (배지는 실력을 겨루지 않는다 — 행동만 센다).
+    """
+    return ItemList(items=badge_service.sync(db, user))
 
 
 @router.get(

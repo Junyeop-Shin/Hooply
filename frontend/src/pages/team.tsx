@@ -12,9 +12,26 @@ import { surveyApi } from '../api/survey'
 import { localISODate, type PlayerCard, type PlayerCardDetailed } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
+import { RecordsTab } from '../components/records'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 const EVENTS_PAGE = 5
+type TeamTab = 'events' | 'records' | 'members'
+const seenMonthKey = (teamId: number) => `hooply:records-seen-month:${teamId}`
+
+/**
+ * 첫 탭 결정. 평소엔 일정 탭. 달이 바뀐 뒤 처음 팀 화면을 열면 딱 한 번 기록 탭을 먼저 보여 준다 —
+ * 지난달 월간 랭킹이 확정됐다는 뜻이라서. "지난 방문 달" 을 이 기기에 기억하고, 없으면(첫 방문) 그냥 적어만 둔다.
+ */
+function initialTab(teamId: number): { tab: TeamTab; newMonth: boolean } {
+  const cur = localISODate().slice(0, 7)
+  try {
+    const seen = localStorage.getItem(seenMonthKey(teamId))
+    localStorage.setItem(seenMonthKey(teamId), cur)
+    if (seen && seen !== cur) return { tab: 'records', newMonth: true }
+  } catch { /* 저장소를 못 쓰면 늘 일정 탭 */ }
+  return { tab: 'events', newMonth: false }
+}
 
 /* ---------- S-05 팀 생성 ---------- */
 export function TeamCreatePage() {
@@ -128,7 +145,8 @@ export function TeamDetailPage() {
   const { teamId } = useParams()
   const id = Number(teamId)
   const nav = useNavigate()
-  const [tab, setTab] = useState<'events' | 'members'>('events')
+  const [{ tab, newMonth }, setTabState] = useState(() => initialTab(id))
+  const setTab = (t: TeamTab) => setTabState((s) => ({ ...s, tab: t }))
   const team = useQuery({ queryKey: ['team', id], queryFn: () => teamsApi.get(id) })
   const players = useQuery({ queryKey: ['team', id, 'players'], queryFn: () => teamsApi.players(id), enabled: tab === 'members' })
   const events = useQuery({ queryKey: ['events', 'team', id, 'all', 50], queryFn: () => eventsApi.list(id, { size: 50 }), enabled: tab === 'events' })
@@ -175,10 +193,10 @@ export function TeamDetailPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 border-b border-line bg-surface">
-        {(['events', 'members'] as const).map((k) => (
+      <div className="grid grid-cols-3 border-b border-line bg-surface">
+        {(['events', 'records', 'members'] as const).map((k) => (
           <button key={k} onClick={() => setTab(k)} className={`min-h-11 text-sm font-semibold ${tab === k ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
-            {k === 'events' ? '일정' : `팀원 ${t.member_count}`}
+            {k === 'events' ? '일정' : k === 'records' ? '기록' : `팀원 ${t.member_count}`}
           </button>
         ))}
       </div>
@@ -226,11 +244,10 @@ export function TeamDetailPage() {
               />
             )}
           </>
+        ) : tab === 'records' ? (
+          <RecordsTab teamId={id} myPlayerId={t.my_player_id} newMonth={newMonth} />
         ) : players.isLoading ? <Spinner /> : (
           <div className="space-y-2">
-            <button onClick={() => nav(`/teams/${id}/leaderboard`)} className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left text-sm font-semibold text-ink">
-              <span>리더보드 <span className="ml-1 text-[11px] font-normal text-muted">참여율 · 출전 쿼터{isManager ? ' · 기여 점수' : ''}</span></span><span>→</span>
-            </button>
             {players.data?.items.map((p) => <PlayerRow key={p.id} p={p} isMe={p.id === t.my_player_id} />)}
             <LeaveTeamButton teamId={id} teamName={t.name} />
           </div>

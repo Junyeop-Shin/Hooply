@@ -528,6 +528,76 @@ def leaderboard_periods(db: Session, team_id: int) -> list[str]:
     return list(db.scalars(select(sub.c.ym).group_by(sub.c.ym).order_by(sub.c.ym.desc())).all())
 
 
+def monthly_margin(db: Session, team_id: int, period: str):
+    """월간 코트 마진 랭킹 (기록 탭). 순위 값은 출전 쿼터의 10분 환산 마진 **평균** — 합계는 많이 뛴 사람이 무조건 위로 간다.
+
+    실력 지표가 아니라 그 달의 결과다 (9.1절: 팀이 하루 고정이라 이긴 팀 6~7명이 비슷한 값을 받는다). 그래서 잔차가
+    아닌 원시 마진을 그대로 쓰고, 화면도 "코트 마진" 이라 부른다. 출전이 그 달 팀 전체 쿼터의 `margin_rank_min_share`
+    미만이면 순위 없이 아래에 둔다 — 두 쿼터 뛰고 +12 인 사람이 1등이 되는 것을 막는다.
+    병합된 게스트 기록은 회원 쪽으로 합산한다 (리더보드와 같은 규칙).
+    """
+    import math
+
+    from app.models import Quarter
+    from app.schemas.peer import MonthlyMarginEntry, MonthlyMarginView
+
+    today = datetime.now(ZoneInfo(get_settings().timezone)).date()
+    lo, hi = _period_range(period)
+    event_ids = list(db.scalars(
+        select(Event.id).where(Event.team_id == team_id, Event.status != EventStatus.CANCELED, Event.event_date <= today, Event.event_date >= lo, Event.event_date < hi)
+    ).all())
+    total = db.scalar(select(func.count()).select_from(Quarter).where(Quarter.event_id.in_(event_ids))) if event_ids else 0
+    total = total or 0
+    share = get_settings().margin_rank_min_share
+    threshold = max(1, math.ceil(total * share)) if total else 0
+
+    all_rows = db.execute(select(Player.id, Player.merged_into_player_id).where(Player.team_id == team_id)).all()
+    merged_into = {pid: into for pid, into in all_rows if into is not None}
+
+    def canonical(pid: int) -> int:
+        seen: set[int] = set()
+        while pid in merged_into and pid not in seen:
+            seen.add(pid)
+            pid = merged_into[pid]
+        return pid
+
+    players = db.scalars(
+        select(Player).where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE, Player.merged_into_player_id.is_(None))
+        .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+    ).all()
+    quarters: dict[int, int] = defaultdict(int)
+    margin: dict[int, Decimal] = defaultdict(Decimal)
+    wins: dict[int, int] = defaultdict(int)
+    if event_ids:
+        for pid, n, total_margin, n_wins in db.execute(
+            select(
+                QuarterLineup.player_id, func.count(), func.coalesce(func.sum(QuarterLineup.normalized_margin), 0),
+                func.count().filter(QuarterLineup.normalized_margin > 0),
+            )
+            .join(Quarter, Quarter.id == QuarterLineup.quarter_id).where(Quarter.event_id.in_(event_ids)).group_by(QuarterLineup.player_id)
+        ).all():
+            quarters[canonical(pid)] += n
+            margin[canonical(pid)] += Decimal(total_margin)
+            wins[canonical(pid)] += n_wins
+    entries = []
+    for p in players:
+        q = quarters[p.id]
+        if q == 0:
+            continue  # 그 달 출전이 없는 사람은 목록에 아예 넣지 않는다 (미달 목록이 팀원 전체가 되지 않게)
+        avg = Decimal(str(round(float(margin[p.id]) / q, 1)))
+        entries.append(MonthlyMarginEntry(
+            rank=None, player=to_card(p, include_grade=False), avg_margin=avg, total_margin=Decimal(str(round(float(margin[p.id]), 1))),
+            quarters=q, wins=wins[p.id], eligible=q >= threshold,
+        ))
+    entries.sort(key=lambda e: (not e.eligible, -float(e.avg_margin) if e.eligible else -e.quarters, e.player.display_name))
+    rank = 0
+    for e in entries:
+        if e.eligible:
+            rank += 1
+            e.rank = rank
+    return MonthlyMarginView(period=period, total_quarters=total, threshold_quarters=threshold, min_share=share, items=entries)
+
+
 def leaderboard(db: Session, team_id: int, *, metric: str, period: str | None, include_grade: bool) -> list:
     """팀 리더보드. metric: attendance(참여율) / quarters(출전 쿼터) / residual(기여 점수, 매니저).
 

@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { GuestClaimView, LeaderboardEntry, LeaderboardMetric, MergeCandidate, PlayerCard, PlayerCardDetailed, TeamDetail, TeamRole } from './types'
+import type { GuestClaimView, LeaderboardEntry, LeaderboardMetric, MergeCandidate, MonthlyMarginView, PlayerCard, PlayerCardDetailed, TeamDetail, TeamRole } from './types'
 
 export const teamsApi = {
   create: (input: { name: string; description?: string; home_court?: string }) =>
@@ -22,6 +22,8 @@ export const teamsApi = {
     api<{ items: LeaderboardEntry[] }>(`/teams/${teamId}/stats/leaderboard?metric=${metric}${period ? `&period=${period}` : ''}`),
   /** 리더보드에서 고를 수 있는 달 (기록이 있는 달만, 최신순). 예: ["2026-09", "2026-08"] */
   leaderboardPeriods: (teamId: number) => api<{ items: string[] }>(`/teams/${teamId}/stats/periods`),
+  /** 월간 코트 마진 랭킹 (기록 탭). period = "2026-09" */
+  monthlyMargin: (teamId: number, period: string) => api<MonthlyMarginView>(`/teams/${teamId}/stats/monthly-margin?period=${period}`),
 
   // 게스트 레코드 (회차와 무관)
   guests: (teamId: number, q?: string) =>

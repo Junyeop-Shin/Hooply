@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # 쿼터 기록만 저장하고 잔차 갱신(9.2절)에는 넣지 않는다. 잊지 않도록 상수로 뽑아둔 것.
     rating_warmup_events: int = 2
 
+    # 월간 코트 마진 랭킹에 오르려면 그 달 팀이 뛴 전체 쿼터의 이 비율 이상 출전해야 한다 (기록 탭).
+    # 절대 횟수 대신 비율로 두어 한 달에 2회 모인 달과 5회 모인 달의 기준이 자동으로 달라진다.
+    margin_rank_min_share: float = 0.30
+
 
 @lru_cache
 def get_settings() -> Settings:

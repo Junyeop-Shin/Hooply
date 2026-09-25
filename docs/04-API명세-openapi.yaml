@@ -177,6 +177,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /auth/logout:
+    post:
+      summary: 로그아웃 (refresh 토큰 폐기)
+      tags:
+      - 인증 · 프로필
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      security: []
+      responses:
+        '204':
+          description: 성공
   /auth/password/forgot:
     post:
       summary: 비밀번호 재설정 요청
@@ -225,6 +240,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserDetail'
+    delete:
+      summary: 계정 삭제
+      tags:
+      - 인증 · 프로필
+      responses:
+        '204':
+          description: 성공
+        '422':
+          description: CANNOT_DEMOTE_LAST_MANAGER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       summary: 내 프로필 수정
       tags:
@@ -242,6 +270,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserDetail'
+  /me/password:
+    post:
+      summary: 비밀번호 변경
+      tags:
+      - 인증 · 프로필
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '204':
+          description: 성공
+        '401':
+          description: INVALID_CREDENTIALS
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /me/avatar:
     post:
       summary: 프로필 사진 등록 · 교체
@@ -609,6 +663,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: CANNOT_DEMOTE_LAST_MANAGER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}:leave:
+    post:
+      summary: 팀 나가기
+      tags:
+      - 팀 · 참가자
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: 성공
         '422':
           description: CANNOT_DEMOTE_LAST_MANAGER
           content:
@@ -1870,6 +1944,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ItemList_str_'
+  /teams/{team_id}/stats/monthly-margin:
+    get:
+      summary: 월간 코트 마진 랭킹
+      tags:
+      - 경기 후 설문 · 통계
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: period
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonthlyMarginView'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /me/badges:
+    get:
+      summary: 내 배지
+      tags:
+      - 경기 후 설문 · 통계
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList_BadgeView_'
   /teams/{team_id}/stats/leaderboard:
     get:
       summary: 팀 리더보드
@@ -2355,6 +2470,51 @@ components:
       type: object
       required:
       - data_url
+    AxisRank:
+      properties:
+        level:
+          type: string
+          enum:
+          - HIGH
+          - MID
+          - LOW
+          nullable: true
+        percentile:
+          type: integer
+          nullable: true
+        sample:
+          type: integer
+      type: object
+      required:
+      - level
+      - percentile
+      - sample
+    BadgeView:
+      properties:
+        code:
+          type: string
+        group:
+          type: string
+          enum:
+          - START
+          - ACTIVITY
+          - RELATION
+        threshold:
+          type: integer
+        progress:
+          type: integer
+        earned_at:
+          type: string
+          format: date-time
+          nullable: true
+      type: object
+      required:
+      - code
+      - group
+      - title
+      - description
+      - threshold
+      - progress
     CandidateView:
       properties:
         id:
@@ -2384,6 +2544,22 @@ components:
       - metrics
       - is_adopted
       - squads
+    ChangePasswordRequest:
+      properties:
+        current_password:
+          type: string
+          format: password
+          writeOnly: true
+        new_password:
+          type: string
+          maxLength: 72
+          minLength: 8
+          format: password
+          writeOnly: true
+      type: object
+      required:
+      - current_password
+      - new_password
     CompatiblePlayer:
       properties:
         player:
@@ -2805,6 +2981,15 @@ components:
       type: object
       required:
       - items
+    ItemList_BadgeView_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/BadgeView'
+          type: array
+      type: object
+      required:
+      - items
     ItemList_CompatiblePlayer_:
       properties:
         items:
@@ -3031,6 +3216,13 @@ components:
       required:
       - email
       - password
+    LogoutRequest:
+      properties:
+        refresh_token:
+          type: string
+      type: object
+      required:
+      - refresh_token
     MarginPoint:
       properties:
         event_id:
@@ -3069,6 +3261,55 @@ components:
       type: object
       required:
       - into_player_id
+    MonthlyMarginEntry:
+      properties:
+        rank:
+          type: integer
+          nullable: true
+        player:
+          $ref: '#/components/schemas/PlayerCard'
+        avg_margin:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+        total_margin:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+        quarters:
+          type: integer
+        wins:
+          type: integer
+        eligible:
+          type: boolean
+      type: object
+      required:
+      - rank
+      - player
+      - avg_margin
+      - total_margin
+      - quarters
+      - wins
+      - eligible
+    MonthlyMarginView:
+      properties:
+        period:
+          type: string
+        total_quarters:
+          type: integer
+        threshold_quarters:
+          type: integer
+        min_share:
+          type: number
+        items:
+          items:
+            $ref: '#/components/schemas/MonthlyMarginEntry'
+          type: array
+      type: object
+      required:
+      - period
+      - total_quarters
+      - threshold_quarters
+      - min_share
+      - items
     MovePlayer:
       properties:
         player_id:
@@ -3379,6 +3620,10 @@ components:
             type: string
             pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
             nullable: true
+          type: object
+        skill_axes_rank:
+          additionalProperties:
+            $ref: '#/components/schemas/AxisRank'
           type: object
         manager_rank:
           $ref: '#/components/schemas/RankInfo'

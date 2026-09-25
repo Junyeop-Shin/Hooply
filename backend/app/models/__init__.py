@@ -33,6 +33,7 @@ from app.models.assignment import (
     AssignmentSquad,
 )
 from app.models.audit import AuditLog
+from app.models.badge import UserBadge
 from app.models.event import Event, EventAttendance
 from app.models.game import Quarter, QuarterLineup
 from app.models.peer import ChemistryScore, PostGameSurvey, PostGameVote
@@ -82,4 +83,5 @@ __all__ = [
     "Team",
     "User",
     "UserAvatar",
+    "UserBadge",
 ]

@@ -160,6 +160,40 @@ class CompatiblePlayer(BaseModel):
     together_quarters: int = Field(description="같은 팀으로 함께 출전한 쿼터 수")
 
 
+class MonthlyMarginEntry(BaseModel):
+    """월간 코트 마진 랭킹의 한 줄. 실력이 아니라 "그 달 코트에서 벌어진 결과" 다 (9.1절) — 화면도 그렇게 부른다."""
+
+    rank: int | None = Field(description="순위. 출전 기준 미달이면 None")
+    player: PlayerCard
+    avg_margin: Decimal = Field(description="출전 쿼터의 10분 환산 마진 평균 (점/쿼터)")
+    total_margin: Decimal = Field(description="같은 값의 합계")
+    quarters: int = Field(description="그 달 출전 쿼터 수")
+    wins: int = Field(description="이긴 쿼터 수")
+    eligible: bool = Field(description="출전 기준(threshold_quarters) 이상인지")
+
+
+class MonthlyMarginView(BaseModel):
+    """`GET /teams/{id}/stats/monthly-margin` 응답."""
+
+    period: str = Field(description="YYYY-MM")
+    total_quarters: int = Field(description="그 달 팀이 기록한 전체 쿼터 수")
+    threshold_quarters: int = Field(description="랭킹에 오르는 최소 출전 쿼터 = ceil(total × min_share)")
+    min_share: float = Field(description="설정값 margin_rank_min_share")
+    items: list[MonthlyMarginEntry] = Field(description="기준 충족자 마진 평균 내림차순, 그 뒤 미달자 출전 수 내림차순")
+
+
+class BadgeView(BaseModel):
+    """`GET /me/badges` 의 items 원소 — 획득한 것과 아직 못 얻은 것(진행도 포함)을 함께 내려준다."""
+
+    code: str
+    group: Literal["START", "ACTIVITY", "RELATION"]
+    title: str
+    description: str
+    threshold: int
+    progress: int = Field(description="현재 값 (threshold 이상이면 획득)")
+    earned_at: datetime | None = None
+
+
 class LeaderboardEntry(BaseModel):
     """`GET /teams/{id}/stats/leaderboard` 의 items 원소."""
 
