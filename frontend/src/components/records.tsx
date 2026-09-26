@@ -15,6 +15,7 @@ import { teamsApi } from '../api/teams'
 import { localISODate, type BadgeGroup, type BadgeTier, type BadgeView, type MarginPoint, type MonthlyMarginEntry } from '../api/types'
 import { SERIES_INFO, SINGLE_PICT, type BadgeFrame, type BadgePict } from './badge-art'
 import { BadgeDefs, BadgeIcon } from './badge-icon'
+import { FirstTimeTip } from './tutorial'
 import { Avatar, Card, EmptyState, SectionTitle, Spinner } from './ui'
 
 /** "2026-09" → "9월" (같은 해) / "2025년 12월" (다른 해) */
@@ -32,6 +33,7 @@ const mmdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`
 export function RecordsTab({ teamId, myPlayerId, newMonth }: { teamId: number; myPlayerId: number | null; newMonth: boolean }) {
   return (
     <div className="space-y-5">
+      <FirstTimeTip id="records" />
       <TrendSection playerId={myPlayerId} />
       <MonthlyMarginSection teamId={teamId} newMonth={newMonth} />
       <BadgeSection />

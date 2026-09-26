@@ -147,6 +147,9 @@ class UserDetail(ORMModel):
     onboarding_completed: bool = Field(description="false면 프론트가 온보딩 설문(S-03)으로 보낸다")
     primary_team_id: int | None = Field(default=None, description="메인 팀. 여러 팀에 속했을 때 프로필이 먼저 보여줄 팀 (홈에서 설정)")
     identities: list[IdentityView] = Field(default=[], description="연결된 로그인 수단 목록")
+    tutorial_state: str = Field(default="DECLINED", description="시작 안내 상태: PENDING(팝업) · ACTIVE(체크리스트) · CLOSED · DONE · DECLINED")
+    tutorial_path: str | None = Field(default=None, description="PLAYER(팀 코드로 가입) · MANAGER(팀 만들기). 경로를 고르기 전이면 None")
+    tutorial_tips_seen: list[str] = Field(default=[], description="이미 닫은 기능별 첫 안내 id")
 
 
 class UserUpdate(BaseModel):

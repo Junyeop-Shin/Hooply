@@ -11,6 +11,11 @@
     한 명(m19 주희정)은 일부러 설문 전 상태로 둬서 홈의 온보딩 안내 카드를 확인할 수 있다.
   - 매니저 1명: manager@demo.com / demo1234  (이름 허재)
   - 팀원 19명: m01@demo.com ~ m19@demo.com / demo1234 · 게스트 출신 가입자 m20@demo.com (허웅)
+  - 시작 안내(튜토리얼) 확인용 새 계정 2개 — 설문·팀 없이 막 가입한 상태라 홈에 "안내를 받을까요?" 팝업이 뜬다
+      · tutorial-player@demo.com  → 팀 코드 CTMATE26 (일요 코트메이트) 로 가입해 보는 팀원 경로
+      · tutorial-manager@demo.com → 팀을 새로 만들어 보는 매니저 경로
+    위 데모 계정들은 팝업 없이 기능별 첫 안내(배정·경기 기록·투표·배정 결과·기록 탭)만 본다.
+  - 팀 코드: 일요 코트메이트는 CTMATE26 으로 고정 (튜토리얼 계정이 쓸 수 있게). 나머지 팀은 무작위
   - 지난 10주 회차 (전부 종료): 매회 참석자 조합이 달라지고(고정 10명 + 번갈아 4명), 게스트가 섞이며,
     배정 확정 + 쿼터 7~9개 기록까지 끝나 있다. 최근 4회차에는 경기 후 투표도 들어가 있다.
       · 3회차부터 실력 지표에 반영된다 (첫 2회 게이트, 13.2절 1항)
@@ -37,7 +42,7 @@ import zlib
 from datetime import UTC, date, datetime, time, timedelta
 
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.session import SessionLocal
 from app.models import Team, User
@@ -48,6 +53,7 @@ from app.models.enums import (
     Position,
     SelfRankLevel,
     Side,
+    TutorialState,
 )
 from app.schemas.assignment import AssignmentRunRequest, ConstraintSet, PinConstraint
 from app.schemas.auth import SignupRequest
@@ -73,6 +79,9 @@ TEAM2_NAME = "수요 픽업"
 TEAM3_NAME = "목요 픽업"
 ADMIN_EMAIL = "admin@demo.com"
 TEAM_NAME = "일요 코트메이트"
+DEMO_TEAM_CODE = "CTMATE26"  # 대문자+숫자 8자, 0/O/1/I 없음
+TUTORIAL_PLAYER_EMAIL = "tutorial-player@demo.com"
+TUTORIAL_MANAGER_EMAIL = "tutorial-manager@demo.com"
 PASSWORD = "demo1234"
 MANAGER_EMAIL = "manager@demo.com"
 
@@ -265,6 +274,10 @@ def main() -> None:
         manager = users[0]
         team = team_service.create_team(db, manager, TeamCreate(name=TEAM_NAME, description="매주 일요일 오전, 게스트 환영", home_court="서초 사회체육관"))
         team_service.set_approval(db, team, admin, True)  # 관리자 승인 (콘솔에서 하는 것과 같은 처리)
+        # 튜토리얼 계정이 매주 같은 코드로 들어올 수 있게 고정 (다른 팀이 이미 쓰고 있으면 무작위 코드 그대로)
+        if not db.scalar(select(Team.id).where(Team.team_code == DEMO_TEAM_CODE)):
+            team.team_code = DEMO_TEAM_CODE
+            db.commit()
         for u in users[1:]:
             team_service.join_team(db, u, team.team_code)
         for i, (u, row) in enumerate(zip(users, ROSTER, strict=True)):
@@ -454,6 +467,13 @@ def main() -> None:
             event_service.respond(db, ev2, caller_player(db, u, team2.id), AttendanceStatus.ATTEND, None)
         db.commit()
 
+        # 8) 시작 안내 — 위 데모 계정은 이미 앱을 쓰는 사람이라 팝업·체크리스트 없이 기능별 첫 안내만 본다 (DONE).
+        #    튜토리얼 확인용 새 계정 2개는 막 가입한 상태(PENDING) 그대로 둔다 — 설문도 팀도 없다
+        db.execute(update(User).where(User.email.like("%@demo.com")).values(tutorial_state=TutorialState.DONE))
+        db.commit()
+        auth_service.signup(db, SignupRequest(email=TUTORIAL_PLAYER_EMAIL, password=SecretStr(PASSWORD), name="김신입"))
+        auth_service.signup(db, SignupRequest(email=TUTORIAL_MANAGER_EMAIL, password=SecretStr(PASSWORD), name="박팀장"))
+
         db.refresh(team)
         print("=== 데모 데이터 생성 완료 ===")
         print(f"팀: {TEAM_NAME} (코드 {team.team_code}) · 회원 {team_service.member_count(db, team.id)}명 · 상태 {team.status}")
@@ -467,6 +487,7 @@ def main() -> None:
         print(f"매니저 로그인: {MANAGER_EMAIL} / {PASSWORD}")
         print(f"팀원 로그인: m01@demo.com ~ m19@demo.com / {PASSWORD}  (m19 주희정은 설문 전 상태)")
         print("게스트 기록 본인 확인: m20@demo.com (허웅) 로그인 → 홈의 '본인이 맞나요?' 카드 · 매니저 팀원 관리에는 '기록 이어받기 제안'")
+        print(f"시작 안내 확인: {TUTORIAL_PLAYER_EMAIL} (팀 코드 {team.team_code} 로 가입) · {TUTORIAL_MANAGER_EMAIL} (팀 만들기) / {PASSWORD}")
         if admin:
             print(f"관리자 콘솔: /admin  (로그인 {ADMIN_EMAIL} / {PASSWORD})")
         else:

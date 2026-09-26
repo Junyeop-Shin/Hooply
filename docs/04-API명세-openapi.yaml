@@ -2024,6 +2024,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /me/tutorial:
+    get:
+      summary: 시작 안내 상태와 체크리스트
+      tags:
+      - 시작 안내
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TutorialView'
+    put:
+      summary: 시작 안내 상태 변경
+      tags:
+      - 시작 안내
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TutorialUpdate'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TutorialView'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /admin/users:
     get:
       summary: 전체 사용자 검색
@@ -4446,6 +4481,72 @@ components:
       required:
       - access_token
       - refresh_token
+    TutorialStep:
+      properties:
+        key:
+          type: string
+        status:
+          type: string
+          enum:
+          - DONE
+          - TODO
+          - WAITING
+        hint:
+          type: string
+        link:
+          type: string
+          nullable: true
+        action:
+          type: string
+          nullable: true
+      type: object
+      required:
+      - key
+      - title
+      - status
+      - hint
+    TutorialUpdate:
+      properties:
+        state:
+          type: string
+          enum:
+          - ACTIVE
+          - CLOSED
+          - DONE
+          - DECLINED
+          nullable: true
+        path:
+          type: string
+          enum:
+          - PLAYER
+          - MANAGER
+          nullable: true
+        tip_seen:
+          type: string
+          nullable: true
+      type: object
+    TutorialView:
+      properties:
+        state:
+          type: string
+        path:
+          type: string
+          nullable: true
+        tips_seen:
+          items:
+            type: string
+          type: array
+        steps:
+          items:
+            $ref: '#/components/schemas/TutorialStep'
+          type: array
+        all_done:
+          type: boolean
+      type: object
+      required:
+      - state
+      - path
+      - tips_seen
     UserDetail:
       properties:
         id:
@@ -4474,6 +4575,15 @@ components:
         identities:
           items:
             $ref: '#/components/schemas/IdentityView'
+          type: array
+        tutorial_state:
+          type: string
+        tutorial_path:
+          type: string
+          nullable: true
+        tutorial_tips_seen:
+          items:
+            type: string
           type: array
       type: object
       required:

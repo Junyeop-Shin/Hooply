@@ -3,23 +3,34 @@
  * 들어오는 곳: 내 프로필 "도움말 · 문의", 로그인 화면 아래 링크. 문장은 lib/help-content.ts 한 곳에서 관리한다.
  */
 import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { authApi } from '../api/auth'
+import { tutorialApi } from '../api/tutorial'
 import { useIsLoggedIn } from '../store/auth'
 import { CONTACT_EMAIL, HELP_SECTIONS } from '../lib/help-content'
-import { Badge, Card, SectionTitle } from '../components/ui'
+import { Badge, Button, Card, SectionTitle } from '../components/ui'
 import { Content, Screen, TopBar } from '../components/layout'
 
 export function HelpPage() {
   const loggedIn = useIsLoggedIn()
-  // 프로필을 내려 둔 채 들어오면 스크롤 위치가 그대로 남아 맨 아래부터 보인다. 첫 주제부터 보이게 맨 위로
-  useEffect(() => { window.scrollTo(0, 0) }, [])
+  const { hash } = useLocation()
+  const target = hash.replace('#', '')
+  // 프로필을 내려 둔 채 들어오면 스크롤 위치가 그대로 남아 맨 아래부터 보인다. 맨 위로 — 주제를 지정해 왔으면 그 주제로
+  useEffect(() => {
+    const el = target ? document.getElementById(target) : null
+    if (el) el.scrollIntoView({ block: 'start' })
+    else window.scrollTo(0, 0)
+  }, [target])
   return (
     <Screen>
       <TopBar title="도움말" back={loggedIn ? '/me' : '/login'} />
       <Content>
         <p className="px-1 text-sm text-muted">궁금한 주제를 눌러 펼쳐 보세요. <span className="whitespace-nowrap">매니저 표시가 있는 주제는 매니저만 쓰는 기능이에요.</span></p>
+        {loggedIn && <RestartTutorial />}
         <div className="space-y-2">
           {HELP_SECTIONS.map((s, i) => (
-            <details key={s.id} id={s.id} open={i === 0} className="group rounded-2xl border border-line bg-surface">
+            <details key={s.id} id={s.id} open={target ? target === s.id : i === 0} className="group rounded-2xl border border-line bg-surface">
               <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
                 <span className="flex-1 font-semibold text-ink">{s.title}</span>
                 {s.manager && <Badge tone="navy">매니저</Badge>}
@@ -41,6 +52,24 @@ export function HelpPage() {
         <ContactCard />
       </Content>
     </Screen>
+  )
+}
+
+/** 시작 안내를 거절했거나 닫았던 사람이 다시 켠다 (경로 선택부터) */
+function RestartTutorial() {
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me })
+  const qc = useQueryClient()
+  const nav = useNavigate()
+  const restart = useMutation({
+    mutationFn: () => tutorialApi.update({ state: 'ACTIVE' }),
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['me'] }); nav('/') },
+  })
+  if (!me.data || me.data.tutorial_state === 'ACTIVE') return null
+  return (
+    <Card className="flex items-center justify-between gap-3">
+      <div><p className="text-sm font-semibold text-ink">시작 안내 다시 보기</p><p className="text-xs text-muted">홈에 할 일 목록이 다시 생기고, 기능별 첫 안내도 켜져요.</p></div>
+      <Button variant="ghost" className="min-h-10 shrink-0 text-sm" loading={restart.isPending} onClick={() => restart.mutate()}>다시 보기</Button>
+    </Card>
   )
 }
 

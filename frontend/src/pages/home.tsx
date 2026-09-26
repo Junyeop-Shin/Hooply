@@ -13,6 +13,7 @@ import { surveyApi } from '../api/survey'
 import { POSITIONS, SELF_RANK_LABEL, localISODate, type EventView, type Position, type UserDetail } from '../api/types'
 import { useAuthStore } from '../store/auth'
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
+import { TutorialCard, TutorialPrompt } from '../components/tutorial'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { fmtEvent } from '../lib/format'
 import { startKakao } from './auth'
@@ -54,7 +55,7 @@ export function HomePage() {
         <div className="rounded-2xl bg-navy-800 p-5 text-white">
           <p className="text-sm text-bar-sub">안녕하세요,</p>
           <p className="text-xl font-bold">{me.data ? `${me.data.nickname ?? me.data.name}님` : '…'}</p>
-          {me.data && !me.data.onboarding_completed ? (
+          {me.data && !me.data.onboarding_completed && me.data.tutorial_state !== 'ACTIVE' ? (  /* 시작 안내 중이면 체크리스트가 대신 안내한다 */
             <Link to="/survey" className="mt-3 flex items-center justify-between rounded-xl bg-court-500 px-4 py-3 text-sm font-semibold">
               실력 설문을 아직 안 하셨어요 · 2분이면 끝나요 <span>→</span>
             </Link>
@@ -70,6 +71,9 @@ export function HomePage() {
             </Link>
           ) : null}
         </div>
+
+        {me.data && <TutorialCard me={me.data} />}
+        {me.data && <TutorialPrompt me={me.data} />}
 
         <GuestClaimCards />
 

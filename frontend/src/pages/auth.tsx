@@ -67,7 +67,7 @@ export function KakaoCallbackPage() {
         if (mode === 'link') { await authApi.kakaoLink(code, state); nav('/me', { replace: true }); return }
         const pair = await authApi.kakaoCallback(code, state)
         login(pair)
-        nav(pair.is_new ? '/survey' : '/', { replace: true })
+        nav('/', { replace: true })  // 새 가입자는 홈에서 시작 안내 팝업을 본다
       } catch (e) { setErr(e instanceof ApiError ? e.message : '카카오 로그인에 실패했어요.') }
     })()
   }, [nav, login])
@@ -154,7 +154,7 @@ export function SignupPage() {
         height_cm: form.height_cm ? Number(form.height_cm) : undefined,
       })
       setTokens(pair)
-      nav('/survey', { replace: true }) // 흐름 A: 가입 직후 온보딩 설문
+      nav('/', { replace: true }) // 가입 직후 홈 — 시작 안내 팝업에서 설문·팀 가입으로 안내한다
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === 'VALIDATION_ERROR') {

@@ -39,7 +39,26 @@ export interface UserDetail {
   onboarding_completed: boolean
   primary_team_id: number | null
   identities: { provider: 'LOCAL' | 'KAKAO' }[]
+  /** 시작 안내: PENDING(팝업) · ACTIVE(체크리스트) · CLOSED · DONE · DECLINED(아무 안내 없음) */
+  tutorial_state: TutorialState
+  tutorial_path: TutorialPath | null
+  tutorial_tips_seen: string[]
 }
+
+// --- 시작 안내 (튜토리얼) ---
+export type TutorialState = 'PENDING' | 'ACTIVE' | 'CLOSED' | 'DONE' | 'DECLINED'
+export type TutorialPath = 'PLAYER' | 'MANAGER'
+export interface TutorialStep {
+  key: string
+  title: string
+  /** WAITING = 다른 사람의 행동이 먼저 필요해 아직 할 수 없음 */
+  status: 'DONE' | 'TODO' | 'WAITING'
+  hint: string
+  link: string | null
+  action: string | null
+}
+export interface TutorialView { state: TutorialState; path: TutorialPath | null; tips_seen: string[]; steps: TutorialStep[]; all_done: boolean }
+export interface TutorialUpdate { state?: 'ACTIVE' | 'CLOSED' | 'DONE' | 'DECLINED'; path?: TutorialPath; tip_seen?: string }
 
 export interface UserSummary {
   id: number

@@ -13,6 +13,7 @@ from app.api.v1 import (
     rankings,
     surveys,
     teams,
+    tutorial,
 )
 
 api_router = APIRouter()
@@ -25,4 +26,5 @@ api_router.include_router(events.router)
 api_router.include_router(assignments.router)
 api_router.include_router(quarters.router)
 api_router.include_router(peer.router)
+api_router.include_router(tutorial.router)
 api_router.include_router(admin.router)

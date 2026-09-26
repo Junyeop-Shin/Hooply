@@ -221,3 +221,20 @@ class TargetSide(StrEnum):
 
     SAME_TEAM = "SAME_TEAM"  # 같은 팀에서 고른 사람
     OPPONENT = "OPPONENT"  # 상대 팀에서 고른 사람
+
+
+class TutorialState(StrEnum):
+    """users.tutorial_state — 처음 쓰는 사람을 위한 시작 안내 (홈 체크리스트 + 기능별 첫 안내)."""
+
+    PENDING = "PENDING"  # 아직 묻지 않음 → 홈에 "안내를 받을까요?" 팝업
+    ACTIVE = "ACTIVE"  # 안내 진행 중 → 홈 체크리스트 카드
+    CLOSED = "CLOSED"  # 체크리스트를 × 로 닫음 → 카드는 끝, 기능별 첫 안내는 계속
+    DONE = "DONE"  # 체크리스트를 다 마침 → 기능별 첫 안내는 계속
+    DECLINED = "DECLINED"  # 팝업에서 거절(또는 기능 도입 전 가입자) → 아무 안내도 없음
+
+
+class TutorialPath(StrEnum):
+    """users.tutorial_path — 시작 안내 경로. 팀 코드를 받았으면 PLAYER, 팀을 만들면 MANAGER."""
+
+    PLAYER = "PLAYER"
+    MANAGER = "MANAGER"

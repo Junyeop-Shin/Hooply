@@ -172,6 +172,8 @@
 | GET | `/teams/{team_id}/stats/leaderboard` | 팀 리더보드 | 200 · 403 |
 | GET | `/teams/{team_id}/stats/monthly-margin` | 월간 코트 마진 랭킹 (기록 탭, `?period=YYYY-MM`) | 200 · 400 · 403 |
 | GET | `/me/badges` | 내 배지 — 획득·진행도 (기록 탭) | 200 |
+| GET | `/me/tutorial` | 시작 안내 상태 + 체크리스트 단계 (서버가 실제 데이터로 판정) | 200 |
+| PUT | `/me/tutorial` | 시작 안내 상태·경로 변경, 닫은 첫 안내 기록 | 200 · 400 |
 
 ### 관리자
 
@@ -198,6 +200,7 @@
 | S-01/02/24 인증 | POST /auth/signup, POST /auth/login, POST /auth/refresh, GET /auth/kakao/login-url, GET /auth/kakao/callback, POST /auth/kakao/link |
 | S-03 설문 · S-23 내 위치 | GET /surveys/onboarding, POST /surveys/onboarding/responses, PUT /teams/{id}/self-rank |
 | S-04 홈 · S-17 프로필 | GET /me, PATCH /me, GET /me/teams, GET /me/profile, PUT /me/positions, GET /players/{id}/stats |
+| S-27 시작 안내 | GET /me, GET/PUT /me/tutorial |
 | S-25 기록 탭 | GET /players/{id}/stats, GET /teams/{id}/stats/periods, GET /teams/{id}/stats/monthly-margin, GET /me/badges |
 | S-17 프로필 사진 | POST /me/avatar, DELETE /me/avatar, GET /users/{id}/avatar |
 | S-04/S-07 게스트 기록 확인 | GET /me/guest-claims, POST /players/{id}:claim |

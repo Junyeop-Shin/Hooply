@@ -31,7 +31,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, BigPK, TimestampMixin
-from app.models.enums import AuthProvider, GlobalRole, db_enum
+from app.models.enums import AuthProvider, GlobalRole, TutorialPath, TutorialState, db_enum
 
 
 class User(TimestampMixin, Base):
@@ -72,6 +72,13 @@ class User(TimestampMixin, Base):
     # 팀이 하나도 없어도 프로필에서 수정·표시할 수 있게 계정에 둔다. 팀 가입 시 이 값으로 행을 만든다.
     position_prefs: Mapped[list[str] | None] = mapped_column(JSONB)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # soft delete. NULL = 정상
+    # 시작 안내 (0019). 새 가입자는 PENDING 으로 시작해 홈에서 팝업을 본다. 기능 도입 전 가입자는 DECLINED 로 채웠다.
+    # tips_seen = 이미 닫은 기능별 첫 안내 id 목록 (app/services/tutorial_service.TIP_IDS)
+    tutorial_state: Mapped[TutorialState] = mapped_column(
+        db_enum(TutorialState, 10), default=TutorialState.PENDING, server_default="PENDING", nullable=False
+    )
+    tutorial_path: Mapped[TutorialPath | None] = mapped_column(db_enum(TutorialPath, 10))
+    tutorial_tips_seen: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
 
     # 연결된 로그인 수단들. 계정 삭제 시 함께 삭제 (delete-orphan)
     identities: Mapped[list["AuthIdentity"]] = relationship(

@@ -21,6 +21,7 @@ import { fmtEvent } from '../lib/format'
 import { renderSquadImage } from '../lib/squad-image'
 import { teamsApi } from '../api/teams'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
+import { FirstTimeTip } from '../components/tutorial'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
 const STRATEGY_LABEL: Record<Strategy, string> = { SKILL: '실력 우선', CHEMISTRY: '친화도 우선', BALANCED: '종합' }
@@ -101,6 +102,7 @@ export function AssignPage() {
     <Screen>
       <TopBar title="팀 배정" back={`/events/${id}`} right={<button className="mr-1 text-xs font-semibold text-brand-ink" onClick={() => loadLast.mutate()}>지난 조건 불러오기</button>} />
       <Content>
+        <FirstTimeTip id="assign" />
         {msg && <Alert kind="info">{msg}</Alert>}
         {ev.data.rsvp_open && (
           <Card className="flex items-center justify-between">
@@ -481,6 +483,7 @@ export function AdoptedPage() {
         )}
       </div>
       <Content>
+        <FirstTimeTip id="adopted" />
         <Card><p className="text-sm text-ink-2 whitespace-pre-line">{v.explanation}</p></Card>
         <Card className="flex items-center gap-3">
           <div className="min-w-0 flex-1">

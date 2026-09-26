@@ -12,6 +12,7 @@ import { peerApi } from '../api/peer'
 import { REASON_TAGS, reasonLabel, type ReasonTag, type VoteCandidate, type VoteIn } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
+import { FirstTimeTip } from '../components/tutorial'
 import { fmtEvent } from '../lib/format'
 
 const MAX_PER_SIDE = 2
@@ -124,6 +125,7 @@ export function VotePage() {
     <Screen>
       <TopBar title="경기 후 투표" back={back} />
       <Content>
+        <FirstTimeTip id="vote" />
         <div className="px-1">
           {ev.data && <p className="text-xs font-semibold text-muted">{fmtEvent(ev.data)}</p>}
           <p className="mt-2 text-sm leading-relaxed text-ink">다음에 또 같은 팀으로 뛰고 싶은 사람을 골라 주세요. {hasTeams ? '우리 팀·상대 팀에서 2명씩' : `최대 ${MAX_PER_SIDE * 2}명`} 고를 수 있고, 다음 팀을 짤 때 반영돼요.</p>

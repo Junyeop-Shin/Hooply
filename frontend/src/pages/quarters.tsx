@@ -22,6 +22,7 @@ import { teamsApi } from '../api/teams'
 import type { PlayerCard, QuarterIn, Side } from '../api/types'
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
+import { FirstTimeTip } from '../components/tutorial'
 
 type Draft = { quarter_no: number; black_score: number; white_score: number; duration_min: number; black: number[]; white: number[] }
 type SideKey = 'black' | 'white'
@@ -193,6 +194,7 @@ export function QuartersPage() {
     <Screen>
       <TopBar title="경기 기록" back={`/events/${id}`} right={<span className="mr-2 text-sm font-bold"><span className="text-ink">블랙 {total.black}</span> <span className="text-faint">:</span> <span className="text-muted">{total.white} 화이트</span></span>} />
       <Content>
+        <FirstTimeTip id="quarters" />
         <p className="px-1 text-xs text-muted">경기 후 한 번에 입력하세요. 저장 전 내용은 이 기기에 임시 보관돼요.</p>
         {restored && <Alert kind="info">저장하지 않은 입력을 되살렸어요.</Alert>}
         {!hasAssignment && <Alert kind="warn">확정된 팀 배정이 없어 참석자 전원이 양쪽에 보여요. 팀마다 5명씩 골라 주세요.</Alert>}
