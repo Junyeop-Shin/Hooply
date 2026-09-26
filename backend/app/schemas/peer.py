@@ -190,6 +190,8 @@ class BadgeView(BaseModel):
     title: str
     description: str
     threshold: int
+    series: str | None = Field(default=None, description="묶음 키 (QUARTERS / ATTEND / VOTES / PLAY_AGAIN). 단일 배지는 None")
+    tier: Literal["BRONZE", "SILVER", "GOLD"] | None = Field(default=None, description="묶음 안의 단계. 단일 배지는 None")
     progress: int = Field(description="현재 값 (threshold 이상이면 획득)")
     earned_at: datetime | None = None
 

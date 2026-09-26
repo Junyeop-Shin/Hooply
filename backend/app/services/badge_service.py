@@ -33,6 +33,7 @@ from app.models.enums import AttendanceStatus, EventStatus, PlayerKind, PlayerSt
 from app.schemas.peer import BadgeView
 
 Group = Literal["START", "ACTIVITY", "RELATION"]
+Tier = Literal["BRONZE", "SILVER", "GOLD"]
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,10 @@ class Badge:
     description: str
     metric: str  # counters() 의 키
     threshold: int
+    # 같은 행동을 쌓는 배지는 한 묶음(series)으로 동·은·금이 된다. 화면은 묶음 하나를 칸 하나로 보여 준다.
+    # 아이콘 그림은 docs/badges/badge_art.py 의 SERIES / SINGLES 가 이 키·코드로 고른다
+    series: str | None = None
+    tier: Tier | None = None
 
 
 BADGES: tuple[Badge, ...] = (
@@ -53,21 +58,22 @@ BADGES: tuple[Badge, ...] = (
     Badge("FIRST_RSVP", "START", "첫 참석 응답", "일정에 참석/불참을 처음 답했어요", "rsvp", 1),
     # 활동 — 참석과 출전. 둘은 같은 행동이라 한 묶음
     Badge("FIRST_QUARTER", "ACTIVITY", "첫 출전", "쿼터 기록에 처음 이름이 올랐어요", "quarters", 1),
-    Badge("QUARTERS_10", "ACTIVITY", "출전 10쿼터", "쿼터 10개를 뛰었어요", "quarters", 10),
-    Badge("QUARTERS_50", "ACTIVITY", "출전 50쿼터", "쿼터 50개를 뛰었어요", "quarters", 50),
-    Badge("QUARTERS_100", "ACTIVITY", "출전 100쿼터", "쿼터 100개를 뛰었어요", "quarters", 100),
-    Badge("ATTEND_5", "ACTIVITY", "참석 5회", "일정에 5번 나왔어요", "attended", 5),
-    Badge("ATTEND_10", "ACTIVITY", "참석 10회", "일정에 10번 나왔어요", "attended", 10),
-    Badge("ATTEND_25", "ACTIVITY", "참석 25회", "일정에 25번 나왔어요", "attended", 25),
-    Badge("STREAK_3", "ACTIVITY", "3회 연속 참석", "한 팀 일정에 3번 연속으로 나왔어요", "streak", 3),
+    Badge("QUARTERS_10", "ACTIVITY", "출전 10쿼터", "쿼터 10개를 뛰었어요", "quarters", 10, "QUARTERS", "BRONZE"),
+    Badge("QUARTERS_50", "ACTIVITY", "출전 50쿼터", "쿼터 50개를 뛰었어요", "quarters", 50, "QUARTERS", "SILVER"),
+    Badge("QUARTERS_100", "ACTIVITY", "출전 100쿼터", "쿼터 100개를 뛰었어요", "quarters", 100, "QUARTERS", "GOLD"),
+    Badge("ATTEND_5", "ACTIVITY", "참석 5회", "일정에 5번 나왔어요", "attended", 5, "ATTEND", "BRONZE"),
+    Badge("ATTEND_10", "ACTIVITY", "참석 10회", "일정에 10번 나왔어요", "attended", 10, "ATTEND", "SILVER"),
+    Badge("ATTEND_25", "ACTIVITY", "참석 25회", "일정에 25번 나왔어요", "attended", 25, "ATTEND", "GOLD"),
+    Badge("STREAK_3", "ACTIVITY", "연속 참석", "한 팀 일정에 3번 연속으로 나왔어요", "streak", 3),
     # 관계 — 투표하고, 지목받고, 사람을 데려오는 것
-    Badge("FIRST_VOTE", "RELATION", "첫 투표", "경기 후 투표에 처음 응답했어요", "votes", 1),
-    Badge("VOTES_5", "RELATION", "투표 5회", "경기 후 투표에 5번 응답했어요", "votes", 5),
-    Badge("PLAY_AGAIN_1", "RELATION", "또 뛰고 싶은 사람", "'다음에 같이 뛰고 싶은 사람'으로 처음 지목받았어요", "play_again", 1),
-    Badge("PLAY_AGAIN_5", "RELATION", "인기 동료", "'다음에 같이 뛰고 싶은 사람'으로 5번 지목받았어요", "play_again", 5),
-    Badge("PLAY_AGAIN_10", "RELATION", "모두의 동료", "'다음에 같이 뛰고 싶은 사람'으로 10번 지목받았어요", "play_again", 10),
-    Badge("MUTUAL_3", "RELATION", "서로 뽑은 사이 3명", "서로 지목한 사람이 3명이에요", "mutual", 3),
-    Badge("GUEST_CONVERTED", "RELATION", "게스트를 팀원으로", "내가 부른 게스트가 가입해 기록을 이어받았어요", "guest_converted", 1),
+    Badge("FIRST_VOTE", "RELATION", "투표 1회", "경기 후 투표에 처음 응답했어요", "votes", 1, "VOTES", "BRONZE"),
+    Badge("VOTES_5", "RELATION", "투표 5회", "경기 후 투표에 5번 응답했어요", "votes", 5, "VOTES", "SILVER"),
+    Badge("VOTES_10", "RELATION", "투표 10회", "경기 후 투표에 10번 응답했어요", "votes", 10, "VOTES", "GOLD"),
+    Badge("PLAY_AGAIN_1", "RELATION", "지목 1회", "'다음에 같이 뛰고 싶은 사람'으로 처음 지목받았어요", "play_again", 1, "PLAY_AGAIN", "BRONZE"),
+    Badge("PLAY_AGAIN_5", "RELATION", "지목 5회", "'다음에 같이 뛰고 싶은 사람'으로 5번 지목받았어요", "play_again", 5, "PLAY_AGAIN", "SILVER"),
+    Badge("PLAY_AGAIN_10", "RELATION", "지목 10회", "'다음에 같이 뛰고 싶은 사람'으로 10번 지목받았어요", "play_again", 10, "PLAY_AGAIN", "GOLD"),
+    Badge("MUTUAL_3", "RELATION", "서로 뽑은 사이", "서로 지목한 사람이 3명이 됐어요", "mutual", 3),
+    Badge("GUEST_CONVERTED", "RELATION", "게스트 영입", "내가 부른 게스트가 가입해 기록을 이어받았어요", "guest_converted", 1),
 )
 BY_CODE = {b.code: b for b in BADGES}
 
@@ -143,7 +149,7 @@ def sync(db: Session, user: User) -> list[BadgeView]:
         for row in new:
             earned[row.code] = row.earned_at
     return [
-        BadgeView(code=b.code, group=b.group, title=b.title, description=b.description, threshold=b.threshold,
+        BadgeView(code=b.code, group=b.group, title=b.title, description=b.description, threshold=b.threshold, series=b.series, tier=b.tier,
                   progress=min(c[b.metric], b.threshold) if b.code in earned else c[b.metric], earned_at=earned.get(b.code))
         for b in BADGES
     ]

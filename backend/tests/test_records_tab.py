@@ -53,7 +53,14 @@ def test_badges_follow_behaviour_and_never_revoke(client, club):
     names = _month_of_games(client, club)
     items = client.get(f"{API}/me/badges", headers=m).json()["items"]
     by = {b["code"]: b for b in items}
-    assert len(items) == 19 and all(b["group"] in ("START", "ACTIVITY", "RELATION") for b in items)
+    assert len(items) == 20 and all(b["group"] in ("START", "ACTIVITY", "RELATION") for b in items)
+    # 묶음 4개 × 동·은·금, 나머지 8개는 단일
+    series = {}
+    for b in items:
+        if b["series"]:
+            series.setdefault(b["series"], []).append(b["tier"])
+    assert series == {s: ["BRONZE", "SILVER", "GOLD"] for s in ("QUARTERS", "ATTEND", "VOTES", "PLAY_AGAIN")}
+    assert sum(1 for b in items if b["series"] is None) == 8
     earned = {c for c, b in by.items() if b["earned_at"]}
     # 시작 배지 4개 + 첫 출전 + 3회 연속 참석. 매니저(names[0])는 8쿼터 뛰었고 세 번 다 나왔다
     assert {"JOIN_TEAM", "SURVEY_DONE", "SELF_RANK_DONE", "FIRST_RSVP", "FIRST_QUARTER", "STREAK_3"} <= earned

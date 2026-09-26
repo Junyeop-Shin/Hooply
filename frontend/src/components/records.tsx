@@ -12,7 +12,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { peerApi } from '../api/peer'
 import { teamsApi } from '../api/teams'
-import { localISODate, type BadgeGroup, type BadgeView, type MarginPoint, type MonthlyMarginEntry } from '../api/types'
+import { localISODate, type BadgeGroup, type BadgeTier, type BadgeView, type MarginPoint, type MonthlyMarginEntry } from '../api/types'
+import { SERIES_INFO, SINGLE_PICT, type BadgeFrame, type BadgePict } from './badge-art'
+import { BadgeDefs, BadgeIcon } from './badge-icon'
 import { Avatar, Card, EmptyState, SectionTitle, Spinner } from './ui'
 
 /** "2026-09" → "9월" (같은 해) / "2025년 12월" (다른 해) */
@@ -192,41 +194,131 @@ function MarginRow({ e, dim = false }: { e: MonthlyMarginEntry; dim?: boolean })
 }
 
 /* ---------- 배지 ---------- */
+// 같은 행동을 쌓는 배지(묶음)는 칸 하나로 합쳐 동 → 은 → 금으로 올라가고, 한 번이면 끝나는 배지는 단일 칸.
+// 칸을 누르면 아래에서 시트가 올라와 단계별로 얻은 날짜·남은 양을 보여 준다. 자랑·공유·획득 알림은 없다.
 
 const GROUP_LABEL: Record<BadgeGroup, string> = { START: '시작', ACTIVITY: '활동', RELATION: '관계' }
 const GROUP_ORDER: BadgeGroup[] = ['START', 'ACTIVITY', 'RELATION']
+const TIER_KO: Record<BadgeTier, string> = { BRONZE: '동', SILVER: '은', GOLD: '금' }
+const TIER_FRAME: Record<BadgeTier, BadgeFrame> = { BRONZE: 'bronze', SILVER: 'silver', GOLD: 'gold' }
+
+/** 화면의 칸 하나 — 단일 배지 1개 또는 묶음(동·은·금 3개) */
+interface BadgeTileModel { key: string; group: BadgeGroup; title: string; pict: BadgePict; desc: string; items: BadgeView[] }
+
+function toTiles(items: BadgeView[]): BadgeTileModel[] {
+  const tiles: BadgeTileModel[] = []
+  const bySeries = new Map<string, BadgeTileModel>()
+  for (const b of items) {
+    if (b.series) {
+      let t = bySeries.get(b.series)
+      if (!t) {
+        const info = SERIES_INFO[b.series] ?? { title: b.title, pict: 'ball' as BadgePict, desc: b.description }
+        t = { key: b.series, group: b.group, title: info.title, pict: info.pict, desc: info.desc, items: [] }
+        bySeries.set(b.series, t); tiles.push(t)
+      }
+      t.items.push(b)
+    } else {
+      tiles.push({ key: b.code, group: b.group, title: b.title, pict: SINGLE_PICT[b.code] ?? 'ball', desc: b.description, items: [b] })
+    }
+  }
+  return tiles
+}
+
+/** 칸의 현재 모습: 틀, 칸 이름, 아래 줄 문구 */
+function tileState(t: BadgeTileModel): { frame: BadgeFrame; title: string; sub: string; earned: boolean } {
+  if (t.items.length === 1 && !t.items[0].series) {
+    const b = t.items[0]
+    if (b.earned_at) return { frame: 'single', title: t.title, sub: mmdd(b.earned_at.slice(0, 10)), earned: true }
+    return { frame: 'locked', title: t.title, sub: b.threshold > 1 ? `${b.progress}/${b.threshold}` : '아직', earned: false }
+  }
+  const got = t.items.filter((b) => b.earned_at)
+  const top = got[got.length - 1]
+  const next = t.items.find((b) => !b.earned_at)
+  if (!top) return { frame: 'locked', title: t.title, sub: `동까지 ${next!.progress}/${next!.threshold}`, earned: false }
+  const tier = top.tier!
+  return {
+    frame: TIER_FRAME[tier], title: `${t.title} · ${TIER_KO[tier]}`, earned: true,
+    sub: next ? `${TIER_KO[next.tier!]}까지 ${next.progress}/${next.threshold}` : `금 · ${mmdd(top.earned_at!.slice(0, 10))}`,
+  }
+}
 
 function BadgeSection() {
   const q = useQuery({ queryKey: ['me', 'badges'], queryFn: peerApi.myBadges })
   const items = q.data?.items ?? []
+  const tiles = toTiles(items)
   const earned = items.filter((b) => b.earned_at).length
+  const [open, setOpen] = useState<BadgeTileModel | null>(null)
   return (
     <section>
+      <BadgeDefs />
       <SectionTitle action={items.length ? <span className="text-xs text-muted">획득 {earned}/{items.length}</span> : undefined}>배지</SectionTitle>
       {q.isLoading ? <Spinner /> : (
         <Card className="space-y-3">
-          <p className="text-[11px] text-faint">실력이 아니라 함께한 행동으로 얻어요. 회색은 아직 못 얻은 배지고, 숫자는 진행 정도예요.</p>
+          <p className="text-[11px] text-faint">함께한 행동으로 얻어요. 칸을 누르면 단계와 남은 양이 보여요.</p>
           {GROUP_ORDER.map((g) => (
             <div key={g}>
               <p className="mb-1.5 text-xs font-bold text-muted">{GROUP_LABEL[g]}</p>
-              <div className="grid grid-cols-3 gap-2">
-                {items.filter((b) => b.group === g).map((b) => <BadgeTile key={b.code} b={b} />)}
+              <div className="grid grid-cols-4 gap-1.5">
+                {tiles.filter((t) => t.group === g).map((t) => <BadgeTile key={t.key} t={t} onOpen={() => setOpen(t)} />)}
               </div>
             </div>
           ))}
         </Card>
       )}
+      {open && <BadgeSheet t={open} onClose={() => setOpen(null)} />}
     </section>
   )
 }
 
-function BadgeTile({ b }: { b: BadgeView }) {
-  const done = !!b.earned_at
+function BadgeTile({ t, onOpen }: { t: BadgeTileModel; onOpen: () => void }) {
+  const st = tileState(t)
   return (
-    <div title={b.description} className={`flex min-h-[76px] flex-col items-center justify-center rounded-xl px-1.5 py-2 text-center ${done ? 'border border-brand-line bg-brand-soft' : 'bg-sunken'}`}>
-      <span className={`mb-1 h-2 w-2 rounded-full ${done ? 'bg-court-500' : 'bg-line-strong'}`} />
-      <p className={`text-[11px] font-semibold leading-tight ${done ? 'text-ink' : 'text-faint'}`}>{b.title}</p>
-      <p className="mt-0.5 text-[10px] text-faint">{done ? mmdd(b.earned_at!.slice(0, 10)) : b.threshold > 1 ? `${b.progress}/${b.threshold}` : '아직'}</p>
+    <button
+      type="button" onClick={onOpen} aria-label={`${st.title} 자세히 보기`}
+      className={`flex min-h-[92px] flex-col items-center justify-start rounded-xl px-1 pb-2 pt-2.5 text-center active:opacity-80 ${st.earned ? 'border border-brand-line bg-brand-soft' : 'border border-transparent bg-sunken'}`}
+    >
+      <BadgeIcon frame={st.frame} pict={t.pict} label={st.title} className="mb-1 w-[38px]" />
+      <span className={`text-[10.5px] font-semibold leading-tight ${st.earned ? 'text-ink' : 'text-faint'}`}>{st.title}</span>
+      <span className="mt-0.5 text-[9.5px] tabular-nums text-faint">{st.sub}</span>
+    </button>
+  )
+}
+
+/** 칸을 누르면 올라오는 시트 — 게스트 초대 시트와 같은 모양 */
+function BadgeSheet({ t, onClose }: { t: BadgeTileModel; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${t.title} 배지`}>
+      <div className="safe-bottom max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-bold text-ink">{t.title}</h3>
+          <button type="button" onClick={onClose} aria-label="닫기" className="-mr-1 -mt-1 flex size-9 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
+        </div>
+        <p className="mb-3 text-xs text-muted">{t.desc}</p>
+        <div className="divide-y divide-line">
+          {t.items.map((b) => {
+            const done = !!b.earned_at
+            const frame: BadgeFrame = done ? (b.tier ? TIER_FRAME[b.tier] : 'single') : 'locked'
+            const pct = Math.min(100, Math.round((b.progress / b.threshold) * 100))
+            return (
+              <div key={b.code} className="flex items-center gap-3 py-2.5">
+                <BadgeIcon frame={frame} pict={t.pict} label={b.title} className="w-12 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className={`text-sm font-semibold ${done ? 'text-ink' : 'text-muted'}`}>{b.tier ? `${TIER_KO[b.tier]} · ` : ''}{b.title}</p>
+                  {done ? (
+                    <p className="text-xs tabular-nums text-muted">{mmdd(b.earned_at!.slice(0, 10))} 달성</p>
+                  ) : (
+                    <>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-sunken"><div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} /></div>
+                      <p className="mt-0.5 text-xs tabular-nums text-muted">{b.progress}/{b.threshold}</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }

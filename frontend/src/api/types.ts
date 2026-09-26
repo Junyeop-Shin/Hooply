@@ -540,12 +540,16 @@ export interface MonthlyMarginView {
   items: MonthlyMarginEntry[]
 }
 export type BadgeGroup = 'START' | 'ACTIVITY' | 'RELATION'
+export type BadgeTier = 'BRONZE' | 'SILVER' | 'GOLD'
 export interface BadgeView {
   code: string
   group: BadgeGroup
   title: string
   description: string
   threshold: number
+  /** 묶음 키 (QUARTERS / ATTEND / VOTES / PLAY_AGAIN). 단일 배지는 null */
+  series: string | null
+  tier: BadgeTier | null
   progress: number
   earned_at: string | null
 }

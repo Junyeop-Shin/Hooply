@@ -2501,6 +2501,16 @@ components:
           - RELATION
         threshold:
           type: integer
+        series:
+          type: string
+          nullable: true
+        tier:
+          type: string
+          enum:
+          - BRONZE
+          - SILVER
+          - GOLD
+          nullable: true
         progress:
           type: integer
         earned_at:
