@@ -198,7 +198,7 @@
 | S-01/02/24 인증 | POST /auth/signup, POST /auth/login, POST /auth/refresh, GET /auth/kakao/login-url, GET /auth/kakao/callback, POST /auth/kakao/link |
 | S-03 설문 · S-23 내 위치 | GET /surveys/onboarding, POST /surveys/onboarding/responses, PUT /teams/{id}/self-rank |
 | S-04 홈 · S-17 프로필 | GET /me, PATCH /me, GET /me/teams, GET /me/profile, PUT /me/positions, GET /players/{id}/stats |
-| S-24 기록 탭 | GET /players/{id}/stats, GET /teams/{id}/stats/periods, GET /teams/{id}/stats/monthly-margin, GET /me/badges |
+| S-25 기록 탭 | GET /players/{id}/stats, GET /teams/{id}/stats/periods, GET /teams/{id}/stats/monthly-margin, GET /me/badges |
 | S-17 프로필 사진 | POST /me/avatar, DELETE /me/avatar, GET /users/{id}/avatar |
 | S-04/S-07 게스트 기록 확인 | GET /me/guest-claims, POST /players/{id}:claim |
 | S-05/06/07 팀 | POST /teams, POST /teams/join, GET /teams/{id}, GET /teams/{id}/players, GET /teams/{id}/events, GET /events/{id}/assignment/adopted |

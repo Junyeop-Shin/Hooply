@@ -247,6 +247,11 @@ export function ProfilePage() {
               </section>
             )}
 
+            <Card onClick={() => nav('/help')} label="도움말 · 문의" className="flex items-center justify-between gap-3">
+              <div><p className="font-semibold text-ink">도움말 · 문의</p><p className="text-xs text-muted">기능 설명, 실력 공개 범위, 개발자 연락처</p></div>
+              <span className="text-faint" aria-hidden="true">→</span>
+            </Card>
+
             <AccountSection user={u} onLoggedOut={() => { logout(); nav('/login', { replace: true }) }} />
           </>
         )}

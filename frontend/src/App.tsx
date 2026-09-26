@@ -33,6 +33,7 @@ const SelfRankPage = page(() => import('./pages/survey'), 'SelfRankPage')
 const SurveyPage = page(() => import('./pages/survey'), 'SurveyPage')
 const EventCreatePage = page(() => import('./pages/events'), 'EventCreatePage')
 const EventDetailPage = page(() => import('./pages/events'), 'EventDetailPage')
+const HelpPage = page(() => import('./pages/help'), 'HelpPage')
 
 function RequireAuth() {
   return useIsLoggedIn() ? <Outlet /> : <Navigate to="/login" replace />
@@ -48,6 +49,7 @@ export default function App() {
       <Route path="/auth/kakao/callback" element={<KakaoCallbackPage />} /> {/* 카카오 리다이렉트 (로그인 여부 무관) */}
       <Route path="/password/forgot" element={<ForgotPasswordPage />} />
       <Route path="/password/reset" element={<ResetPasswordPage />} />   {/* 메일 링크 */}
+      <Route path="/help" element={<HelpPage />} />                      {/* 도움말 · 문의 (로그인 없이도) */}
       <Route element={<GuestOnly />}>
         <Route path="/login" element={<LoginPage />} />   {/* S-01 */}
         <Route path="/signup" element={<SignupPage />} /> {/* S-02 */}

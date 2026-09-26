@@ -126,6 +126,7 @@ export function LoginPage() {
         <span className="text-faint">|</span>
         <Link to="/signup" className="font-semibold text-brand-ink">회원가입</Link>
       </div>
+      <p className="mt-3 text-center text-xs text-faint"><Link to="/help" className="underline underline-offset-2 hover:text-ink-2">도움말 · 문의</Link></p>
     </Screen>
   )
 }
