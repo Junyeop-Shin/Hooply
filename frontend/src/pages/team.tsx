@@ -66,13 +66,13 @@ export function TeamCreatePage() {
       <TopBar title="팀 만들기" back="/" />
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); m.mutate() }} className="flex flex-1 flex-col">
         <Content>
-          <Field label="팀 이름" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="화요농구" maxLength={50} required />
+          <div data-tutorial="CREATE_TEAM"><Field label="팀 이름" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="화요농구" maxLength={50} required /></div>
           <Field label="소개 (선택)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="매주 화요일 8시, 초보 환영" />
           <Field label="홈 코트 (선택)" value={form.home_court} onChange={(e) => setForm({ ...form, home_court: e.target.value })} placeholder="서초체육관" maxLength={100} />
           {m.isError && <Alert>{errMsg(m.error, '팀을 만들지 못했어요.')}</Alert>}
           <Alert kind="info">팀을 만든 사람이 매니저가 돼요. 나중에 다른 팀원에게 권한을 넘길 수 있어요.</Alert>
         </Content>
-        <BottomAction><Button type="submit" full loading={m.isPending}>팀 코드 발급받기</Button></BottomAction>
+        <BottomAction><div data-tutorial="CREATE_TEAM"><Button type="submit" full loading={m.isPending}>팀 코드 발급받기</Button></div></BottomAction>
       </form>
     </Screen>
   )
@@ -118,7 +118,7 @@ export function TeamJoinPage() {
       <TopBar title="팀 코드로 가입" back="/" />
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); m.mutate() }} className="flex flex-1 flex-col">
         <Content>
-          <Field
+          <div data-tutorial="JOIN_TEAM"><Field
             label="팀 코드"
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
@@ -129,12 +129,12 @@ export function TeamJoinPage() {
             error={err?.code === 'TEAM_CODE_NOT_FOUND' ? '존재하지 않거나 만료된 코드예요.' : undefined}
             hint="매니저가 카카오톡으로 보내준 8자리 코드"
             required
-          />
+          /></div>
           {err && err.code !== 'TEAM_CODE_NOT_FOUND' && (
             <Alert kind={err.code === 'ALREADY_MEMBER' ? 'info' : 'error'}>{err.message}</Alert>
           )}
         </Content>
-        <BottomAction><Button type="submit" full loading={m.isPending} disabled={code.length !== 8}>가입하기</Button></BottomAction>
+        <BottomAction><div data-tutorial="JOIN_TEAM"><Button type="submit" full loading={m.isPending} disabled={code.length !== 8}>가입하기</Button></div></BottomAction>
       </form>
     </Screen>
   )
@@ -182,7 +182,7 @@ export function TeamDetailPage() {
             <p className="font-semibold">
               {t.approval_status === 'REJECTED' ? '관리자가 팀 승인을 거절했어요. 문의해 주세요.' : t.approval_status === 'PENDING' ? `관리자 승인을 기다리는 중이에요${need > 0 ? ` · ${need}명 더 필요` : ''}` : `${need}명 더 모이면 일정을 만들 수 있어요`}
             </p>
-            <div className="mt-2 flex items-center justify-between gap-2">
+            <div data-tutorial="INVITE" className="mt-2 flex items-center justify-between gap-2">
               <span className="font-mono text-lg font-black tracking-[0.25em]">{t.team_code}</span>
               <span className="flex gap-1.5">
                 <button className="rounded-lg bg-court-500 px-3 py-1.5 text-xs font-semibold" onClick={() => navigator.clipboard?.writeText(t.team_code)}>코드 복사</button>

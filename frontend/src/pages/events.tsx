@@ -137,7 +137,7 @@ export function EventCreatePage() {
             </Card>
           )}
           <Field label="제목 (선택)" value={f.title} onChange={set('title')} placeholder="일정 이름" hint="비워 두면 날짜로 보여요." />
-          <Field label="날짜" type="date" value={f.event_date} onChange={set('event_date')} required />
+          <div data-tutorial="FIRST_EVENT"><Field label="날짜" type="date" value={f.event_date} onChange={set('event_date')} required /></div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="시작" type="time" value={f.start_time} onChange={setStart} />
             <Field label="종료" type="time" value={f.end_time} onChange={setEnd} />
@@ -151,7 +151,7 @@ export function EventCreatePage() {
           <Field label="메모 (선택)" value={f.memo} onChange={set('memo')} placeholder="회비, 준비물, 주차 안내 등" />
           {m.isError && <Alert>{errMsg(m.error, editId !== null ? '일정을 고치지 못했어요.' : '일정을 만들지 못했어요.')}</Alert>}
         </Content>
-        <BottomAction><Button type="submit" full loading={m.isPending} disabled={!f.event_date || (editId !== null && !prefilled)}>{editId !== null ? '수정 저장' : '등록하고 응답 받기'}</Button></BottomAction>
+        <BottomAction><div data-tutorial="FIRST_EVENT"><Button type="submit" full loading={m.isPending} disabled={!f.event_date || (editId !== null && !prefilled)}>{editId !== null ? '수정 저장' : '등록하고 응답 받기'}</Button></div></BottomAction>
       </form>
     </Screen>
   )
@@ -239,7 +239,7 @@ export function EventDetailPage() {
         {isManager && past && surveyBlock}
 
         {/* RSVP 토글 (S-10) */}
-        <Card>
+        <div data-tutorial="FIRST_RSVP"><Card>
           <p className="mb-2 text-sm font-bold text-ink">{past ? '참석 응답' : e.rsvp_open ? '이번 일정, 참석하시나요?' : '참석 응답'}</p>
           <div className="grid grid-cols-2 gap-2">
             {(['ATTEND', 'ABSENT'] as const).map((st) => {
@@ -269,7 +269,7 @@ export function EventDetailPage() {
               + 게스트로 초대할 사람이 있어요 <span>→</span>
             </button>
           )}
-        </Card>
+        </Card></div>
 
         {/* 요약 (S-11) */}
         {s && (

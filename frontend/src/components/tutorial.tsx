@@ -6,11 +6,13 @@
  * 단계 판정은 서버(GET /me/tutorial)가 실제 데이터로 한다. 문장은 lib/tutorial-content.ts.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { tutorialApi } from '../api/tutorial'
 import type { TutorialUpdate, UserDetail } from '../api/types'
-import { FLOW, TIPS, type TipId } from '../lib/tutorial-content'
+import { FLOW, SPOTLIGHT, TIPS, type TipId } from '../lib/tutorial-content'
+import { Spotlight } from './spotlight'
 import { Button, Card, Spinner } from './ui'
 
 function useTutorialUpdate() {
@@ -51,11 +53,20 @@ export function TutorialPrompt({ me }: { me: UserDetail }) {
   )
 }
 
+/** 홈에서 이미 밝혀 준 단계 — 같은 단계는 한 번만 밝힌다 (기기에 기억, 못 읽으면 매번 밝힘) */
+function useSpotSeen(userId: number) {
+  const key = `hooply:tutorial-spot:${userId}`
+  const [seen, setSeen] = useState<string | null>(() => { try { return localStorage.getItem(key) } catch { return null } })
+  const mark = (v: string) => { setSeen(v); try { localStorage.setItem(key, v) } catch { /* ignore */ } }
+  return [seen, mark] as const
+}
+
 /** 홈 맨 위 체크리스트 카드 */
 export function TutorialCard({ me }: { me: UserDetail }) {
   const active = me.tutorial_state === 'ACTIVE'
   const q = useQuery({ queryKey: ['me', 'tutorial'], queryFn: tutorialApi.get, enabled: active })
   const upd = useTutorialUpdate()
+  const [spotSeen, markSpot] = useSpotSeen(me.id)
   if (!active) return null
   const v = q.data
   const close = (
@@ -65,6 +76,8 @@ export function TutorialCard({ me }: { me: UserDetail }) {
   // 경로 선택 — 팀 코드를 받았으면 팀원, 아니면 팀 만들기
   if (!me.tutorial_path) {
     return (
+      <div data-tutorial="PATH">
+      {spotSeen !== 'PATH' && <Spotlight target="PATH" title="먼저 하나만 골라 주세요" text="팀 코드를 받았다면 팀원으로, 아니면 팀을 직접 만드는 순서로 안내해요." onClose={() => markSpot('PATH')} />}
       <Card className="space-y-3 border-brand-line bg-brand-soft">
         <div className="flex items-start justify-between gap-2">
           <div><p className="text-xs font-bold text-brand-ink">시작 안내</p><p className="mt-0.5 font-bold text-ink">팀 코드를 받으셨나요?</p></div>
@@ -79,6 +92,7 @@ export function TutorialCard({ me }: { me: UserDetail }) {
           </button>
         </div>
       </Card>
+      </div>
     )
   }
   if (q.isLoading || !v) return <Card><Spinner /></Card>
@@ -100,8 +114,12 @@ export function TutorialCard({ me }: { me: UserDetail }) {
   }
 
   const done = v.steps.filter((s) => s.status === 'DONE').length
+  const next = v.steps.find((s) => s.status === 'TODO')
   return (
     <Card className="space-y-3 border-brand-line">
+      {next && spotSeen !== next.key && (
+        <Spotlight target={`step-${next.key}`} title="다음 할 일이에요" text={`${next.title} — 오른쪽 '${next.action ?? '하기'}'를 눌러 시작해요.`} onClose={() => markSpot(next.key)} />
+      )}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold text-brand-ink">시작 안내 · {me.tutorial_path === 'PLAYER' ? '팀원' : '매니저'}</p>
@@ -112,7 +130,7 @@ export function TutorialCard({ me }: { me: UserDetail }) {
       </div>
       <ol className="space-y-2">
         {v.steps.map((s, i) => (
-          <li key={s.key} className={`flex items-start gap-3 rounded-xl px-3 py-2.5 ${s.status === 'TODO' ? 'bg-brand-soft' : 'bg-surface-2'}`}>
+          <li key={s.key} data-tutorial={`step-${s.key}`} className={`flex items-start gap-3 rounded-xl px-3 py-2.5 ${s.status === 'TODO' ? 'bg-brand-soft' : 'bg-surface-2'}`}>
             <span className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.status === 'DONE' ? 'bg-court-500 text-white' : s.status === 'TODO' ? 'border-2 border-court-500 text-brand-ink' : 'border border-line-strong text-faint'}`}>
               {s.status === 'DONE' ? '✓' : i + 1}
             </span>
@@ -123,7 +141,7 @@ export function TutorialCard({ me }: { me: UserDetail }) {
               {s.status !== 'DONE' && <p className="mt-0.5 text-xs text-muted">{s.hint}</p>}
             </div>
             {s.status === 'TODO' && s.link && (
-              <Link to={s.link} state={{ from: '/' }} className="flex min-h-9 shrink-0 items-center rounded-lg bg-brand px-3 text-xs font-semibold text-on-brand">{s.action ?? '하기'}</Link>
+              <Link to={s.link} state={{ from: '/', tutorialFocus: s.key }} onClick={() => markSpot(s.key)} className="flex min-h-9 shrink-0 items-center rounded-lg bg-brand px-3 text-xs font-semibold text-on-brand">{s.action ?? '하기'}</Link>
             )}
           </li>
         ))}
@@ -152,4 +170,18 @@ export function FirstTimeTip({ id }: { id: TipId }) {
       </div>
     </div>
   )
+}
+
+/**
+ * 체크리스트 단계를 눌러 들어온 화면에서 해야 할 칸을 밝혀 준다 (로그인 뒤 모든 화면에 한 번 깔림).
+ * 들어올 때 넘긴 tutorialFocus 와 SPOTLIGHT 문장으로 그리고, 시작 안내가 진행 중일 때만.
+ */
+export function TutorialSpotlight() {
+  const loc = useLocation()
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me })
+  const [closedAt, setClosedAt] = useState<string | null>(null)
+  const focus = (loc.state as { tutorialFocus?: string } | null)?.tutorialFocus
+  const copy = focus ? SPOTLIGHT[focus] : undefined
+  if (!copy || me.data?.tutorial_state !== 'ACTIVE' || closedAt === loc.key) return null
+  return <Spotlight key={loc.key} target={focus!} title={copy.title} text={copy.text} onClose={() => setClosedAt(loc.key)} />
 }

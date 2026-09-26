@@ -49,6 +49,15 @@ export const TIPS: Record<TipId, { title: string; lines: string[]; help: string 
   },
 }
 
+/** 체크리스트 단계를 눌러 들어간 화면에서 밝게 보여 줄 칸의 말풍선. 칸은 data-tutorial="<단계 키>" 로 표시한다 */
+export const SPOTLIGHT: Record<string, { title: string; text: string }> = {
+  JOIN_TEAM: { title: '팀 코드 넣기', text: "매니저에게 받은 8자리 코드를 넣고 '가입하기'를 눌러요." },
+  CREATE_TEAM: { title: '팀 이름만 있으면 돼요', text: "팀 이름을 넣고 '팀 코드 발급받기'를 눌러요. 소개와 홈 코트는 나중에 넣어도 돼요." },
+  INVITE: { title: '이 코드로 팀원을 모아요', text: "'카카오톡 공유'를 누르면 초대 메시지가 만들어져요. 5명이 모이고 승인되면 일정을 만들 수 있어요." },
+  FIRST_EVENT: { title: '날짜만 있으면 돼요', text: "날짜를 고르고 '등록하고 응답 받기'를 누르면 팀원들에게 참석 응답을 받아요." },
+  FIRST_RSVP: { title: '참석하시나요?', text: '참석 또는 불참을 눌러요. 마감 전까지는 바꿀 수 있어요.' },
+}
+
 /** 체크리스트를 다 마친 뒤 "앞으로 이렇게 진행돼요" — 누르는 곳 없이 설명만 */
 export const FLOW: Record<'PLAYER' | 'MANAGER', string[]> = {
   PLAYER: [

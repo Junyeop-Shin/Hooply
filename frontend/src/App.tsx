@@ -10,6 +10,7 @@ import { Spinner } from './components/ui'
 // 첫 화면(로그인·홈)은 어차피 바로 필요하므로 함께 받는다
 import { KakaoCallbackPage, LoginPage, SignupPage } from './pages/auth'
 import { HomePage, ProfilePage } from './pages/home'
+import { TutorialSpotlight } from './components/tutorial'
 
 const page = <T extends Record<string, unknown>, K extends keyof T>(load: () => Promise<T>, name: K) =>
   lazy(() => load().then((m) => ({ default: m[name] as React.ComponentType })))
@@ -36,7 +37,8 @@ const EventDetailPage = page(() => import('./pages/events'), 'EventDetailPage')
 const HelpPage = page(() => import('./pages/help'), 'HelpPage')
 
 function RequireAuth() {
-  return useIsLoggedIn() ? <Outlet /> : <Navigate to="/login" replace />
+  // 시작 안내 중이면 체크리스트에서 들어온 화면의 해야 할 칸을 밝혀 준다
+  return useIsLoggedIn() ? <><Outlet /><TutorialSpotlight /></> : <Navigate to="/login" replace />
 }
 function GuestOnly() {
   return useIsLoggedIn() ? <Navigate to="/" replace /> : <Outlet />
