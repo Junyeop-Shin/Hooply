@@ -22,6 +22,7 @@ PROVIDER_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
 }
 TEMPERATURE = 0.3
+MIN_PROVIDER_DEADLINE = 10.0  # Gemini 는 이보다 짧은 요청 마감을 400 으로 거절한다. 실제 대기 상한은 llm_guard 가 따로 건다
 
 
 def provider_of(model: str) -> str:
@@ -50,7 +51,7 @@ def chat_model() -> BaseChatModel | None:
     if not available():
         return None
     s = get_settings()
-    return _build(s.llm_model, s.llm_api_key, s.llm_timeout_seconds)
+    return _build(s.llm_model, s.llm_api_key, max(s.llm_timeout_seconds, MIN_PROVIDER_DEADLINE))
 
 
 def structured(schema: type[BaseModel]) -> Runnable | None:

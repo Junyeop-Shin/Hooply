@@ -82,7 +82,8 @@ class Settings(BaseSettings):
     # 기본값은 특정 버전이 아니라 Google 이 최신 Flash 로 유지하는 별칭 — 버전 모델(gemini-2.5-flash 등)은 은퇴하면 404 가 난다
     llm_model: str = "google_genai:gemini-flash-latest"
     llm_api_key: str = ""  # 서버 전용. 비우면 공급자 기본 환경 변수(GOOGLE_API_KEY 등)를 본다
-    llm_timeout_seconds: float = 8.0  # 넘으면 폴백 (FR-50)
+    # 넘으면 폴백 (FR-50). 명세는 8초였지만 Gemini 는 10초 미만 마감을 거절하고(400), 최신 Flash 는 답 전에 생각하는 시간이 있어 15초로
+    llm_timeout_seconds: float = 15.0
     llm_rate_per_minute: int = 5  # 사용자당 실제 호출 횟수 (캐시 적중은 세지 않는다)
 
     # --- 실력 지표 ---

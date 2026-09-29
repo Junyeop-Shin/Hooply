@@ -254,7 +254,7 @@ def test_model_factory_builds_langchain_model_from_settings(monkeypatch):
     llm_model._build.cache_clear()
     m = llm_model.chat_model()
     assert type(m).__name__ == "ChatGoogleGenerativeAI"
-    assert m.temperature == llm_model.TEMPERATURE and m.max_retries == 0 and m.timeout == get_settings().llm_timeout_seconds
+    assert m.temperature == llm_model.TEMPERATURE and m.max_retries == 0 and m.timeout >= llm_model.MIN_PROVIDER_DEADLINE
     assert llm_model.structured(Explain) is not None
     assert llm_model.provider_of("openai:gpt-5-mini") == "openai"
     llm_model._build.cache_clear()
