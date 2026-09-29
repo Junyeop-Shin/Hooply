@@ -2,11 +2,11 @@
  * S-29 전술판 (docs/07 FR-47). 경로: /tactics/:key?event=일정&squad=팀번호
  *
  * - `event` 가 없으면 전술 설명만 (전술 탭 목록에서 들어왔고 그날 참석자가 아닌 경우).
- * - `event` 가 있으면 그날 블랙/화이트의 자리 배치를 함께 보여 준다. 배치는 서버가 자동으로 추천한 것이고,
+ * - `event` 가 있으면 그날 그 팀(`squad`, 없으면 내 팀)의 자리 배치를 함께 보여 준다. 상대 팀으로 바꿔 보는 칸은 없다. 배치는 서버가 자동으로 추천한 것이고,
  *   매니저가 자리를 바꿔 저장했으면 그 배치다. 자리 목록에는 괄호로 예비(같은 전술판 5명 중 그 역할도 맞는 사람)를 단다.
  * - 매니저는 동그라미나 자리 목록을 눌러 사람을 바꾸고 저장한다. "추천 배치로 되돌리기" 로 저장을 지운다.
  */
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
@@ -14,8 +14,8 @@ import { tacticsApi } from '../api/tactics'
 import type { EventPlayView, Play, SlotLineup, SquadBoard } from '../api/types'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { TacticBoard, type BoardTone } from '../components/tactic-board'
-import { CIRCLED, SlotPeople } from '../components/tactics'
-import { Alert, Badge, Button, Card, Spinner } from '../components/ui'
+import { CIRCLED, SlotPeople, TacticExplain, useAiTactics } from '../components/tactics'
+import { Alert, Badge, Button, SectionTitle, Spinner } from '../components/ui'
 import { DEFENSE_LABEL, ROLE_LABEL, renderCounter } from '../lib/tactics'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
@@ -46,78 +46,84 @@ export function TacticBoardPage() {
   return withEvent ? <EventBoard play={play} view={withEvent} eventId={eventId!} /> : <PlainBoard play={play} note={view.isError ? errMsg(view.error, '') : null} />
 }
 
-function PlayHeader({ play }: { play: Play }) {
+function PlayHeader({ play, context }: { play: Play; context?: ReactNode }) {
   return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2">
-        <h2 className="text-lg font-bold text-ink">{play.name}</h2>
+    <div className="space-y-1.5 px-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-xl font-black text-ink">{play.name}</h2>
         {play.situation === 'inbound'
           ? <Badge tone="court">인바운드</Badge>
           : <Badge tone={play.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[play.defense]}</Badge>}
       </div>
-      <p className="text-sm text-muted">{play.summary}</p>
+      {context}
     </div>
   )
 }
 
 function RoleList({ play, slots, onTap }: { play: Play; slots?: SlotLineup[]; onTap?: (slot: number) => void }) {
   return (
-    <Card className="divide-y divide-line p-0">
-      {play.roles.map((role, i) => {
-        const s = slots?.[i]
-        const inner = (
-          <>
-            <span className="w-6 shrink-0 text-base font-bold text-brand-ink">{CIRCLED[i]}</span>
-            <span className="w-24 shrink-0 text-sm text-ink-2">{ROLE_LABEL[role]}</span>
-            <span className="min-w-0 flex-1 text-sm">{s ? <SlotPeople s={s} /> : null}</span>
-            {onTap && <span className="text-faint" aria-hidden="true">›</span>}
-          </>
-        )
-        return onTap ? (
-          <button key={i} type="button" onClick={() => onTap(i + 1)} className="flex min-h-11 w-full items-center gap-2 px-4 py-2 text-left active:bg-sunken">{inner}</button>
-        ) : (
-          <div key={i} className="flex min-h-11 items-center gap-2 px-4 py-2">{inner}</div>
-        )
-      })}
-    </Card>
+    <section>
+      <SectionTitle>자리</SectionTitle>
+      <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
+        {play.roles.map((role, i) => {
+          const s = slots?.[i]
+          const inner = (
+            <>
+              <span className="w-5 shrink-0 text-center text-sm font-bold text-brand-ink">{CIRCLED[i]}</span>
+              <span className="w-[5.5rem] shrink-0 text-sm text-ink-2">{ROLE_LABEL[role]}</span>
+              <span className="min-w-0 flex-1 text-sm">{s ? <SlotPeople s={s} /> : null}</span>
+              {onTap && <span className="text-xs font-semibold text-brand-ink">바꾸기</span>}
+            </>
+          )
+          return (
+            <li key={i}>
+              {onTap ? (
+                <button type="button" onClick={() => onTap(i + 1)} className="flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left active:bg-sunken">{inner}</button>
+              ) : (
+                <div className="flex min-h-12 items-center gap-3 px-4 py-2">{inner}</div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
-/** 막혔을 때의 대안 */
-function Counter({ text }: { text: string }) {
-  if (!text) return null
-  return <p className="rounded-xl bg-sunken px-3 py-2.5 text-sm leading-relaxed text-ink-2"><b className="text-ink">막히면</b> · {text}</p>
-}
-
-/** 일정 없이 전술만 볼 때 */
+/** 일정 없이 전술만 볼 때 — 자리는 번호로 */
 function PlainBoard({ play, note }: { play: Play; note: string | null }) {
   return (
     <Screen>
       <TopBar title="전술판" back="/" />
       <Content>
         <PlayHeader play={play} />
+        <TacticExplain summary={play.summary} counter={renderCounter(play.counter)} />
         {note && <Alert kind="info">{note}</Alert>}
         <TacticBoard key={play.key} play={play} />
         <RoleList play={play} />
-        <Counter text={renderCounter(play.counter)} />
       </Content>
     </Screen>
   )
 }
 
-/** 그날 자리 배치와 함께 */
+/**
+ * 추천 전술에서 들어온 전술판 — 그 팀 전용. 상대 팀으로 바꿔 보는 칸은 없다 (팀원은 내 팀, 매니저는 들어온 팀).
+ * 전술 소개 바로 아래에 추천 카드와 같은 "전술 설명"(AI 이유 · 핵심 자리 · 주의할 점 · 막히면)을 둔다.
+ */
 function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; eventId: number }) {
   const [sp] = useSearchParams()
   const qc = useQueryClient()
-  const squads = view.squads
-  const [squadNo, setSquadNo] = useState<number>(() => Number(sp.get('squad')) || view.my_squad_no || squads[0].squad_no)
-  const [draft, setDraft] = useState<Partial<Record<number, number[]>>>({}) // 매니저가 바꾸는 중인 배치 (squad_no → 슬롯 순 player_id)
+  const zone = sp.get('zone') === '1'
+  const wanted = Number(sp.get('squad')) || view.my_squad_no
+  const sq = view.squads.find((s) => s.squad_no === wanted) ?? view.squads[0]
+  const ai = useAiTactics(eventId, sq.squad_no, zone, true)
+  const aiItem = ai.data && !ai.data.fallback ? ai.data.items.find((x) => x.play_key === view.play_key) : undefined
+  const [draft, setDraft] = useState<number[] | null>(null) // 매니저가 바꾸는 중인 배치 (슬롯 순 player_id)
   const [picking, setPicking] = useState<number | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const sq = squads.find((s) => s.squad_no === squadNo) ?? squads[0]
   const lineup = sq.lineup
   const savedRow = lineup?.slots.map((s) => s.player_id) ?? []
-  const row = draft[sq.squad_no] ?? savedRow
+  const row = draft ?? savedRow
   const dirty = row.join() !== savedRow.join()
   const nameOf = (pid: number) => sq.members.find((m) => m.player_id === pid)?.display_name ?? null
   // 바꾸는 중이면 예비는 저장 뒤에 다시 계산되므로 이름만 보여 준다
@@ -130,7 +136,7 @@ function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; 
     onSuccess: (v, slotsIn) => {
       qc.setQueryData(['tactics', 'event', eventId, view.play_key], v)
       qc.invalidateQueries({ queryKey: ['tactics', 'recommend', eventId] })
-      setDraft({ ...draft, [sq.squad_no]: undefined })
+      setDraft(null)
       setNotice(slotsIn.length ? '저장했어요. 그날 참석자에게 이 배치로 보여요.' : '추천 배치로 되돌렸어요.')
     },
   })
@@ -140,44 +146,36 @@ function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; 
     const already = next.indexOf(pid)
     if (already >= 0) next[already] = next[slot - 1] // 다른 자리에 있던 사람이면 서로 바꾼다
     next[slot - 1] = pid
-    setDraft({ ...draft, [sq.squad_no]: next })
+    setDraft(next)
     setPicking(null)
     setNotice(null)
   }
+
+  const context = lineup && (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+      <span className="inline-flex items-center gap-1.5 font-semibold text-ink-2">
+        <span className={`size-2.5 rounded-full ${sq.squad_no === 1 ? 'bg-team-black' : 'border border-line-strong bg-team-white'}`} aria-hidden="true" />
+        {sq.squad_name}{view.my_squad_no === sq.squad_no ? ' · 내 팀' : ''}
+      </span>
+      <span>적합도 <b className="text-brand-ink">{Math.round(lineup.fit)}</b></span>
+      <span>{lineup.manual ? '매니저가 정한 배치' : '자동 추천 배치'}</span>
+    </p>
+  )
 
   return (
     <Screen>
       <TopBar title="전술판" back="/" />
       <Content>
-        <PlayHeader play={play} />
-        {squads.length > 1 && (
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-sunken p-1" role="tablist" aria-label="팀 고르기">
-            {squads.map((s) => (
-              <button
-                key={s.squad_no} type="button" role="tab" aria-selected={s.squad_no === sq.squad_no}
-                onClick={() => { setSquadNo(s.squad_no); setNotice(null) }}
-                className={`min-h-10 rounded-lg text-sm font-semibold ${s.squad_no === sq.squad_no ? (s.squad_no === 1 ? 'bg-team-black text-team-black-ink' : 'border border-line-strong bg-team-white text-team-white-ink') : 'text-muted'}`}
-              >
-                {s.squad_name}{view.my_squad_no === s.squad_no ? ' · 내 팀' : ''}
-              </button>
-            ))}
-          </div>
-        )}
+        <PlayHeader play={play} context={context} />
         {!lineup ? (
           <Alert kind="info">이 팀은 5명이 안 돼서 자리를 정할 수 없어요.</Alert>
         ) : (
           <>
-            <div className="flex items-center gap-2 text-xs text-muted">
-              <span>적합도 <b className="text-brand-ink">{Math.round(lineup.fit)}</b></span>
-              <span>·</span>
-              <span>{lineup.manual ? '매니저가 정한 배치' : '자동 추천 배치'}</span>
-            </div>
+            <TacticExplain summary={play.summary} ai={aiItem} counter={renderCounter(play.counter, row.map(nameOf))} />
             {notice && <Alert kind="info">{notice}</Alert>}
             {save.isError && <Alert>{errMsg(save.error, '저장하지 못했어요.')}</Alert>}
             <TacticBoard key={play.key} play={play} tone={toneOf(sq.squad_no)} names={row.map(nameOf)} onSlotTap={view.can_edit ? setPicking : undefined} />
             <RoleList play={play} slots={slots} onTap={view.can_edit ? setPicking : undefined} />
-            <Counter text={renderCounter(play.counter, row.map(nameOf))} />
-            <p className="text-[11px] text-faint">괄호 안은 같은 전술판 5명 중에서 그 역할도 할 수 있는 예비예요.</p>
           </>
         )}
       </Content>
@@ -189,7 +187,7 @@ function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; 
             )}
             {dirty && (
               <>
-                <Button variant="ghost" className="shrink-0 whitespace-nowrap" onClick={() => setDraft({ ...draft, [sq.squad_no]: undefined })}>취소</Button>
+                <Button variant="ghost" className="shrink-0 whitespace-nowrap" onClick={() => setDraft(null)}>취소</Button>
                 <Button full loading={save.isPending} onClick={() => save.mutate(row.map((pid, i) => ({ slot: i + 1, player_id: pid })))}>{sq.squad_name} 배치 저장</Button>
               </>
             )}

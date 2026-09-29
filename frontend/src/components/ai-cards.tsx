@@ -49,7 +49,7 @@ function Fallback({ title, text }: { title: string; text: string | null | undefi
 }
 
 /** 항목 목록을 섹션별로 타이핑. 섹션 제목은 그 섹션 첫 글자가 나올 때 함께 뜬다 */
-export function TypedSections({ sections, note = true }: { sections: { title?: string; items: string[]; tone?: 'lead' | 'warn' }[]; note?: boolean }) {
+export function TypedSections({ sections, note = true }: { sections: { title?: string; items: string[]; tone?: 'lead' | 'warn' | 'caution' }[]; note?: boolean }) {
   const flat = sections.flatMap((s) => s.items)
   const [typed, done] = useTypewriter(flat)
   const lastIdx = typed.reduce((acc, t, k) => (t ? k : acc), 0)
@@ -62,14 +62,14 @@ export function TypedSections({ sections, note = true }: { sections: { title?: s
         if (!shown.some(Boolean)) return null
         return (
           <div key={si} className={s.tone === 'warn' ? 'rounded-xl bg-warn-soft px-3 py-2' : ''}>
-            {s.title && <p className={`mb-1 text-xs font-bold ${s.tone === 'warn' ? 'text-warn-ink' : 'text-muted'}`}>{s.title}</p>}
+            {s.title && <p className={`mb-1 text-xs font-bold ${s.tone === 'warn' || s.tone === 'caution' ? 'text-warn-ink' : 'text-muted'}`}>{s.title}</p>}
             {s.tone === 'lead' ? (
               <p className="text-[15px] font-semibold leading-snug text-ink">{shown[0]}<Caret on={!done && lastIdx === start} /></p>
             ) : (
               <ul className="space-y-1">
                 {shown.map((t, k) => t && (
-                  <li key={k} className={`flex gap-1.5 text-sm ${s.tone === 'warn' ? 'text-warn-ink' : 'text-ink-2'}`}>
-                    {s.tone !== 'warn' && <span className="text-brand-ink" aria-hidden="true">·</span>}
+                  <li key={k} className={`flex gap-1.5 text-sm ${s.tone === 'warn' || s.tone === 'caution' ? 'text-warn-ink' : 'text-ink-2'}`}>
+                    {s.tone !== 'warn' && s.tone !== 'caution' && <span className="text-brand-ink" aria-hidden="true">·</span>}
                     <span>{t}<Caret on={!done && lastIdx === start + k} /></span>
                   </li>
                 ))}
