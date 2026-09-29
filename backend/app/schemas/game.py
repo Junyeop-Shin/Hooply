@@ -42,8 +42,10 @@ class QuarterIn(BaseModel):
     """
 
     quarter_no: int = Field(ge=1, le=30, description="1부터. 회차마다 개수가 다를 수 있다 (하루 최대 30쿼터)")
-    black_score: int = Field(ge=0, le=200, description="블랙 팀 득점")
-    white_score: int = Field(ge=0, le=200, description="화이트 팀 득점")
+    black_score: int = Field(ge=0, le=200, description="첫째 칸(BLACK · home) 팀 득점")
+    white_score: int = Field(ge=0, le=200, description="둘째 칸(WHITE · away) 팀 득점")
+    home_squad_no: int = Field(default=1, ge=1, le=3, description="첫째 칸에 선 팀 번호. 2팀이면 1(블랙), 3팀이면 그 쿼터 대진")
+    away_squad_no: int = Field(default=2, ge=1, le=3, description="둘째 칸에 선 팀 번호. home 과 달라야 한다")
     duration_min: int = Field(default=DEFAULT_DURATION_MIN, ge=MIN_DURATION_MIN, le=MAX_DURATION_MIN, description="쿼터 길이(분). 기본 8분, 1~10분. 마진을 10분 기준으로 정규화하는 데 쓴다")
     lineups: list[LineupIn] = Field(min_length=10, max_length=10, description="팀당 5명, 총 10명")
 
@@ -56,6 +58,8 @@ class QuarterUpdate(BaseModel):
 
     black_score: int | None = Field(default=None, ge=0, le=200)
     white_score: int | None = Field(default=None, ge=0, le=200)
+    home_squad_no: int | None = Field(default=None, ge=1, le=3)
+    away_squad_no: int | None = Field(default=None, ge=1, le=3)
     duration_min: int | None = Field(default=None, ge=MIN_DURATION_MIN, le=MAX_DURATION_MIN)
     lineups: list[LineupIn] | None = Field(default=None, min_length=10, max_length=10, description="보내면 10명 전체로 교체")
 
@@ -92,6 +96,8 @@ class QuarterView(BaseModel):
     quarter_no: int
     black_score: int
     white_score: int
+    home_squad_no: int = Field(description="첫째 칸(BLACK)에 선 팀")
+    away_squad_no: int = Field(description="둘째 칸(WHITE)에 선 팀")
     duration_min: int
     lineups: list[LineupView] = Field(description="10명. 사이드별 5명")
 
@@ -110,7 +116,20 @@ class PlayerQuarterCount(BaseModel):
     player_id: int
     display_name: str
     side: Side
+    squad_no: int = Field(default=1, description="마지막으로 뛴 팀 번호 (3팀이면 칸 대신 이것으로 묶는다)")
     quarters: int
+
+
+class SquadTally(BaseModel):
+    """팀별 기록 — 3팀이면 칸(블랙/화이트) 합계 대신 이것을 본다."""
+
+    squad_no: int
+    squad_name: str
+    quarters: int = Field(description="뛴 쿼터 수")
+    points_for: int
+    points_against: int
+    wins: int
+    losses: int
 
 
 class QuarterSummary(BaseModel):
@@ -122,6 +141,8 @@ class QuarterSummary(BaseModel):
     black_wins: int = Field(description="블랙이 이긴 쿼터 수")
     white_wins: int
     per_player: list[PlayerQuarterCount] = Field(default=[], description="출전 쿼터 수, 사이드별·많은 순")
+    team_count: int = Field(default=2, description="그날 팀 수 (확정 배정 기준, 없으면 2)")
+    squads: list[SquadTally] = Field(default=[], description="팀별 쿼터 · 득실 · 승패 (팀 번호 순)")
 
 
 class QuarterListView(BaseModel):

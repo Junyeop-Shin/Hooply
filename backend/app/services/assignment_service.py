@@ -4,7 +4,9 @@
   1. 입력: 참석 확정자(회원+게스트), 팀 수 T, 회차별 제약(LOCK / SEPARATE / PIN)
   2. 실현가능성 사전 검사 → 실패면 422 + details (9.6절 표)
   3. PIN 은 그 팀에 고정, LOCK 은 Union-Find 로 **슈퍼노드** 로 축약 (제약 위반이 원천적으로 불가능)
-  4. 2팀 · 12~14명 규모는 **완전 탐색** (조합 ≤ 수천 개, 9.7절) — 슈퍼노드 부분집합을 전부 평가
+  4. 2팀 · 12~16명 규모는 **완전 탐색** (조합 ≤ 수천 개, 9.7절) — 슈퍼노드 부분집합을 전부 평가.
+     3팀(참석 16명 이상, 21명이면 7·7·7)은 조합이 수천만 개라 **지역 탐색** — 여러 번 새로 출발하는 탐욕 초기해에서
+     맞바꾸기·옮기기 이웃을 한꺼번에(행렬로) 채점해 가장 좋은 쪽으로 옮기기를 더 나아지지 않을 때까지 되풀이한다
   5. 하드 제약: 각 팀에 1번(PG) 가능자 ≥ 1, 5번(PF/C) 가능자 ≥ 1. 만족하는 해가 없으면 경고 후 완화
   6. 목적함수 J 를 전략 3종 가중치로 각각 최소화 → 후보안 3개 (서로 다른 편성을 보장)
   7. 규칙 기반 설명 생성 (매니저용 수치 / 플레이어용 문장)
@@ -14,12 +16,13 @@
     + w_pref·(−팀 내 선호 조합)   + w_role·(선호 포지션 미충족)
     + w_fair·(최근 회차 같은 팀 반복) + w_guest·(게스트 편중)
 
-지금은 2팀만 지원한다 (13.1절 Q4 — 현재 운영이 2팀 고정). 3팀 이상은 422 로 안내한다.
+2팀 · 3팀을 지원한다 (13.1절 Q4 — 참석이 많은 날 7명씩 3팀). 4팀 이상은 422 로 안내한다.
 """
 
 from __future__ import annotations
 
 import itertools
+import random
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -73,6 +76,10 @@ SQUAD_NAMES = ["블랙", "화이트", "레드", "블루"]  # 13.1절 Q6 기본�
 MAX_SUPERNODES = 18  # 완전 탐색 상한 (2^18 ≈ 26만, 약 0.6초). 초과 시 안내 — 실측 22개는 10초라 내렸다
 HARD_PENALTY = 10.0
 MIN_SQUAD_SIZE = 5  # 수동 수정 후에도 출전 5명은 남아야 한다
+MAX_TEAMS = 3
+LS_RESTARTS = 6  # 3팀 지역 탐색: 전략마다 새로 출발하는 횟수
+LS_KICKS = 25  # 국소 최적에 빠지면 두 번 무작위로 맞바꿔 흔든 뒤 다시 내려가 보는 횟수 (더 나으면 옮겨 간다)
+LS_SEED = 20260929  # 같은 입력이면 같은 결과가 나오도록 고정
 
 # 9.5절 전략별 가중치 표 + 공통 w_fair / w_guest
 STRATEGY_WEIGHTS: dict[Strategy, dict[str, float]] = {
@@ -199,8 +206,8 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
     warnings: list[str] = []
     c = body.constraints
 
-    if t != 2:
-        v.append(ConstraintViolation(code="VALIDATION_ERROR", message="현재는 2팀 배정만 지원해요."))
+    if t not in (2, MAX_TEAMS):
+        v.append(ConstraintViolation(code="VALIDATION_ERROR", message="2팀 또는 3팀으로만 나눌 수 있어요."))
     if n < t * 5:
         v.append(ConstraintViolation(code="NOT_ENOUGH_PLAYERS", message=f"{t}팀을 만들려면 최소 {t * 5}명이 필요해요 (현재 {n}명)"))
 
@@ -272,7 +279,7 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
         if a in pins and b in pins and pins[a] == pins[b]:
             v.append(ConstraintViolation(code="SEPARATE_INFEASIBLE", message="갈라놓기로 지정한 두 사람이 같은 팀에 배치됐어요.", player_ids=supernodes[a] + supernodes[b]))
 
-    if len(supernodes) > MAX_SUPERNODES:
+    if t == 2 and len(supernodes) > MAX_SUPERNODES:  # 완전 탐색 상한 — 3팀은 지역 탐색이라 상한이 없다
         v.append(ConstraintViolation(code="VALIDATION_ERROR", message=f"참석 인원이 너무 많아요 (묶음 후 {len(supernodes)}개). 18개 이하로 줄여 주세요."))
 
     # 경고 (차단 아님)
@@ -453,7 +460,8 @@ def score_partition(prep: Prepared, partition: tuple[int, ...], pref_pairs: dict
             if r.primary:
                 c[r.primary] += 1
         counts.append(c)
-    imbalance = sum(abs(counts[0][pos] - counts[1][pos]) for pos in Position) / max(1, len(prep.roster)) if prep.team_count == 2 else 0.0
+    # 포지션 분포 불균형: 포지션마다 가장 많은 팀과 가장 적은 팀의 차이 (2팀이면 |블랙 − 화이트|)
+    imbalance = sum(max(c[pos] for c in counts) - min(c[pos] for c in counts) for pos in Position) / max(1, len(prep.roster))
     position = missing + imbalance
 
     # role: 같은 팀에서 같은 주 포지션이 과다 (정원 5 기준 포지션당 1자리, 팀 인원이 많으면 2자리)
@@ -484,22 +492,27 @@ def score_partition(prep: Prepared, partition: tuple[int, ...], pref_pairs: dict
     return Scored(partition=partition, _squads=squads, terms={"skill": skill, "position": position, "pref": pref, "role": role, "fair": fair, "guest": guest, "means": means}, hard_ok=hard_ok)
 
 
-def score_partitions(prep: Prepared, partitions: list[tuple[int, ...]], pref_pairs: dict, recent_pairs: set) -> list[Scored]:
-    """분할 전부를 한 번에 채점한다 — `score_partition` 과 같은 값을 내지만 파이썬 루프 대신 행렬 연산이다.
+@dataclass
+class _NodeStats:
+    """슈퍼노드별 값과 노드 쌍 행렬 — 분할 여러 개를 한 번에 채점할 때 쓴다. 명단 · 선호 · 최근 쌍마다 한 번 만든다."""
 
-    2팀 기준 분할은 슈퍼노드마다 0/1 이므로, 분할 × 노드 행렬 A 하나로 팀 0 의 인원·실력 합·포지션 수를
-    A·(노드별 값) 으로, 팀 1 은 (1−A) 로 얻는다. 같은 팀 쌍의 선호·반복 합은 노드 쌍 행렬 U 로
-    aᵀUa + (1−a)ᵀU(1−a) 다. 6천 개 분할이 파이썬으로 수백 ms 걸리던 것을 수 ms 로 줄인다.
-    """
-    if prep.team_count != 2 or not partitions:
-        return [score_partition(prep, part, pref_pairs, recent_pairs) for part in partitions]
-    if not prep.skill_sd:
-        prep.skill_sd = _skill_sd(prep)
+    size: np.ndarray
+    skill_sum: np.ndarray
+    handle: np.ndarray
+    big: np.ndarray
+    guest: np.ndarray
+    prim: np.ndarray  # (노드, 포지션) 주 포지션 인원
+    pref_u: np.ndarray  # (노드, 노드) i<j 쌍 사이 선호 합
+    rec_u: np.ndarray  # (노드, 노드) i<j 쌍 사이 최근 같은 팀 쌍 수
+    pref_const: float  # 노드 안의 쌍 — 어느 분할에서도 같은 팀이라 상수
+    rec_const: int
+    has_pairs: bool
+
+
+def _node_stats(prep: Prepared, pref_pairs: dict, recent_pairs: set) -> _NodeStats:
     n_nodes = len(prep.supernodes)
-    n_roster = max(1, len(prep.roster))
     positions = list(Position)
     pos_idx = {pos: i for i, pos in enumerate(positions)}
-
     size = np.zeros(n_nodes)
     skill_sum = np.zeros(n_nodes)
     handle = np.zeros(n_nodes)
@@ -518,13 +531,12 @@ def score_partitions(prep: Prepared, partitions: list[tuple[int, ...]], pref_pai
         for r in rs:
             if r.primary:
                 prim[i, pos_idx[r.primary]] += 1
-
-    # 노드 쌍 (i<j) 사이의 선호 합 · 최근 같은 팀 쌍 수. 노드 안의 쌍은 어느 분할에서도 같은 팀이라 상수
     pref_u = np.zeros((n_nodes, n_nodes))
     rec_u = np.zeros((n_nodes, n_nodes))
     pref_const = 0.0
     rec_const = 0
-    if pref_pairs or recent_pairs:
+    has_pairs = bool(pref_pairs or recent_pairs)
+    if has_pairs:
         def pair_terms(ids_a: list[int], ids_b: list[int] | None) -> tuple[float, int]:
             pairs = itertools.combinations(sorted(ids_a), 2) if ids_b is None else ((min(a, b), max(a, b)) for a in ids_a for b in ids_b)
             pv, rc = 0.0, 0
@@ -540,43 +552,232 @@ def score_partitions(prep: Prepared, partitions: list[tuple[int, ...]], pref_pai
             rec_const += rc
             for j in range(i + 1, n_nodes):
                 pref_u[i, j], rec_u[i, j] = pair_terms(members[i], members[j])
+    return _NodeStats(size, skill_sum, handle, big, guest, prim, pref_u, rec_u, pref_const, rec_const, has_pairs)
 
-    A = np.asarray(partitions, dtype=float)  # 1 = 팀 1(화이트), 0 = 팀 0(블랙)
-    A0 = 1.0 - A  # 팀 0 소속 여부
-    s0, s1 = A0 @ size, A @ size
-    m0 = (A0 @ skill_sum) / np.maximum(s0, 1)
-    m1 = (A @ skill_sum) / np.maximum(s1, 1)
-    m0[s0 == 0] = 0.0
-    m1[s1 == 0] = 0.0
-    skill = np.abs(m0 - m1) / max(prep.skill_sd, 0.5)
 
-    missing = ((A0 @ handle) == 0).astype(int) + ((A @ handle) == 0).astype(int) + ((A0 @ big) == 0).astype(int) + ((A @ big) == 0).astype(int)
-    c0, c1 = A0 @ prim, A @ prim
-    imbalance = np.abs(c0 - c1).sum(axis=1) / n_roster
-    position = missing + imbalance
+def _terms_matrix(prep: Prepared, st: _NodeStats, P: np.ndarray, n_recent: int) -> dict[str, np.ndarray]:
+    """분할 행렬 P(분할 × 노드, 값 = 팀 번호 0..T-1)의 항을 한꺼번에 계산한다. `score_partition` 과 같은 식이다.
 
-    slots0 = np.where(s0 <= 5, 1, 2)[:, None]
-    slots1 = np.where(s1 <= 5, 1, 2)[:, None]
-    role = (np.maximum(0, c0 - slots0).sum(axis=1) + np.maximum(0, c1 - slots1).sum(axis=1)) / n_roster
-
-    pref_sum = np.einsum("pi,ij,pj->p", A0, pref_u, A0) + np.einsum("pi,ij,pj->p", A, pref_u, A) + pref_const
+    팀 s 의 소속 여부 M_s = (P == s) 로 인원·실력 합·포지션 수를 M_s·(노드별 값) 으로, 같은 팀 쌍의 선호·반복 합은
+    노드 쌍 행렬 U 로 M_sᵀ U M_s 를 팀마다 더해 얻는다. 파이썬 루프 대신 행렬 연산이라 수천 개도 수 ms 다.
+    """
+    t = prep.team_count
+    n_roster = max(1, len(prep.roster))
+    Ms = [(P == s).astype(float) for s in range(t)]
+    sizes = np.stack([M @ st.size for M in Ms])  # (T, m)
+    sums = np.stack([M @ st.skill_sum for M in Ms])
+    means = np.where(sizes > 0, sums / np.maximum(sizes, 1), 0.0)
+    skill = (means.max(axis=0) - means.min(axis=0)) / max(prep.skill_sd, 0.5)
+    missing = sum(((M @ st.handle) == 0).astype(int) + ((M @ st.big) == 0).astype(int) for M in Ms)
+    counts = np.stack([M @ st.prim for M in Ms])  # (T, m, 포지션)
+    imbalance = (counts.max(axis=0) - counts.min(axis=0)).sum(axis=1) / n_roster
+    slots = np.where(sizes <= 5, 1, 2)[:, :, None]
+    role = np.maximum(0, counts - slots).sum(axis=(0, 2)) / n_roster
+    m = P.shape[0]
+    if st.has_pairs:
+        pref_sum = sum(np.einsum("pi,ij,pj->p", M, st.pref_u, M) for M in Ms) + st.pref_const
+        repeats = sum(np.einsum("pi,ij,pj->p", M, st.rec_u, M) for M in Ms) + st.rec_const
+    else:
+        pref_sum = np.zeros(m)
+        repeats = np.zeros(m)
     pref = -pref_sum / max(1, n_roster / 2)
-    repeats = np.einsum("pi,ij,pj->p", A0, rec_u, A0) + np.einsum("pi,ij,pj->p", A, rec_u, A) + rec_const
-    fair = repeats / max(1, len(recent_pairs)) if recent_pairs else np.zeros(len(partitions))
+    fair = repeats / max(1, n_recent) if n_recent else np.zeros(m)
+    g = np.stack([M @ st.guest for M in Ms])
+    gsum = g.sum(axis=0)
+    guest = np.where(gsum > 0, (g.max(axis=0) - g.min(axis=0)) / np.maximum(gsum, 1), 0.0)
+    return {"skill": skill, "position": missing + imbalance, "pref": pref, "role": role, "fair": fair, "guest": guest, "missing": missing, "means": means}
 
-    g0, g1 = A0 @ guest, A @ guest
-    gsum = g0 + g1
-    guest_term = np.where(gsum > 0, np.abs(g0 - g1) / np.maximum(gsum, 1), 0.0)
 
+def _totals(terms: dict[str, np.ndarray], w: dict[str, float]) -> np.ndarray:
+    j = (w["skill"] * terms["skill"] + w["position"] * terms["position"] + w["pref"] * terms["pref"] + w["role"] * terms["role"]
+         + W_FAIR * terms["fair"] + W_GUEST * terms["guest"])
+    return j + np.where(terms["missing"] > 0, HARD_PENALTY, 0.0)
+
+
+def score_partitions(prep: Prepared, partitions: list[tuple[int, ...]], pref_pairs: dict, recent_pairs: set, stats: _NodeStats | None = None) -> list[Scored]:
+    """분할 전부를 한 번에 채점한다 — `score_partition` 과 같은 값을 내지만 파이썬 루프 대신 행렬 연산이다 (2팀 · 3팀)."""
+    if not partitions:
+        return []
+    if not prep.skill_sd:
+        prep.skill_sd = _skill_sd(prep)
+    st = stats or _node_stats(prep, pref_pairs, recent_pairs)
+    tm = _terms_matrix(prep, st, np.asarray(partitions, dtype=int), len(recent_pairs))
     out = []
     for k, part in enumerate(partitions):
         out.append(Scored(
             partition=part,
-            terms={"skill": float(skill[k]), "position": float(position[k]), "pref": float(pref[k]), "role": float(role[k]),
-                   "fair": float(fair[k]), "guest": float(guest_term[k]), "means": [float(m0[k]), float(m1[k])]},
-            hard_ok=bool(missing[k] == 0), _prep=prep,
+            terms={"skill": float(tm["skill"][k]), "position": float(tm["position"][k]), "pref": float(tm["pref"][k]), "role": float(tm["role"][k]),
+                   "fair": float(tm["fair"][k]), "guest": float(tm["guest"][k]), "means": [float(x) for x in tm["means"][:, k]]},
+            hard_ok=bool(tm["missing"][k] == 0), _prep=prep,
         ))
     return out
+
+
+# ---------------------------------------------------------------------------
+# 지역 탐색 (3팀)
+# ---------------------------------------------------------------------------
+
+
+def _sep_of(prep: Prepared) -> dict[int, set[int]]:
+    out: dict[int, set[int]] = defaultdict(set)
+    for a, b in prep.separate_pairs:
+        out[a].add(b)
+        out[b].add(a)
+    return out
+
+
+def _construct(prep: Prepared, rng: random.Random, sep_of: dict[int, set[int]]) -> tuple[int, ...] | None:
+    """탐욕 초기해: 큰 묶음·센 사람부터, 갈라놓기를 지키며 정원이 남는 팀 중 실력 합이 가장 낮은 팀에 넣는다.
+    정원에 맞는 팀이 없으면(묶음이 커서) 가장 적은 팀에 넣어 인원이 벌어지는 것을 허용한다. 5명 못 채우는 팀이 생기면 None."""
+    t = prep.team_count
+    size = [len(ids) for ids in prep.supernodes]
+    skill = [sum(prep.roster[p].skill for p in ids) for ids in prep.supernodes]
+    target = _squad_sizes(sum(size), t)
+    rng.shuffle(target)
+    assign: dict[int, int] = dict(prep.pins)
+    load = [0] * t
+    ssum = [0.0] * t
+    for node, sq in prep.pins.items():
+        load[sq] += size[node]
+        ssum[sq] += skill[node]
+    noise = max(prep.skill_sd, 0.5) * 0.35
+    free = sorted((i for i in range(len(size)) if i not in prep.pins), key=lambda i: (-size[i], -(skill[i] / size[i]) + rng.uniform(-noise, noise)))
+    for i in free:
+        ok = [s for s in range(t) if all(assign.get(o) != s for o in sep_of.get(i, ()))]
+        if not ok:
+            return None
+        fit = [s for s in ok if load[s] + size[i] <= target[s]]
+        s = min(fit, key=lambda x: (ssum[x], load[x], rng.random())) if fit else min(ok, key=lambda x: (load[x], rng.random()))
+        assign[i] = s
+        load[s] += size[i]
+        ssum[s] += skill[i]
+    if min(load) < MIN_SQUAD:
+        return None
+    return tuple(assign[i] for i in range(len(size)))
+
+
+def _spread(prep: Prepared, part: tuple[int, ...]) -> int:
+    sizes = [sum(len(prep.supernodes[i]) for i, s in enumerate(part) if s == sq) for sq in range(prep.team_count)]
+    return max(sizes) - min(sizes)
+
+
+def _good_start(prep: Prepared, rng: random.Random, sep_of: dict[int, set[int]], ideal_spread: int, tries: int = 30) -> tuple[int, ...] | None:
+    """초기해 여러 개 중 인원이 가장 고른 것 — 갈라놓기 때문에 탐욕이 가끔 인원을 벌리므로, 고르게 되면 바로 쓴다."""
+    best: tuple[int, ...] | None = None
+    for _ in range(tries):
+        c = _construct(prep, rng, sep_of)
+        if c is None:
+            continue
+        if _spread(prep, c) <= ideal_spread:
+            return c
+        if best is None or _spread(prep, c) < _spread(prep, best):
+            best = c
+    return best
+
+
+def _canon(part: tuple[int, ...], pinned: bool) -> tuple[int, ...]:
+    """사전 배치가 없으면 팀 이름만 바뀐 같은 편성을 하나로 — 처음 나온 순서로 팀 번호를 다시 매긴다."""
+    if pinned:
+        return part
+    remap: dict[int, int] = {}
+    return tuple(remap.setdefault(x, len(remap)) for x in part)
+
+
+def _neighbors(prep: Prepared, part: np.ndarray, free: list[int], sep: np.ndarray, st: _NodeStats, max_spread: float) -> np.ndarray:
+    """맞바꾸기(서로 다른 팀의 두 노드) · 옮기기(노드 하나를 다른 팀으로) 이웃 중 인원 · 갈라놓기 조건을 지키는 것."""
+    t = prep.team_count
+    rows = []
+    for x, a in enumerate(free):
+        for b in free[x + 1:]:
+            if part[a] != part[b]:
+                r = part.copy()
+                r[a], r[b] = part[b], part[a]
+                rows.append(r)
+        for s in range(t):
+            if s != part[a]:
+                r = part.copy()
+                r[a] = s
+                rows.append(r)
+    if not rows:
+        return np.zeros((0, len(part)), dtype=int)
+    P = np.stack(rows)
+    sizes = np.stack([(P == s).astype(float) @ st.size for s in range(t)])
+    ok = (sizes.min(axis=0) >= MIN_SQUAD) & ((sizes.max(axis=0) - sizes.min(axis=0)) <= max_spread + 1e-9)
+    if len(sep):
+        ok &= (P[:, sep[:, 0]] != P[:, sep[:, 1]]).all(axis=1)
+    return P[ok]
+
+
+def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strategies: list[Strategy]) -> tuple[list[Scored], int]:
+    """3팀 지역 탐색. 전략마다 LS_RESTARTS 번 새로 출발해, 이웃 전부를 한 번에 채점하고 가장 좋은 이웃으로 옮기기를
+    더 나아지지 않을 때까지 한다. 찾은 국소 최적해들(서로 다른 편성)을 돌려준다 — 후보안 3개가 서로 달라야 하므로.
+    반환: (채점한 국소 최적해, 채점한 분할 수)."""
+    if not prep.skill_sd:
+        prep.skill_sd = _skill_sd(prep)
+    st = _node_stats(prep, pref_pairs, recent_pairs)
+    rng = random.Random(LS_SEED + len(prep.roster))
+    sep_of = _sep_of(prep)
+    sep = np.array(sorted(prep.separate_pairs), dtype=int).reshape(-1, 2)
+    free = [i for i in range(len(prep.supernodes)) if i not in prep.pins]
+    ideal = _squad_sizes(sum(len(x) for x in prep.supernodes), prep.team_count)
+    ideal_spread = max(ideal) - min(ideal)
+    optima: dict[tuple[int, ...], tuple[int, ...]] = {}
+    evaluated = 0
+    n_recent = len(recent_pairs)
+
+    def descend(part: np.ndarray, cur: float, w: dict[str, float], max_spread: float) -> tuple[np.ndarray, float]:
+        nonlocal evaluated
+        while True:
+            P = _neighbors(prep, part, free, sep, st, max_spread)
+            if not len(P):
+                return part, cur
+            j = _totals(_terms_matrix(prep, st, P, n_recent), w)
+            evaluated += len(P)
+            k = int(np.argmin(j))
+            if j[k] >= cur - 1e-9:
+                return part, cur
+            part, cur = P[k], float(j[k])
+
+    for strategy in strategies:
+        w = STRATEGY_WEIGHTS[strategy]
+        for _ in range(LS_RESTARTS):
+            start = _good_start(prep, rng, sep_of, ideal_spread)
+            if start is None:
+                break
+            part = np.array(start, dtype=int)
+            max_spread = max(ideal_spread, _spread(prep, start))  # 묶음 때문에 벌어진 인원보다 더 벌리지는 않는다
+            part, cur = descend(part, float(_totals(_terms_matrix(prep, st, part[None, :], n_recent), w)[0]), w, max_spread)
+            optima.setdefault(_canon(tuple(int(x) for x in part), bool(prep.pins)), ())
+            # 흔들기: 서로 다른 팀의 두 노드를 두 번 맞바꾼 뒤 다시 내려간다. 더 나으면 거기서 이어 간다
+            for _ in range(LS_KICKS):
+                trial = part.copy()
+                for _ in range(2):
+                    x, y = rng.sample(free, 2) if len(free) >= 2 else (free[0], free[0])
+                    if trial[x] != trial[y] and st.size[x] == st.size[y]:
+                        trial[x], trial[y] = trial[y], trial[x]
+                if len(sep) and not (trial[sep[:, 0]] != trial[sep[:, 1]]).all():
+                    continue
+                t_cur = float(_totals(_terms_matrix(prep, st, trial[None, :], n_recent), w)[0])
+                trial, t_cur = descend(trial, t_cur, w, max_spread)
+                optima.setdefault(_canon(tuple(int(x) for x in trial), bool(prep.pins)), ())
+                if t_cur < cur - 1e-9:
+                    part, cur = trial, t_cur
+    parts = list(optima)
+    if parts:
+        sizes = [sum(len(prep.supernodes[i]) for i, s in enumerate(parts[0]) if s == sq) for sq in range(prep.team_count)]
+        prep.sizes = sizes
+    return score_partitions(prep, parts, pref_pairs, recent_pairs, st), evaluated + len(parts)
+
+
+def first_partition(prep: Prepared) -> tuple[int, ...] | None:
+    """조건을 지키는 편성이 하나라도 있는가 — 2팀은 완전 탐색의 첫 해, 3팀은 탐욕 초기해를 여러 번 시도."""
+    if prep.team_count == 2:
+        return next(enumerate_partitions(prep), None)
+    ideal = _squad_sizes(sum(len(x) for x in prep.supernodes), prep.team_count)
+    c = _good_start(prep, random.Random(LS_SEED), _sep_of(prep), max(ideal) - min(ideal), tries=60)
+    if c is not None:
+        prep.sizes = [sum(len(prep.supernodes[i]) for i, s in enumerate(c) if s == sq) for sq in range(prep.team_count)]
+    return c
 
 
 # ---------------------------------------------------------------------------
@@ -612,6 +813,7 @@ def metrics_of(sc: Scored) -> dict:
             }
             for i, s in enumerate(sc.squads)
         },
+        "team_count": len(sc.squads),
         "guest_count_per_squad": [sum(1 for r in s if r.is_guest) for s in sc.squads],
         "unknown_skill_per_squad": [sum(1 for r in s if not r.known) for s in sc.squads],
         "terms": {k: round(v, 3) for k, v in sc.terms.items() if k != "means"},
@@ -623,14 +825,16 @@ def explain_manager(sc: Scored, strategy: Strategy, prep: Prepared) -> str:
     means = sc.terms["means"]
     names = SQUAD_NAMES
     gap = max(means) - min(means)
+    three = len(means) >= 3
+    vs = "가장 강한 팀과 가장 약한 팀이" if three else "두 팀이"
     lines = [
         f"[{STRATEGY_LABEL[strategy]}] " + " · ".join(f"{names[i]} {len(sc.squads[i])}명" for i in range(len(means)))
-        + f" — 두 팀이 붙으면 한 쿼터에 약 {gap:.2f}점 차가 날 것으로 예상돼요 (0에 가까울수록 균형)."  # 결과 화면 상단 카드(skill_spread 소수 둘째 자리)와 같은 자릿수
+        + f" — {vs} 붙으면 한 쿼터에 약 {gap:.2f}점 차가 날 것으로 예상돼요 (0에 가까울수록 균형)."  # 결과 화면 상단 카드(skill_spread 소수 둘째 자리)와 같은 자릿수
     ]
     if sc.hard_ok:
-        lines.append("양 팀 모두 1번(볼 운반)·5번(골밑) 가능 인원을 확보했어요.")
+        lines.append(f"{'세 팀' if three else '양 팀'} 모두 1번(볼 운반)·5번(골밑) 가능 인원을 확보했어요.")
     else:
-        lines.append("⚠ 오늘 인원으로는 한쪽 팀에 볼 운반이나 골밑을 맡을 사람이 없어요.")
+        lines.append("⚠ 오늘 인원으로는 어느 팀에 볼 운반이나 골밑을 맡을 사람이 없어요.")
     if prep.pin_list:
         lines.append(f"사전 배치 {len(prep.pin_list)}명은 지정한 팀에 고정했어요.")
     unknown = [r for s in sc.squads for r in s if r.is_guest and not r.known]
@@ -645,7 +849,7 @@ def explain_manager(sc: Scored, strategy: Strategy, prep: Prepared) -> str:
 
 
 def explain_player(sc: Scored, positions: dict[int, Position | None]) -> str:
-    lines = ["실력이 비슷하도록 두 팀을 나눴어요."]
+    lines = [f"실력이 비슷하도록 {_TEAMS_WORD.get(len(sc.squads), '팀')}을 나눴어요."]
     if sc.hard_ok:
         lines.append("각 팀에 볼 운반과 골밑을 맡을 수 있는 사람이 있어요.")
     got = sum(1 for s in sc.squads for r in s if r.primary and positions.get(r.id) == r.primary)
@@ -669,7 +873,7 @@ def _validate_prepared(prep: Prepared) -> ValidateResult:
         return ValidateResult(feasible=False, violations=prep.violations, warnings=prep.warnings)
     # 분할 가능성: 해가 하나라도 있는지 (찾으면 prep.sizes 가 실제 인원으로 바뀐다)
     ideal = list(prep.sizes)
-    if next(enumerate_partitions(prep), None) is None:
+    if first_partition(prep) is None:
         code = "SEPARATE_INFEASIBLE" if prep.separate_pairs else "LOCK_PARTITION_INFEASIBLE"
         msg = "갈라놓기 제약을 모두 만족하는 팀 구성이 없어요." if prep.separate_pairs else _partition_msg(prep)
         return ValidateResult(feasible=False, violations=[ConstraintViolation(code=code, message=msg)], warnings=prep.warnings)
@@ -683,17 +887,21 @@ def _ro(n: int) -> str:
 
 
 def _warn_uneven(prep: Prepared, ideal: list[int]) -> None:
-    """묶음 때문에 고르게 못 나눴으면 알려 준다 (차단 아님). 양 팀 5명 이상이면 비율은 제한하지 않는다."""
+    """묶음 때문에 고르게 못 나눴으면 알려 준다 (차단 아님). 팀마다 5명 이상이면 비율은 제한하지 않는다."""
     if sorted(prep.sizes) != sorted(ideal):
-        small = min(prep.sizes)
-        note = f"묶음을 지키려고 두 팀 인원을 {max(prep.sizes)}:{small}{_ro(small)} 나눴어요"
+        ordered = sorted(prep.sizes, reverse=True)
+        small = ordered[-1]
+        note = f"묶음을 지키려고 {_TEAMS_WORD.get(len(ordered), '팀')} 인원을 {':'.join(map(str, ordered))}{_ro(small)} 나눴어요"
         if note not in prep.warnings:
             prep.warnings.append(note)
 
 
+_TEAMS_WORD = {2: "두 팀", 3: "세 팀"}
+
+
 def _partition_msg(prep: Prepared) -> str:
     sizes = sorted((len(ids) for ids in prep.supernodes if len(ids) > 1), reverse=True)
-    return f"{'명 그룹과 '.join(str(x) for x in sizes)}명 그룹으로는 두 팀을 각각 {MIN_SQUAD}명 이상으로 나눌 수 없어요."
+    return f"{'명 그룹과 '.join(str(x) for x in sizes)}명 그룹으로는 {_TEAMS_WORD.get(prep.team_count, '팀')}을 각각 {MIN_SQUAD}명 이상으로 나눌 수 없어요."
 
 
 def _raise_violations(vr: ValidateResult) -> None:
@@ -724,17 +932,23 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
     ids = [r.id for r in roster]
     pref_pairs = _load_pref_pairs(db, ids)
     recent = _load_recent_pairs(db, event)
-    scored = score_partitions(prep, list(enumerate_partitions(prep)), pref_pairs, recent)
+    if body.team_count == 2:
+        scored = score_partitions(prep, list(enumerate_partitions(prep)), pref_pairs, recent)
+        search, evaluated = "exhaustive", len(scored)
+    else:
+        scored, evaluated = search_partitions(prep, pref_pairs, recent, body.strategies)
+        search = "local_search"
+        _warn_uneven(prep, _squad_sizes(len(roster), body.team_count))
     if any(s.hard_ok for s in scored):
         pool = [s for s in scored if s.hard_ok]
     else:
         pool = scored
-        prep.warnings.append("양 팀에 볼 운반·골밑 자원을 다 넣을 수 없어 이 조건은 접었어요")
+        prep.warnings.append(f"{'양 팀' if body.team_count == 2 else '모든 팀'}에 볼 운반·골밑 자원을 다 넣을 수 없어 이 조건은 접었어요")
 
     _drop_unadopted_runs(db, event)  # 검증을 통과한 뒤에 정리한다 — 실패한 실행 때문에 지난 안을 잃지 않도록
     run_row = AssignmentRun(
         event_id=event.id, executed_by=by.id, team_count=body.team_count,
-        params={"strategies": [s.value for s in body.strategies], "weights": {k.value: v for k, v in STRATEGY_WEIGHTS.items()}, "w_fair": W_FAIR, "w_guest": W_GUEST, "search": "exhaustive", "partitions_evaluated": len(scored)},
+        params={"strategies": [s.value for s in body.strategies], "weights": {k.value: v for k, v in STRATEGY_WEIGHTS.items()}, "w_fair": W_FAIR, "w_guest": W_GUEST, "search": search, "partitions_evaluated": evaluated},
         roster_snapshot=[
             {"player_id": r.id, "name": r.player.display_name, "kind": r.player.kind, "skill": round(r.skill, 2), "known": r.known,
              "playable": sorted(p.value for p in r.playable), "primary": r.primary.value if r.primary else None}
@@ -979,10 +1193,22 @@ def exchange(db: Session, cand: AssignmentCandidate, exchanges: list[Exchange]) 
         if sq_a and sq_b and sq_a == sq_b:
             raise errors.InvalidSwap("같은 팀 안에서는 교체할 필요가 없어요.")
         squad_ids = [sq.id for sq in sorted(cand.squads, key=lambda x: x.squad_no)]
-        if len(squad_ids) != 2:
-            raise errors.InvalidSwap("두 팀으로 나눈 배정에서만 옮길 수 있어요.")
-        src_a = next(iter(sq_a)) if sq_a else next(i for i in squad_ids if i not in sq_b)
-        src_b = next(iter(sq_b)) if sq_b else next(i for i in squad_ids if i != src_a)
+        id_of_no = {sq.squad_no: sq.id for sq in cand.squads}
+        target = id_of_no.get(ex.to_squad_no) if ex.to_squad_no is not None else None
+        if ex.to_squad_no is not None and target is None:
+            raise errors.InvalidSwap("없는 팀이에요.")
+        if sq_a and sq_b:  # 맞교체: a 는 b 의 팀으로, b 는 a 의 팀으로
+            src_a, src_b = next(iter(sq_a)), next(iter(sq_b))
+        elif len(squad_ids) == 2:  # 일방 이동 — 2팀이면 상대 팀이 정해져 있다
+            src_a = next(iter(sq_a)) if sq_a else next(i for i in squad_ids if i not in sq_b)
+            src_b = next(iter(sq_b)) if sq_b else next(i for i in squad_ids if i != src_a)
+        else:  # 3팀 일방 이동은 옮길 팀(to_squad_no)이 있어야 한다
+            if target is None:
+                raise errors.InvalidSwap("옮길 팀을 골라 주세요.")
+            src = next(iter(sq_a or sq_b))
+            if target == src:
+                raise errors.InvalidSwap("이미 그 팀에 있어요.")
+            src_a, src_b = (src, target) if sq_a else (target, src)
         # 결과 편성 계산 후 검증
         new_sq = {pid: s.squad_id for pid, s in slot_of.items()}
         for pid in a:
@@ -1025,7 +1251,7 @@ def move(db: Session, cand: AssignmentCandidate, moves: list[MovePlayer]) -> Ass
             raise errors.InvalidSwap("없는 팀이거나 이 배정안에 없는 사람이에요.")
         if slot.squad_id == target.id:
             raise errors.InvalidSwap("이미 그 팀에 있어요.")
-        exs.append(Exchange(a_player_ids=[mv.player_id], b_player_ids=[]))
+        exs.append(Exchange(a_player_ids=[mv.player_id], b_player_ids=[], to_squad_no=mv.to_squad_no))
     return exchange(db, cand, exs)
 
 

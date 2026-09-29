@@ -5,7 +5,7 @@
 판단은 규칙과 알고리즘이 하고 LLM 은 문장만 쓴다. 그래서 LLM 이 입력에 없는 사람·숫자·전술을 말하면 버린다.
 
 검증 규칙 (명세 9절)
-  1. 가명: 선수는 P1…Pn, 팀은 A·B. 실명은 입력 어디에도 넣지 않는다 (`Aliases`)
+  1. 가명: 선수는 P1…Pn, 팀은 A·B(3팀이면 D 까지 — C 는 센터 포지션과 겹쳐 쓰지 않는다). 실명은 입력 어디에도 넣지 않는다 (`Aliases`)
   2. 복원: `P(\\d+)(?!\\d)` 로 숫자를 통째로 읽어 P1 과 P10 이 섞이거나 "P3가" 처럼 조사가 붙어도 정확히 바꾼다
   3. 가명 검사: 출력의 P숫자가 입력에 없으면 전체 폐기 (unknown_alias). 체인별 추가 검사(C 의 전술 id)도 같은 사유
   4. 숫자 검사: 출력 숫자가 입력에 없으면 **그 문장만** 버린다 (unknown_number). 농구 용어(3점 · 1번~5번 · 2-3 …)는 허용,
@@ -48,7 +48,8 @@ from app.models import LlmResult
 log = logging.getLogger("hooply.llm")
 
 ALIAS_RE = re.compile(r"P(\d+)(?!\d)")
-SQUAD_RE = re.compile(r"(?<![A-Za-z0-9])([AB])(?![A-Za-z0-9])")
+SQUAD_ALIASES = "ABD"  # 팀 가명 — C 는 포지션 C(센터)와 겹쳐 복원할 때 "C 자리" 가 팀 이름으로 바뀌므로 건너뛴다
+SQUAD_RE = re.compile(rf"(?<![A-Za-z0-9])([{SQUAD_ALIASES}])(?![A-Za-z0-9])")
 # 숫자 검사에서 빼는 농구 용어. 긴 것부터 (1-3-1 을 1-3 과 1 로 쪼개지 않게)
 TERM_RE = re.compile(r"1-3-1|2-3|3-2|1:1|2:2|[23]점|[1-5]번")
 NUM_RE = re.compile(r"\d+(?:\.\d+)?%?")
@@ -68,7 +69,7 @@ _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="llm")
 
 
 class Aliases:
-    """선수 → P1…Pn, 팀 → A·B. 넣은 순서대로 번호를 매기므로 호출하는 쪽이 팀·배정 순서로 넣으면 번호가 고정된다."""
+    """선수 → P1…Pn, 팀 → A·B·D. 넣은 순서대로 번호를 매기므로 호출하는 쪽이 팀·배정 순서로 넣으면 번호가 고정된다."""
 
     def __init__(self) -> None:
         self._by_player: dict[int, str] = {}
@@ -84,7 +85,7 @@ class Aliases:
 
     def squad(self, squad_no: int, name: str) -> str:
         if squad_no not in self._by_squad:
-            alias = "AB"[len(self._by_squad)] if len(self._by_squad) < 2 else f"T{len(self._by_squad) + 1}"
+            alias = SQUAD_ALIASES[len(self._by_squad)] if len(self._by_squad) < len(SQUAD_ALIASES) else f"T{len(self._by_squad) + 1}"
             self._by_squad[squad_no] = alias
             self._name[alias] = name
         return self._by_squad[squad_no]
@@ -99,7 +100,7 @@ class Aliases:
     def restore(self, text: str) -> str:
         """가명 → 실명. 바로 뒤 조사는 실명의 받침에 맞춘다 ("P3가" → "서장훈이", "A와" → "블랙과")."""
         text = substitute(text, r"(P\d+)(?!\d)", self._name.get)
-        return substitute(text, r"(?<![A-Za-z0-9])([AB])(?![A-Za-z0-9])", self._name.get)
+        return substitute(text, SQUAD_RE.pattern, self._name.get)
 
     def player_id_of(self, alias: str) -> int | None:
         return next((pid for pid, a in self._by_player.items() if a == alias), None)

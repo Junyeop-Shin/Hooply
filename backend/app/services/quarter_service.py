@@ -12,7 +12,16 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors
 from app.core.errors import ErrorDetail
-from app.models import Event, Player, Quarter, QuarterLineup, User
+from app.models import (
+    AssignmentCandidate,
+    AssignmentRun,
+    AssignmentSquad,
+    Event,
+    Player,
+    Quarter,
+    QuarterLineup,
+    User,
+)
 from app.models.enums import EventStatus, PlayerStatus, Side
 from app.schemas.game import (
     LineupIn,
@@ -25,10 +34,33 @@ from app.schemas.game import (
     QuarterSummary,
     QuarterUpdate,
     QuarterView,
+    SquadTally,
 )
 from app.services import rating_service
 
 SIDE_LABEL = {Side.BLACK: "블랙", Side.WHITE: "화이트"}
+DEFAULT_SQUAD_NAMES = ["블랙", "화이트", "레드"]
+
+
+def _squad_names(db: Session, event: Event) -> dict[int, str]:
+    """확정 배정의 팀 번호 → 이름. 배정이 없으면 2팀(블랙 · 화이트)."""
+    rows = db.execute(
+        select(AssignmentSquad.squad_no, AssignmentSquad.squad_name)
+        .join(AssignmentCandidate, AssignmentCandidate.id == AssignmentSquad.candidate_id)
+        .join(AssignmentRun, AssignmentRun.id == AssignmentCandidate.run_id)
+        .where(AssignmentRun.event_id == event.id, AssignmentCandidate.is_adopted.is_(True))
+    ).all()
+    return {no: name for no, name in rows} or {1: DEFAULT_SQUAD_NAMES[0], 2: DEFAULT_SQUAD_NAMES[1]}
+
+
+def _validate_matchup(db: Session, event: Event, home: int, away: int, names: dict[int, str] | None = None) -> None:
+    """3팀이면 쿼터마다 두 팀을 고른다. 같은 팀끼리, 그날 없는 팀은 안 된다."""
+    names = names or _squad_names(db, event)
+    if home == away:
+        raise errors.ValidationError("한 쿼터에 같은 팀끼리 뛸 수 없어요. 두 팀을 골라 주세요.")
+    bad = [no for no in (home, away) if no not in names]
+    if bad:
+        raise errors.ValidationError(f"그날 없는 팀이에요 (팀 {', '.join(map(str, bad))}).")
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +91,13 @@ def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn]) -> dic
     return players
 
 
-def _apply(db: Session, q: Quarter, event: Event, *, black_score: int, white_score: int, duration_min: int, lineups: list[LineupIn] | None) -> None:
+def _apply(
+    db: Session, q: Quarter, event: Event, *, black_score: int, white_score: int, duration_min: int, lineups: list[LineupIn] | None,
+    home: int = 1, away: int = 2, names: dict[int, str] | None = None,
+) -> None:
+    _validate_matchup(db, event, home, away, names)
     q.black_score, q.white_score, q.duration_min = black_score, white_score, duration_min
+    q.home_squad_no, q.away_squad_no = home, away
     if lineups is not None:
         _validate_lineups(db, event, lineups)
         for old in list(q.lineups):
@@ -113,7 +150,8 @@ def add_quarter(db: Session, event: Event, by: User, body: QuarterIn) -> Quarter
     q = Quarter(event_id=event.id, quarter_no=body.quarter_no, black_score=0, white_score=0, duration_min=body.duration_min, recorded_by=by.id)
     db.add(q)
     db.flush()
-    _apply(db, q, event, black_score=body.black_score, white_score=body.white_score, duration_min=body.duration_min, lineups=body.lineups)
+    _apply(db, q, event, black_score=body.black_score, white_score=body.white_score, duration_min=body.duration_min, lineups=body.lineups,
+           home=body.home_squad_no, away=body.away_squad_no)
     _finish(db, event)
     return _load(db, q.id)
 
@@ -126,6 +164,7 @@ def bulk_save(db: Session, event: Event, by: User, body: QuarterBulkSave) -> Qua
         raise errors.ValidationError("같은 쿼터 번호가 두 번 들어 있어요.")
     existing = {q.quarter_no: q for q in db.scalars(select(Quarter).where(Quarter.event_id == event.id).options(selectinload(Quarter.lineups))).all()}
     created = updated = deleted = 0
+    names = _squad_names(db, event)
     for item in body.quarters:
         q = existing.get(item.quarter_no)
         if q is None:
@@ -136,7 +175,8 @@ def bulk_save(db: Session, event: Event, by: User, body: QuarterBulkSave) -> Qua
         else:
             q.recorded_by = by.id
             updated += 1
-        _apply(db, q, event, black_score=item.black_score, white_score=item.white_score, duration_min=item.duration_min, lineups=item.lineups)
+        _apply(db, q, event, black_score=item.black_score, white_score=item.white_score, duration_min=item.duration_min, lineups=item.lineups,
+               home=item.home_squad_no, away=item.away_squad_no, names=names)
     for no, q in existing.items():
         if no not in set(nos):
             db.delete(q)
@@ -155,6 +195,8 @@ def update_quarter(db: Session, q: Quarter, body: QuarterUpdate) -> Quarter:
         white_score=body.white_score if body.white_score is not None else q.white_score,
         duration_min=body.duration_min if body.duration_min is not None else q.duration_min,
         lineups=body.lineups,
+        home=body.home_squad_no if body.home_squad_no is not None else q.home_squad_no,
+        away=body.away_squad_no if body.away_squad_no is not None else q.away_squad_no,
     )
     _finish(db, event)
     return _load(db, q.id)
@@ -190,6 +232,7 @@ def quarter_view(db: Session, q: Quarter, names: dict[int, str] | None = None) -
     lineups = sorted(q.lineups, key=lambda lineup: (lineup.side != Side.BLACK, names.get(lineup.player_id, "")))
     return QuarterView(
         id=q.id, quarter_no=q.quarter_no, black_score=q.black_score, white_score=q.white_score, duration_min=q.duration_min,
+        home_squad_no=q.home_squad_no, away_squad_no=q.away_squad_no,
         lineups=[
             LineupView(player_id=lineup.player_id, display_name=names.get(lineup.player_id, "?"), side=lineup.side, position=lineup.position, raw_margin=lineup.raw_margin, normalized_margin=lineup.normalized_margin)
             for lineup in lineups
@@ -202,16 +245,29 @@ def list_quarters(db: Session, event: Event) -> QuarterListView:
     ids = {lineup.player_id for q in quarters for lineup in q.lineups}
     names = dict(db.execute(select(Player.id, Player.display_name).where(Player.id.in_(ids))).all()) if ids else {}
     counts: dict[int, PlayerQuarterCount] = {}
+    squad_names = _squad_names(db, event)
+    tally = {no: SquadTally(squad_no=no, squad_name=nm, quarters=0, points_for=0, points_against=0, wins=0, losses=0) for no, nm in sorted(squad_names.items())}
     for q in quarters:
         for lineup in q.lineups:
-            c = counts.setdefault(lineup.player_id, PlayerQuarterCount(player_id=lineup.player_id, display_name=names.get(lineup.player_id, "?"), side=lineup.side, quarters=0))
+            sq = q.home_squad_no if lineup.side == Side.BLACK else q.away_squad_no
+            c = counts.setdefault(lineup.player_id, PlayerQuarterCount(player_id=lineup.player_id, display_name=names.get(lineup.player_id, "?"), side=lineup.side, squad_no=sq, quarters=0))
             c.quarters += 1
+            c.side, c.squad_no = lineup.side, sq  # 마지막으로 뛴 팀
+        for mine, score, other in ((q.home_squad_no, q.black_score, q.white_score), (q.away_squad_no, q.white_score, q.black_score)):
+            t = tally.setdefault(mine, SquadTally(squad_no=mine, squad_name=DEFAULT_SQUAD_NAMES[(mine - 1) % 3], quarters=0, points_for=0, points_against=0, wins=0, losses=0))
+            t.quarters += 1
+            t.points_for += score
+            t.points_against += other
+            t.wins += score > other
+            t.losses += score < other
     summary = QuarterSummary(
         quarter_count=len(quarters),
         black_total=sum(q.black_score for q in quarters),
         white_total=sum(q.white_score for q in quarters),
         black_wins=sum(1 for q in quarters if q.black_score > q.white_score),
         white_wins=sum(1 for q in quarters if q.white_score > q.black_score),
-        per_player=sorted(counts.values(), key=lambda c: (c.side != Side.BLACK, -c.quarters, c.display_name)),
+        per_player=sorted(counts.values(), key=lambda c: (c.squad_no, -c.quarters, c.display_name)),
+        team_count=len(squad_names),
+        squads=[tally[no] for no in sorted(tally)],
     )
     return QuarterListView(items=[quarter_view(db, q, names) for q in quarters], summary=summary)

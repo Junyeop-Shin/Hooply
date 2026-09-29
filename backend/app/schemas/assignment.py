@@ -62,8 +62,8 @@ class AssignmentRunRequest(BaseModel):
     """
 
     team_count: int = Field(
-        default=2, ge=2, le=4,
-        description="팀 수. 현재 운영은 2팀 고정이며 12~14명 2팀은 완전 탐색으로 최적해를 보장한다. 3팀 이상은 후순위 (13.1절 Q4, 9.7절)",
+        default=2, ge=2, le=3,
+        description="팀 수 2 또는 3. 2팀은 완전 탐색으로 최적해를 보장하고, 3팀(참석 16명 이상, 21명이면 7·7·7)은 지역 탐색이다 (13.1절 Q4, 9.7절)",
     )
     strategies: list[Strategy] = Field(
         default=[Strategy.SKILL, Strategy.CHEMISTRY, Strategy.BALANCED],
@@ -164,6 +164,7 @@ class Exchange(BaseModel):
 
     a_player_ids: list[int] = Field(default=[], description="같은 팀에 있는 선수들 (상대 팀으로 이동)")
     b_player_ids: list[int] = Field(default=[], description="다른 팀에 있는 선수들 (a 쪽 팀으로 이동)")
+    to_squad_no: int | None = Field(default=None, ge=1, description="한쪽만 보낼 때 옮길 팀 번호. 3팀이면 꼭 넣는다 (2팀은 상대 팀)")
 
 
 class SwapRequest(BaseModel):

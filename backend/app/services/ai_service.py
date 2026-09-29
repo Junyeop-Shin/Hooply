@@ -98,6 +98,7 @@ def explain_candidate(db: Session, cand: AssignmentCandidate, user: User) -> AiE
     cs = constraints_of(cand.run)
     payload = {
         "strategy": STRATEGY_LABEL[cand.strategy],
+        "team_count": len(roster),
         "balance": {"skill_spread": m.get("skill_spread")},
         "teams": teams,
         "constraints_applied": {
@@ -114,7 +115,8 @@ def explain_candidate(db: Session, cand: AssignmentCandidate, user: User) -> AiE
         key_parts={"v": PROMPT_VERSION, "candidate": cand.id, "strategy": cand.strategy, "input": payload},
         usable=lambda o: bool(o.get("summary")) and bool(o.get("key_players") or o.get("chemistry")),
         max_chars=90,
-        post=lambda o: {**o, "key_players": o["key_players"][:4], "chemistry": o["chemistry"][:3], "gaps": o["gaps"][:2]},
+        # 팀마다 활약 2명 · 부족한 역할 1개까지 (3팀이면 6 · 3), 조합은 팀 수만큼
+        post=lambda o: {**o, "key_players": o["key_players"][:2 * len(roster)], "chemistry": o["chemistry"][:max(3, len(roster))], "gaps": o["gaps"][:len(roster)]},
     )
     out = llm_guard.run(db, call, user_id=user.id)
     o = out.output

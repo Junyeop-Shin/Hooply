@@ -341,3 +341,10 @@ def test_raw_response_records_actual_model_version(db, monkeypatch):
     bad = {"raw": raw, "parsed": None, "parsing_error": ValueError("bad")}
     monkeypatch.setattr(llm_model, "structured", lambda schema, **_kw: RunnableLambda(lambda _m: bad))
     assert g.run(db, _call(key_parts={"z": 1}), user_id=1).fail_reason == "schema"
+
+
+def test_third_squad_alias_skips_c_so_center_position_is_not_replaced():
+    """3팀 가명은 A · B · D — C 는 포지션 C(센터)와 겹친다. 복원할 때 "C 자리" 는 그대로 남아야 한다."""
+    al = g.Aliases()
+    assert [al.squad(1, "블랙"), al.squad(2, "화이트"), al.squad(3, "레드")] == ["A", "B", "D"]
+    assert al.restore("D는 C 자리가 비어요. A와 D가 붙어요") == "레드는 C 자리가 비어요. 블랙과 레드가 붙어요"
