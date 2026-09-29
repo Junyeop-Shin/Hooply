@@ -66,7 +66,8 @@ export function TacticBoard({
     let hold = 0
     let c = cursorRef.current
     const tick = (now: number) => {
-      const dt = now - last
+      // rAF 가 주는 시각은 그 프레임의 시작 시각이라 effect 에서 잰 시각보다 이를 수 있다 — 음수면 재생 위치가 뒤로 가서 단계가 -1 이 된다
+      const dt = Math.max(0, now - last)
       last = now
       if (hold > 0) { hold -= dt; raf = requestAnimationFrame(tick); return }
       if (reduced) {
@@ -113,7 +114,7 @@ export function TacticBoard({
           </marker>
         </defs>
         <Court />
-        {k !== null && (
+        {k !== null && play.steps[k] && (
           <g opacity={playing ? 0.35 : 0.85}>
             {play.steps[k].actions.map((a, i) => (
               <ActionMark key={i} a={a} from={states[k].pos} to={states[k + 1].pos} arrow={`url(#ah-${ids})`} brandArrow={`url(#ahb-${ids})`} />
@@ -152,7 +153,7 @@ export function TacticBoard({
       </svg>
 
       <p className="min-h-10 text-sm text-ink" aria-live="polite">
-        {k === null ? (
+        {k === null || !play.steps[k] ? (
           <span className="text-muted">끝났어요 — ▶ 을 누르면 처음부터 다시 재생해요</span>
         ) : (
           <><span className="mr-1.5 font-bold text-brand-ink">{k + 1}/{n}</span>{play.steps[k].caption}</>

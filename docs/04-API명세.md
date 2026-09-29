@@ -45,7 +45,7 @@
 | VoteTargets, VoteCandidate, VoteIn, PostGameSurveyIn, ShareMessage, PlayerStats, MarginPoint, QuarterRecord, RatingChange, LeaderboardEntry | 투표·통계 |
 | AdminUserRow, PlayerRawData, RatingAdjust, AuditLogView | 관리자 |
 
-## 4. 엔드포인트 요약 (86개)
+## 4. 엔드포인트 요약 (85개)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -180,10 +180,9 @@
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
 | GET | `/tactics/presets` | 프리셋 전술 8개 + `presets_version` | 200 |
-| GET | `/events/{event_id}/tactics` | 그날 이름표가 저장된 전술 (참석자) | 200 · 403 |
-| GET | `/events/{event_id}/tactics/recommend` | 팀별 추천 전술 상위 3개 (`?squad_no=&zone=`, 매니저) | 200 · 403 · 404 |
-| GET | `/events/{event_id}/tactics/{play_key}` | 전술 + 그날 팀별 이름표 (참석자) | 200 · 403 · 404 |
-| PUT | `/events/{event_id}/tactics/{play_key}/slots` | 이름표 저장 (매니저) | 200 · 400 · 403 · 404 · 422 |
+| GET | `/events/{event_id}/tactics/recommend` | 팀별 자동 추천 — 적합도 75 이상 상위 3개 · 자리 · 예비 (`?squad_no=&zone=`, 참석자 · 점수는 매니저만) | 200 · 403 · 404 |
+| GET | `/events/{event_id}/tactics/{play_key}` | 전술 + 그날 팀별 자리 배치 · 예비 (참석자) | 200 · 403 · 404 |
+| PUT | `/events/{event_id}/tactics/{play_key}/slots` | 자리 바꿔 저장 · 빈 목록이면 추천 배치로 (매니저) | 200 · 400 · 403 · 404 · 422 |
 
 ### 관리자
 
@@ -211,7 +210,7 @@
 | S-03 설문 · S-23 내 위치 | GET /surveys/onboarding, POST /surveys/onboarding/responses, PUT /teams/{id}/self-rank |
 | S-04 홈 · S-17 프로필 | GET /me, PATCH /me, GET /me/teams, GET /me/profile, PUT /me/positions, GET /players/{id}/stats |
 | S-27 시작 안내 | GET /me, GET/PUT /me/tutorial |
-| S-28 전술 탭 · S-29 전술판 | GET /tactics/presets, GET /events/{id}/tactics, GET /events/{id}/tactics/recommend, GET/PUT /events/{id}/tactics/{play_key}[/slots] |
+| S-28 전술 탭 · S-29 전술판 · S-14 오늘 추천 전술 | GET /tactics/presets, GET /events/{id}/tactics/recommend, GET/PUT /events/{id}/tactics/{play_key}[/slots] |
 | S-25 기록 탭 | GET /players/{id}/stats, GET /teams/{id}/stats/periods, GET /teams/{id}/stats/monthly-margin, GET /me/badges |
 | S-17 프로필 사진 | POST /me/avatar, DELETE /me/avatar, GET /users/{id}/avatar |
 | S-04/S-07 게스트 기록 확인 | GET /me/guest-claims, POST /players/{id}:claim |

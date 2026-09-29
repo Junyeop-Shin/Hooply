@@ -248,7 +248,7 @@ export function TeamDetailPage() {
         ) : tab === 'records' ? (
           <RecordsTab teamId={id} myPlayerId={t.my_player_id} newMonth={newMonth} />
         ) : tab === 'tactics' ? (
-          <TacticsTab teamId={id} isManager={isManager} />
+          <TacticsTab teamId={id} />
         ) : players.isLoading ? <Spinner /> : (
           <div className="space-y-2">
             {players.data?.items.map((p) => <PlayerRow key={p.id} p={p} isMe={p.id === t.my_player_id} />)}

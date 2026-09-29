@@ -63,6 +63,10 @@ describe('shownStep', () => {
     expect(shownStep(play, 3)).toBe(3)
     expect(shownStep(play, 4)).toBeNull()
   })
+
+  it('재생 위치가 0 아래로 살짝 내려가도 첫 단계를 보여 준다 (음수 단계 번호 방지)', () => {
+    expect(shownStep(play, -0.001)).toBe(0)
+  })
 })
 
 describe('zigzag', () => {

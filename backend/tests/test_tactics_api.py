@@ -1,6 +1,6 @@
-"""전술 추천 · 이름표 API (docs/07 T2 · T5 · T6).
+"""전술 추천 · 전술판 API (docs/07 T2 · T4 · T5 · T6).
 
-club 픽스처(12명 + 게스트 2명 참석)로 배정을 확정한 뒤 추천·이름표를 확인한다.
+club 픽스처(12명 + 게스트 2명 참석)로 배정을 확정한 뒤 자동 추천 · 자리 배치 · 공개 범위를 확인한다.
 """
 
 from app.tactics.court import zone_of
@@ -74,87 +74,115 @@ def test_recommend_needs_adopted_assignment(client, club):
     eid, _ = _event_with_attendance(client, club)
     r = client.get(f"{API}/events/{eid}/tactics/recommend", headers=club["manager"])
     assert r.status_code == 404 and r.json()["code"] == "NOT_ADOPTED_YET"
+    # 참석 응답만 한 팀원도 확정 전이면 같은 404 (403 이 아니다)
+    assert client.get(f"{API}/events/{eid}/tactics/recommend", headers=club["members"][2]).status_code == 404
     # 확정 전에도 전술판은 열린다 (이름표 칸만 없다)
     r = client.get(f"{API}/events/{eid}/tactics/preset:horns", headers=club["members"][2])
     assert r.status_code == 200 and r.json()["squads"] == []
 
 
-def test_recommend_top3_and_zone_toggle(client, club):
-    m = club["manager"]
+def test_auto_recommendation_for_attendees(client, club, monkeypatch):
+    from app.services import tactic_service
+
+    # club 픽스처는 모두 같은 설문(중간 실력 윙)이라 적합도가 50~60 에 몰린다. 기준을 낮춰 추천이 나오게 한다
+    monkeypatch.setattr(tactic_service, "FIT_MIN", 55.0)
+    m, members = club["manager"], club["members"]
     eid, guests, squads = _adopted_event(client, club)
     r = client.get(f"{API}/events/{eid}/tactics/recommend", headers=m)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert [s["squad_no"] for s in body["squads"]] == [1, 2] and body["zone"] is False
+    assert [s["squad_no"] for s in body["squads"]] == [1, 2] and body["zone"] is False and body["can_edit"] is True
     for sq in body["squads"]:
-        assert len(sq["items"]) == 3
+        assert len(sq["items"]) <= 3
         fits = [it["fit"] for it in sq["items"]]
-        assert fits == sorted(fits, reverse=True)
+        assert fits == sorted(fits, reverse=True) and all(f >= body["fit_min"] for f in fits)
         for it in sq["items"]:
-            assert get_play(it["play_key"]).defense in ("man", "any")
+            assert get_play(it["play_key"]).defense in ("man", "any") and it["manual"] is False
             ids = [s["player_id"] for s in it["slots"]]
             assert len(set(ids)) == 5 and set(ids) <= set(squads[sq["squad_no"]])
             for s in it["slots"]:
-                assert 0 <= s["score"] <= 100
+                assert 0 <= s["score"] <= 100  # 매니저에게는 점수
                 assert s["alt_player_id"] is None or s["alt_player_id"] not in ids
+                # 예비는 같은 전술판 5명 중 다른 사람
+                assert all(b["player_id"] in ids and b["player_id"] != s["player_id"] for b in s["backups"])
+                assert len(s["backups"]) <= 2
                 if s["player_id"] in guests:  # T4: 설문 없는 게스트
                     assert "설문 없음(게스트)" in s["missing_attrs"]
+    assert any(sq["items"] for sq in body["squads"])
 
-    # T5: 지역 수비를 켜면 zone·any 전술만 (1단계 프리셋에서는 두 개)
+    # 참석자(팀원)도 추천을 본다. 자리별 점수·속성·교체 후보는 비운다
+    r = client.get(f"{API}/events/{eid}/tactics/recommend", headers=members[3])
+    assert r.status_code == 200
+    body = r.json()
+    assert body["can_edit"] is False and body["my_squad_no"] in (1, 2)
+    slots = [s for sq in body["squads"] for it in sq["items"] for s in it["slots"]]
+    assert slots and all(s["score"] is None and s["matched_attrs"] == [] and s["missing_attrs"] == [] and s["alt_player_id"] is None for s in slots)
+
+    # T5: 지역 수비를 켜면 zone·any 전술만
     r = client.get(f"{API}/events/{eid}/tactics/recommend", params={"zone": "true", "squad_no": 2}, headers=m)
     body = r.json()
     assert [s["squad_no"] for s in body["squads"]] == [2]
-    assert {it["play_key"] for it in body["squads"][0]["items"]} == {"preset:zone_131", "preset:post_split"}
-
-    # 팀원에게는 추천을 주지 않는다
-    r = client.get(f"{API}/events/{eid}/tactics/recommend", headers=club["members"][3])
-    assert r.status_code == 403 and r.json()["code"] == "FORBIDDEN_ROLE"
+    assert {it["play_key"] for it in body["squads"][0]["items"]} <= {"preset:zone_131", "preset:post_split"}
 
 
-def test_name_tags_save_and_visibility(client, club, signup):
+def test_recommendation_respects_fit_threshold(client, club, monkeypatch):
+    from app.services import tactic_service
+
+    eid, _, _ = _adopted_event(client, club)
+    # 기본 기준(75)이면 모두 같은 설문인 평범한 팀에는 추천이 없다
+    body = client.get(f"{API}/events/{eid}/tactics/recommend", headers=club["manager"]).json()
+    assert body["fit_min"] == tactic_service.FIT_MIN and all(sq["items"] == [] for sq in body["squads"])
+    monkeypatch.setattr(tactic_service, "FIT_MIN", 0.0)
+    body = client.get(f"{API}/events/{eid}/tactics/recommend", headers=club["manager"]).json()
+    assert all(len(sq["items"]) == 3 for sq in body["squads"])
+
+
+def test_board_lineup_override_and_visibility(client, club, signup):
     m, members = club["manager"], club["members"]
     eid, _, squads = _adopted_event(client, club)
     black = squads[1]
-    url = f"{API}/events/{eid}/tactics/preset:high_pnr/slots"
-    slots = [{"slot": i + 1, "player_id": pid} for i, pid in enumerate(black[:5])]
+    board = f"{API}/events/{eid}/tactics/preset:high_pnr"
+    url = f"{board}/slots"
 
+    # 전술판은 저장하지 않아도 추천 배치로 채워져 있다
+    view = client.get(board, headers=members[5]).json()
+    auto = view["squads"][0]["lineup"]
+    assert auto["manual"] is False and len(auto["slots"]) == 5 and view["can_edit"] is False
+    assert all(s["score"] is None for s in auto["slots"])
+
+    slots = [{"slot": i + 1, "player_id": pid} for i, pid in enumerate(black[:5])]
     # 팀원은 저장할 수 없다
     assert client.put(url, json={"squad_no": 1, "slots": slots}, headers=members[4]).status_code == 403
-    # 다른 팀 선수 → 422, 같은 자리 두 번 → 400
+    # 다른 팀 선수 → 422, 같은 자리 두 번 → 400, 다섯 자리가 아니면 400
     bad = [*slots[:4], {"slot": 5, "player_id": squads[2][0]}]
     r = client.put(url, json={"squad_no": 1, "slots": bad}, headers=m)
     assert r.status_code == 422 and r.json()["code"] == "PLAYER_NOT_IN_SQUAD"
     assert r.json()["details"][0]["context"]["player_ids"] == [squads[2][0]]
     dup = [*slots[:4], {"slot": 4, "player_id": black[4]}]
     assert client.put(url, json={"squad_no": 1, "slots": dup}, headers=m).status_code == 400
+    assert client.put(url, json={"squad_no": 1, "slots": slots[:3]}, headers=m).status_code == 400
     assert client.put(f"{API}/events/{eid}/tactics/preset:nope/slots", json={"squad_no": 1, "slots": slots}, headers=m).status_code == 404
 
+    # 매니저가 자리를 바꿔 저장하면 전술판·추천 모두 그 배치 (manual)
     r = client.put(url, json={"squad_no": 1, "slots": slots}, headers=m)
     assert r.status_code == 200, r.text
-    view = r.json()
-    assert view["can_edit"] is True
-    assert [s["player_id"] for s in view["squads"][0]["slots"]] == black[:5]
-    assert view["squads"][1]["slots"] == []
-    assert {mb["player_id"] for mb in view["squads"][0]["members"]} == set(black)
+    lu = r.json()["squads"][0]["lineup"]
+    assert lu["manual"] is True and [s["player_id"] for s in lu["slots"]] == black[:5]
+    view = client.get(board, headers=members[5]).json()
+    assert [s["player_id"] for s in view["squads"][0]["lineup"]["slots"]] == black[:5]
+    rec = client.get(f"{API}/events/{eid}/tactics/recommend", headers=m).json()
+    for it in rec["squads"][0]["items"]:
+        if it["play_key"] == "preset:high_pnr":
+            assert it["manual"] is True
 
-    # T6: 참석자는 보인다
-    view = client.get(f"{API}/events/{eid}/tactics/preset:high_pnr", headers=members[5])
-    assert view.status_code == 200
-    assert view.json()["can_edit"] is False and view.json()["my_squad_no"] in (1, 2)
-    assert [s["player_id"] for s in view.json()["squads"][0]["slots"]] == black[:5]
-    saved = client.get(f"{API}/events/{eid}/tactics", headers=members[5]).json()
-    assert [(i["play_key"], i["squad_no"], i["filled"]) for i in saved["items"]] == [("preset:high_pnr", 1, 5)]
+    # 빈 목록 → 추천 배치로 되돌린다
+    r = client.put(url, json={"squad_no": 1, "slots": []}, headers=m)
+    assert r.json()["squads"][0]["lineup"]["manual"] is False
 
     # T6: 참석하지 않은 팀원은 403
     team = client.get(f"{API}/teams/{club['team_id']}", headers=m).json()
     outsider = signup("late@club.com", name="늦게온사람")
     assert client.post(f"{API}/teams/join", json={"team_code": team["team_code"]}, headers=outsider).status_code == 200
-    r = client.get(f"{API}/events/{eid}/tactics/preset:high_pnr", headers=outsider)
-    assert r.status_code == 403 and r.json()["code"] == "NOT_ATTENDEE"
-    assert client.get(f"{API}/events/{eid}/tactics", headers=outsider).status_code == 403
-
-    # 다시 저장하면 통째로 바뀌고, 빈 목록이면 지워진다
-    r = client.put(url, json={"squad_no": 1, "slots": slots[:2]}, headers=m)
-    assert len(r.json()["squads"][0]["slots"]) == 2
-    client.put(url, json={"squad_no": 1, "slots": []}, headers=m)
-    assert client.get(f"{API}/events/{eid}/tactics", headers=m).json()["items"] == []
+    for path in (board, f"{API}/events/{eid}/tactics/recommend"):
+        r = client.get(path, headers=outsider)
+        assert r.status_code == 403 and r.json()["code"] == "NOT_ATTENDEE"

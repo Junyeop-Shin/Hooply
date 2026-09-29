@@ -626,42 +626,50 @@ export interface Play {
 
 export interface PresetList { presets_version: number; items: Play[] }
 
-export interface SlotRecommendation {
+export interface SlotPlayer { player_id: number; display_name: string }
+
+/** 자리 하나. score·속성·교체 후보는 매니저에게만 채워진다 */
+export interface SlotLineup {
   slot: number
   role: TacticRole
   player_id: number
   display_name: string
-  score: number
+  backups: SlotPlayer[] // 예비: 같은 전술판 5명 중 이 역할도 맞는 사람
+  score: number | null
   matched_attrs: string[]
   missing_attrs: string[]
   alt_player_id: number | null
   alt_display_name: string | null
-  alt_score: number | null
 }
 
-export interface PlayRecommendation {
+export interface PlayLineup {
   play_key: string
   name: string
   summary: string
   defense: Defense
   fit: number
-  slots: SlotRecommendation[]
+  manual: boolean // 매니저가 자리를 바꿔 저장한 배치
+  slots: SlotLineup[]
 }
 
-export interface SquadRecommendation { squad_no: number; squad_name: string; member_count: number; items: PlayRecommendation[] }
-export interface TacticRecommendation { event_id: number; zone: boolean; presets_version: number; squads: SquadRecommendation[] }
+export interface SquadRecommendation { squad_no: number; squad_name: string; member_count: number; items: PlayLineup[] }
+export interface TacticRecommendation {
+  event_id: number
+  zone: boolean
+  fit_min: number
+  presets_version: number
+  can_edit: boolean
+  my_squad_no: number | null
+  squads: SquadRecommendation[]
+}
 
-export interface SlotTag { slot: number; player_id: number; display_name: string }
 export interface SquadMember { player_id: number; display_name: string; is_guest: boolean }
-export interface SquadTags { squad_no: number; squad_name: string; members: SquadMember[]; slots: SlotTag[] }
+export interface SquadBoard { squad_no: number; squad_name: string; members: SquadMember[]; lineup: PlayLineup | null }
 
 export interface EventPlayView {
   play_key: string
   play: Play
   can_edit: boolean
   my_squad_no: number | null
-  squads: SquadTags[]
+  squads: SquadBoard[]
 }
-
-export interface SavedPlay { play_key: string; name: string; squad_no: number; squad_name: string; filled: number }
-export interface SavedPlays { event_id: number; can_edit: boolean; my_squad_no: number | null; items: SavedPlay[] }

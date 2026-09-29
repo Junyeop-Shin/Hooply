@@ -9,6 +9,8 @@ test('전술 탭: 전술 8개 목록 → 전술판에서 단계를 넘기며 본
 
   await expect(page.getByRole('heading', { name: '전술 목록' })).toBeVisible()
   await expect(page.getByRole('button', { name: /전술판 보기$/ })).toHaveCount(8)
+  // 그날 배정이 확정돼 있으면 위에 추천 전술이 늦게 붙어 목록이 밀린다 — 다 불러온 뒤에 누른다
+  await page.waitForLoadState('networkidle')
   await page.getByRole('button', { name: '혼즈 전술판 보기' }).click()
 
   await expect(page.getByRole('img', { name: '혼즈 전술판' })).toBeVisible()

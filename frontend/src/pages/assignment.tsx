@@ -22,6 +22,7 @@ import { renderSquadImage } from '../lib/squad-image'
 import { teamsApi } from '../api/teams'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
+import { AdoptedTactics } from '../components/tactics'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
 const STRATEGY_LABEL: Record<Strategy, string> = { SKILL: '실력 우선', CHEMISTRY: '친화도 우선', BALANCED: '종합' }
@@ -497,6 +498,7 @@ export function AdoptedPage() {
             {share.isPending ? '만드는 중…' : '카카오톡 공유'}
           </button>
         </Card>
+        <AdoptedTactics eventId={id} />
         {mine && (
           <section>
             <SectionTitle>내 팀 · 팀 {mine.squad_name}</SectionTitle>

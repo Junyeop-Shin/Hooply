@@ -89,9 +89,8 @@ export function frameAt(play: Play, states: StepState[], cursor: number): Frame 
 /** cursor 에서 화살표·설명으로 보여 줄 단계 번호 (0부터). 멈춰 있으면 다음에 할 단계, 재생 중이면 지금 단계. 끝이면 null */
 export function shownStep(play: Play, cursor: number): number | null {
   const n = play.steps.length
-  const k = Math.floor(cursor)
-  if (cursor >= n) return null
-  return Math.min(k, n - 1)
+  if (n === 0 || cursor >= n) return null
+  return Math.min(Math.max(Math.floor(cursor), 0), n - 1)
 }
 
 /** 드리블 화살표용 지그재그 경로 (SVG 좌표). 끝 20% 는 곧게 두어 화살촉이 똑바로 선다 */
