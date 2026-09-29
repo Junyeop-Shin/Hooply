@@ -81,6 +81,10 @@ class SurveyFeatures:
     pg_trio: float | None = None  # D3A: 1.0 가능+선호 / 0.5 가능 / 0.0 불가
     c_trio: float | None = None  # D3B
     height_cm: int | None = None
+    # 전술 역할 점수(app/tactics/roles.py) 재료
+    b1_codes: set[str] = field(default_factory=set)  # B1 에서 고른 공격 옵션 코드
+    shot_range: float | None = None  # B2 최대 거리 0~1
+    handle: float | None = None  # B3 볼 운반 0~1
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +247,9 @@ def extract_features(
 
     f = SurveyFeatures()
     b1 = picked_codes("B1")
+    f.b1_codes = b1
+    f.shot_range = norm("B2")
+    f.handle = norm("B3")
     b1_count = len(b1) / 8.0
 
     # --- prior 성분 (0~1) ---
