@@ -6,7 +6,7 @@ const P = (x: number, y: number) => ({ x, y })
 
 /** 하이 픽앤롤 축소판: 스크린 → 드리블·롤 → 패스 → 슛 */
 const play: Play = {
-  key: 'test', name: '테스트', summary: '', defense: 'man', situation: 'half_court',
+  key: 'test', name: '테스트', summary: '', defense: 'man', situation: 'half_court', counter: '',
   start: [P(0.5, 0.66), P(0.95, 0.05), P(0.05, 0.05), P(0.15, 0.48), P(0.66, 0.42)],
   ball: 1,
   roles: ['ball_handler', 'shooter', 'shooter', 'spacer', 'screener_roll'],

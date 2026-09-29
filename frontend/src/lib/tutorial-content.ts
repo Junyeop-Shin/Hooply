@@ -34,7 +34,7 @@ export const TIPS: Record<TipId, { title: string; lines: string[]; help: string 
     title: '이번 팀 배정 결과예요',
     lines: [
       '내 팀과 맡을 포지션을 확인하세요. 팀원에게는 실력 수치가 보이지 않아요.',
-      '두 팀 명단을 이미지 한 장으로 카카오톡에 보낼 수 있어요.',
+      '아래에 두 팀 명단과, 이 팀에 맞는 추천 전술이 이어져요. 전술마다 막혔을 때의 대안도 있어요.',
     ],
     help: 'privacy',
   },

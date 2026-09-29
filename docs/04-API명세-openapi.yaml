@@ -3887,6 +3887,9 @@ components:
           enum:
           - half_court
           - inbound
+        counter:
+          type: string
+          maxLength: 120
         start:
           items:
             $ref: '#/components/schemas/Point'
@@ -3944,6 +3947,8 @@ components:
           type: number
         manual:
           type: boolean
+        counter:
+          type: string
         slots:
           items:
             $ref: '#/components/schemas/SlotLineup'

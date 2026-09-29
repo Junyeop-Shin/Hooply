@@ -10,9 +10,12 @@
   shot                   (없음)
 """
 
+import re
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.core.josa import substitute
 
 Defense = Literal["man", "zone", "any"]
 Situation = Literal["half_court", "inbound"]  # 인바운드는 골밑에서 공을 넣을 때만 쓰는 전술 — 오늘 추천에는 넣지 않는다
@@ -74,6 +77,8 @@ class Play(BaseModel):
     summary: str = Field(min_length=1, max_length=80)  # 목록 카드의 한 줄 설명
     defense: Defense  # 이 전술이 노리는 상대 수비
     situation: Situation = "half_court"
+    # 막혔을 때의 대안 한두 문장. 자리는 {1}~{5} 로 적는다 — 그날 배치가 있으면 선수 이름, 없으면 "5번" 으로 바꿔 보여 준다
+    counter: str = Field(default="", max_length=120)
     start: list[Point] = Field(min_length=5, max_length=5)  # start[i] = 슬롯 i+1 의 시작 위치
     ball: Slot = Field(ge=1, le=5)  # 처음 공을 가진 슬롯
     roles: list[Role] = Field(min_length=5, max_length=5)  # roles[i] = 슬롯 i+1 의 역할
@@ -81,6 +86,14 @@ class Play(BaseModel):
 
     def role_of(self, slot: Slot) -> Role:
         return self.roles[slot - 1]
+
+
+COUNTER_REF = re.compile(r"\{([1-5])\}")
+
+
+def render_counter(text: str, names: list[str] | None = None) -> str:
+    """"{5}의 롤이 막히면 {3}이" → "서장훈의 롤이 막히면 허재가" (names 없으면 "5번의 … 3번이"). 조사는 받침에 맞춘다."""
+    return substitute(text, r"\{([1-5])\}", lambda k: names[int(k) - 1] if names else f"{k}번")
 
 
 def playability_errors(play: Play) -> list[str]:

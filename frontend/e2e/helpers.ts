@@ -24,5 +24,6 @@ export async function openEvent(page: Page, nth: number) {
   await expect(page.getByRole('heading', { name: '일요 코트메이트' })).toBeVisible()
   await page.getByText('일요 정기전').nth(nth).click()
   await expect(page.getByRole('heading', { name: '일요 정기전' })).toBeVisible()
-  await expect(page.getByText(/참석하시나요|참석 응답/)).toBeVisible()  // 응답 중이면 질문형, 끝난 일정이면 '참석 응답'
+  // 응답 중이면 질문형, 끝난 일정이면 '참석 응답', 배정이 확정된 일정이면 화면이 곧 팀 배정 결과
+  await expect(page.getByText(/참석하시나요|참석 응답|팀 배정 결과/).first()).toBeVisible()
 }

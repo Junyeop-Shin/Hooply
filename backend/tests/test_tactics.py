@@ -334,3 +334,12 @@ def test_inbound_plays_are_not_ranked():
     raw["start"][0] = {"x": 0.62, "y": -0.05}  # 공을 넣는 사람은 베이스라인 뒤
     inb = Play.model_validate(raw)
     assert [f.play.key for f in rank_plays([inb, half], _random_roster(8, 1), top=5)] == ["half"]
+
+
+def test_render_counter_names_and_particles():
+    from app.tactics.play import render_counter
+
+    t = "{5}의 롤이 막히면 {3}이 바로, {1}은 윙에서, {2}와는"
+    assert render_counter(t) == "5번의 롤이 막히면 3번이 바로, 1번은 윙에서, 2번과는"
+    names = ["허재", "서장훈", "허재", "현주엽", "서장훈"]
+    assert render_counter(t, names) == "서장훈의 롤이 막히면 허재가 바로, 허재는 윙에서, 서장훈과는"

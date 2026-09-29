@@ -17,6 +17,7 @@ API = "/api/v1"
 
 
 def test_presets_are_playable():
+    assert all(p.counter for p in PRESET_LIST)  # 모든 전술에 막혔을 때의 대안
     assert len(PRESET_LIST) == 22
     assert set(PRESETS) == {
         "high_pnr", "horns", "weave", "pistol", "floppy", "ucla", "post_split", "zone_131",
@@ -114,6 +115,9 @@ def test_auto_recommendation_for_attendees(client, club, monkeypatch):
         for it in sq["items"]:
             play = get_play(it["play_key"])
             assert play.defense in ("man", "any") and play.situation == "half_court" and it["manual"] is False  # 인바운드는 추천하지 않는다
+            # 막혔을 때의 대안은 그날 선수 이름으로 (자리 번호 {n} 이 남지 않는다)
+            assert it["counter"] and "{" not in it["counter"]
+            assert any(s["display_name"] in it["counter"] for s in it["slots"])
             ids = [s["player_id"] for s in it["slots"]]
             assert len(set(ids)) == 5 and set(ids) <= set(squads[sq["squad_no"]])
             for s in it["slots"]:

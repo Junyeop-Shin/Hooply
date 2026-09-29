@@ -16,7 +16,7 @@ import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { TacticBoard, type BoardTone } from '../components/tactic-board'
 import { CIRCLED, SlotPeople } from '../components/tactics'
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui'
-import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
+import { DEFENSE_LABEL, ROLE_LABEL, renderCounter } from '../lib/tactics'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 const toneOf = (squadNo: number): BoardTone => (squadNo === 1 ? 'black' : 'white')
@@ -83,6 +83,12 @@ function RoleList({ play, slots, onTap }: { play: Play; slots?: SlotLineup[]; on
   )
 }
 
+/** 막혔을 때의 대안 */
+function Counter({ text }: { text: string }) {
+  if (!text) return null
+  return <p className="rounded-xl bg-sunken px-3 py-2.5 text-sm leading-relaxed text-ink-2"><b className="text-ink">막히면</b> · {text}</p>
+}
+
 /** 일정 없이 전술만 볼 때 */
 function PlainBoard({ play, note }: { play: Play; note: string | null }) {
   return (
@@ -93,6 +99,7 @@ function PlainBoard({ play, note }: { play: Play; note: string | null }) {
         {note && <Alert kind="info">{note}</Alert>}
         <TacticBoard key={play.key} play={play} />
         <RoleList play={play} />
+        <Counter text={renderCounter(play.counter)} />
       </Content>
     </Screen>
   )
@@ -169,6 +176,7 @@ function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; 
             {save.isError && <Alert>{errMsg(save.error, '저장하지 못했어요.')}</Alert>}
             <TacticBoard key={play.key} play={play} tone={toneOf(sq.squad_no)} names={row.map(nameOf)} onSlotTap={view.can_edit ? setPicking : undefined} />
             <RoleList play={play} slots={slots} onTap={view.can_edit ? setPicking : undefined} />
+            <Counter text={renderCounter(play.counter, row.map(nameOf))} />
             <p className="text-[11px] text-faint">괄호 안은 같은 전술판 5명 중에서 그 역할도 할 수 있는 예비예요.</p>
           </>
         )}

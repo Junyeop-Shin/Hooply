@@ -6,6 +6,12 @@
  */
 import { RIM_X, RIM_Y, COURT_H, COURT_W } from './court'
 import type { CourtPoint, Defense, Play, PlayAction, Situation, TacticRole } from '../api/types'
+import { substitute } from './josa'
+
+/** 막혔을 때의 대안: "{5}의 롤이 막히면 {2}에게" → 이름(없으면 "5번")으로. 조사는 받침에 맞춘다 */
+export function renderCounter(text: string, names?: (string | null)[]): string {
+  return substitute(text, '\\{([1-5])\\}', (k) => names?.[Number(k) - 1] ?? `${k}번`)
+}
 
 export const ROLE_LABEL: Record<TacticRole, string> = {
   ball_handler: '볼 핸들러',

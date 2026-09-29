@@ -44,7 +44,7 @@ from app.schemas.tactic import (
 from app.services import survey_service
 from app.services.assignment_service import _players_of, adopted_candidate
 from app.tactics.matching import SLOTS, allowed_defenses, fit_play
-from app.tactics.play import Play
+from app.tactics.play import Play, render_counter
 from app.tactics.presets import PRESET_LIST, PRESETS_VERSION, get_play, play_key
 from app.tactics.roles import PlayerRoles, compute_role_scores, role_input_from_features
 
@@ -169,7 +169,7 @@ def _lineup(ctx: _Ctx, squad_no: int, play: Play, *, manager: bool) -> tuple[Pla
     fit = round(mean(ctx.scores[pid].scores[play.roles[k]] for k, pid in enumerate(seat)) * 100, 1)
     lineup = PlayLineup(
         play_key=play_key(play), name=play.name, summary=play.summary, defense=play.defense,
-        fit=fit, manual=manual, slots=slots,
+        fit=fit, manual=manual, slots=slots, counter=render_counter(play.counter, [name(pid) for pid in seat]),
     )
     return lineup, auto.fit
 

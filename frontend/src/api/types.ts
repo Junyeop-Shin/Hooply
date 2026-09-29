@@ -621,6 +621,7 @@ export interface Play {
   summary: string
   defense: Defense
   situation: Situation
+  counter: string // 막혔을 때의 대안. 자리는 {1}~{5}
   start: CourtPoint[]
   ball: number
   roles: TacticRole[]
@@ -652,6 +653,7 @@ export interface PlayLineup {
   defense: Defense
   fit: number
   manual: boolean // 매니저가 자리를 바꿔 저장한 배치
+  counter: string // 막혔을 때의 대안 (그날 선수 이름으로)
   slots: SlotLineup[]
 }
 

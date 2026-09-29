@@ -13,6 +13,8 @@ import { POSITIONS, localISODate, type AttendanceView, type EventGuestInput, typ
 import { fmtEvent } from '../lib/format'
 import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
+import { EventTactics } from '../components/tactics'
+import { AdoptedSection } from './assignment'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 
@@ -169,6 +171,7 @@ export function EventDetailPage() {
   const [sheet, setSheet] = useState<'new' | AttendanceView | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ ABSENT: true })
+  const [showAtt, setShowAtt] = useState(false)
   const refresh = () => { qc.invalidateQueries({ queryKey: ['events'] }) }
 
   const respond = useMutation({
@@ -212,32 +215,9 @@ export function EventDetailPage() {
     <Button full onClick={() => nav(`/events/${id}/quarters`)}>경기 후 쿼터 기록하기</Button>
   ) : null
 
-  return (
-    <Screen>
-      {/* 경기 기록이 있는(DONE) 일정은 실력 지표의 근거라 지울 수 없다. 배정을 확정한 일정(CLOSED)은 지울 수 있다 */}
-      <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && (e.status === 'OPEN' || e.status === 'CLOSED') && (
-        <span className="mr-1 flex gap-3 text-sm">
-          <button className="text-court-300" onClick={() => nav(`/events/${id}/edit`)}>수정</button>
-          <button className="text-rose-300" disabled={remove.isPending} onClick={() => confirm('일정을 삭제할까요? 참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.') && remove.mutate()}>삭제</button>
-        </span>
-      )} />
-      <div className="bg-navy-800 px-4 pb-4 text-white">
-        <p className="text-lg font-bold">{fmtEvent(e)}</p>
-        <p className="text-sm text-bar-sub">{e.venue ?? '장소 미정'}{e.memo ? ` · ${e.memo}` : ''}</p>
-        <div className="mt-2 flex items-center gap-2 text-sm">
-          <Badge tone={e.status === 'OPEN' ? 'success' : 'neutral'}>{{ OPEN: past ? '종료' : '응답 받는 중', CLOSED: past ? '종료' : '응답 마감', DONE: '기록 완료', CANCELED: '취소됨' }[e.status]}</Badge>
-          <span className="text-bar-sub">참석 {e.attend_count}명</span>
-          {e.rsvp_deadline && <span className="ml-auto text-xs text-bar-sub">마감 {new Date(e.rsvp_deadline).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
-        </div>
-      </div>
-
-      <Content>
-        {msg && <Alert>{msg}</Alert>}
-
-        {/* 끝난 일정의 매니저 도구는 맨 위로: 경기 기록 · 피어 투표 독려 */}
-        {isManager && past && quarterBlock}
-        {isManager && past && surveyBlock}
-
+  // 참석 응답 · 요약 · 참석자 목록 (S-10 · S-11). 배정이 확정되면 매니저에게만, 접어서 보여 준다
+  const attendanceBlock = (
+    <>
         {/* RSVP 토글 (S-10) */}
         <div data-tutorial="FIRST_RSVP"><Card>
           <p className="mb-2 text-sm font-bold text-ink">{past ? '참석 응답' : e.rsvp_open ? '이번 일정, 참석하시나요?' : '참석 응답'}</p>
@@ -288,19 +268,11 @@ export function EventDetailPage() {
           </Card>
         )}
 
-        {e.adopted_candidate_id && (
-          <button onClick={() => nav(`/events/${id}/assignment`)} className="flex w-full items-center justify-between rounded-2xl bg-navy-800 px-4 py-3 text-left text-sm font-semibold text-white">
-            <span>팀 배정이 확정됐어요 — 결과 보기</span><span>→</span>
-          </button>
-        )}
-        {isManager && s && !past && (
+        {isManager && s && !past && !e.adopted_candidate_id && (
           <Button variant="secondary" full disabled={s.attend < 10} onClick={() => nav(`/events/${id}/assign`)}>
             {e.adopted_candidate_id ? '재배정하기' : s.attend < 10 ? `팀 배정 (참석 10명 이상 필요 · 현재 ${s.attend}명)` : '팀 배정하러 가기'}
           </Button>
         )}
-        {/* 피어 투표 진입은 팀 화면의 일정 배너에서만 (사용자 결정). 여기서는 매니저 독려 카드만 */}
-        {!(isManager && past) && surveyBlock}
-        {!(isManager && past) && quarterBlock}
 
         {att.isLoading ? <Spinner /> : (
           (['ATTEND', 'PENDING', 'ABSENT'] as const).map((st) => groups[st].length > 0 && (
@@ -324,6 +296,64 @@ export function EventDetailPage() {
               </div>
             </section>
           ))
+        )}
+    </>
+  )
+
+  return (
+    <Screen>
+      {/* 경기 기록이 있는(DONE) 일정은 실력 지표의 근거라 지울 수 없다. 배정을 확정한 일정(CLOSED)은 지울 수 있다 */}
+      <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && (e.status === 'OPEN' || e.status === 'CLOSED') && (
+        <span className="mr-1 flex gap-3 text-sm">
+          <button className="text-court-300" onClick={() => nav(`/events/${id}/edit`)}>수정</button>
+          <button className="text-rose-300" disabled={remove.isPending} onClick={() => confirm('일정을 삭제할까요? 참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.') && remove.mutate()}>삭제</button>
+        </span>
+      )} />
+      <div className="bg-navy-800 px-4 pb-4 text-white">
+        <p className="text-lg font-bold">{fmtEvent(e)}</p>
+        <p className="text-sm text-bar-sub">{e.venue ?? '장소 미정'}{e.memo ? ` · ${e.memo}` : ''}</p>
+        <div className="mt-2 flex items-center gap-2 text-sm">
+          <Badge tone={e.status === 'OPEN' ? 'success' : 'neutral'}>{{ OPEN: past ? '종료' : '응답 받는 중', CLOSED: past ? '종료' : '응답 마감', DONE: '기록 완료', CANCELED: '취소됨' }[e.status]}</Badge>
+          <span className="text-bar-sub">참석 {e.attend_count}명</span>
+          {e.rsvp_deadline && <span className="ml-auto text-xs text-bar-sub">마감 {new Date(e.rsvp_deadline).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
+        </div>
+      </div>
+
+      <Content>
+        {msg && <Alert>{msg}</Alert>}
+
+        {/* 끝난 일정의 매니저 도구는 맨 위로: 경기 기록 · 피어 투표 독려 */}
+        {isManager && past && quarterBlock}
+        {isManager && past && surveyBlock}
+
+        {e.adopted_candidate_id ? (
+          <>
+            {/* 배정이 확정되면 이 화면이 곧 팀 배정 결과다 — 팀 배정(설명 포함) → 이 팀에 맞는 전술 */}
+            <AdoptedSection event={e} />
+            {isManager && s && !past && (
+              <Button variant="secondary" full onClick={() => nav(`/events/${id}/assign`)}>재배정하기</Button>
+            )}
+            <EventTactics event={e} />
+            {!(isManager && past) && surveyBlock}
+            {!(isManager && past) && quarterBlock}
+            {/* 참석 현황은 매니저만 — 팀원에게는 누가 불참했는지 보여 줄 필요가 없다 */}
+            {isManager && (
+              <section className="space-y-3">
+                <button onClick={() => setShowAtt(!showAtt)} className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left" aria-expanded={showAtt}>
+                  <span className="text-sm font-semibold text-ink">참석 현황 · 관리 <span className="font-normal text-muted">참석 {e.attend_count}명</span></span>
+                  <span className="text-xs text-faint">{showAtt ? '접기 ▴' : '펼치기 ▾'}</span>
+                </button>
+                {showAtt && attendanceBlock}
+              </section>
+            )}
+          </>
+        ) : (
+          <>
+            {attendanceBlock}
+            {/* 피어 투표 진입은 팀 화면의 일정 배너에서만 (사용자 결정). 여기서는 매니저 독려 카드만 */}
+            {!(isManager && past) && surveyBlock}
+            {!(isManager && past) && quarterBlock}
+          </>
         )}
       </Content>
 

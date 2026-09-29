@@ -110,15 +110,21 @@ function SquadChip({ no, name }: { no: number; name: string }) {
   )
 }
 
-function EventRecommend({ event, zone, setZone, rec }: {
+function EventRecommend({ event, zone, setZone, rec, onlyMine = false, title }: {
   event: EventView; zone: boolean; setZone: (z: boolean) => void; rec: ReturnType<typeof useRecommendation>
+  onlyMine?: boolean // 팀원은 내 팀 전술만 (일정 화면)
+  title?: string
 }) {
   const data = rec.data
-  // 내 팀을 먼저
-  const squads = data ? [...data.squads].sort((a, b) => Number(b.squad_no === data.my_squad_no) - Number(a.squad_no === data.my_squad_no)) : []
+  // 내 팀을 먼저. 팀원 화면에서는 내 팀만
+  const squads = data
+    ? [...data.squads]
+      .filter((sq) => !onlyMine || data.can_edit || data.my_squad_no === null || sq.squad_no === data.my_squad_no)
+      .sort((a, b) => Number(b.squad_no === data.my_squad_no) - Number(a.squad_no === data.my_squad_no))
+    : []
   return (
     <section className="space-y-3">
-      <SectionTitle>{mmdd(event.event_date)} 추천 전술</SectionTitle>
+      <SectionTitle>{title ?? `${mmdd(event.event_date)} 추천 전술`}</SectionTitle>
       <label className="flex min-h-11 items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4">
         <span className="text-sm text-ink">상대가 지역 수비를 써요<span className="block text-[11px] text-muted">켜면 지역 수비 공략 전술만 보여 줘요</span></span>
         <input type="checkbox" role="switch" checked={zone} onChange={(e) => setZone(e.target.checked)} className="size-5 accent-[var(--color-brand)]" />
@@ -222,6 +228,9 @@ function LineupCard({ it, rank, open: initial, to, manager, ai }: { it: PlayLine
               </li>
             ))}
           </ul>
+          {it.counter && (
+            <p className="rounded-xl bg-sunken px-3 py-2 text-xs leading-relaxed text-ink-2"><b className="text-ink">막히면</b> · {it.counter}</p>
+          )}
           <button
             type="button" onClick={() => nav(to)}
             className="min-h-11 w-full rounded-xl border border-brand-line bg-brand-soft text-sm font-semibold text-brand-ink active:opacity-80"
@@ -234,40 +243,10 @@ function LineupCard({ it, rank, open: initial, to, manager, ai }: { it: PlayLine
   )
 }
 
-/** 배정 결과 화면(S-14)의 "오늘 추천 전술" — 내 팀(없으면 두 팀) 추천 이름만 짧게, 누르면 전술판 */
-export function AdoptedTactics({ eventId }: { eventId: number }) {
-  const nav = useNavigate()
-  const rec = useRecommendation(eventId, false)
-  if (!rec.data) return null
-  const d = rec.data
-  const squads = d.squads.filter((s) => d.my_squad_no === null || s.squad_no === d.my_squad_no)
-  if (!squads.some((s) => s.items.length)) return null
-  return (
-    <section>
-      <SectionTitle>오늘 추천 전술</SectionTitle>
-      {d.my_squad_no !== null && <AiOneLiner eventId={eventId} squadNo={d.my_squad_no} />}
-      <Card className="divide-y divide-line p-0">
-        {squads.flatMap((sq) => sq.items.map((it) => (
-          <button key={`${sq.squad_no}-${it.play_key}`} type="button" onClick={() => nav(boardPath(it.play_key, eventId, sq.squad_no))} className="flex min-h-12 w-full items-center gap-2 px-4 text-left active:bg-sunken">
-            <SquadChip no={sq.squad_no} name={sq.squad_name} />
-            <span className="flex-1 font-semibold text-ink">{it.name}</span>
-            <span className="text-xs font-bold text-brand-ink">적합도 {Math.round(it.fit)}</span>
-            <span className="text-faint" aria-hidden="true">›</span>
-          </button>
-        )))}
-      </Card>
-      <p className="mt-1.5 text-[11px] text-faint">팀 화면 전술 탭에서 자리와 예비까지 볼 수 있어요.</p>
-    </section>
-  )
-}
-
-function AiOneLiner({ eventId, squadNo }: { eventId: number; squadNo: number }) {
-  const ai = useAiTactics(eventId, squadNo, false, true)
-  if (!ai.data || ai.data.fallback || !ai.data.one_liner) return null
-  return (
-    <div className="mb-2 rounded-xl bg-brand-soft px-3 py-2">
-      <p className="mb-0.5 text-[10px] font-black text-brand-ink">AI 코치</p>
-      <TypedSections note={false} sections={[{ items: [ai.data.one_liner], tone: 'lead' }]} />
-    </div>
-  )
+/** 일정 화면(배정 확정 뒤)의 추천 전술 — 팀 배정 결과 바로 아래. 팀원은 내 팀 것만, 매니저는 두 팀 모두 */
+export function EventTactics({ event }: { event: EventView }) {
+  const [zone, setZone] = useState(false)
+  const rec = useRecommendation(event.id, zone)
+  if (rec.error instanceof ApiError && rec.error.status === 403) return null
+  return <EventRecommend event={event} zone={zone} setZone={setZone} rec={rec} onlyMine title="이 팀에 맞는 전술" />
 }

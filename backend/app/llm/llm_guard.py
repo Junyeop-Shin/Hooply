@@ -38,19 +38,16 @@ from sqlalchemy.orm import Session
 
 from app.core import ratelimit
 from app.core.config import get_settings
+from app.core.josa import (  # noqa: F401 — josa 는 테스트·다른 모듈이 여기서 가져간다
+    josa,
+    substitute,
+)
 from app.llm import model as llm_model
 from app.models import LlmResult
 
 log = logging.getLogger("hooply.llm")
 
 ALIAS_RE = re.compile(r"P(\d+)(?!\d)")
-# 가명 뒤에 바로 붙은 조사 (다음 글자가 한글이면 조사가 아니라 낱말 — "P3가드" 는 건드리지 않는다)
-# 뒤에 보조사(는·도·만·의·요)가 한 글자 더 붙은 겹조사("와는", "과도")도 조사로 본다
-_PARTICLE = r"(?:(으로|로|이|가|은|는|을|를|과|와)(?=(?:는|도|만|의|요)?(?![가-힣])))"
-ALIAS_PARTICLE_RE = re.compile(r"P(\d+)(?!\d)" + _PARTICLE + "?")
-SQUAD_PARTICLE_RE = re.compile(r"(?<![A-Za-z0-9])([AB])(?![A-Za-z0-9])" + _PARTICLE + "?")
-# (받침 있을 때, 없을 때)
-_PARTICLE_PAIRS = {p: pair for pair in [("이", "가"), ("은", "는"), ("을", "를"), ("과", "와"), ("으로", "로")] for p in pair}
 SQUAD_RE = re.compile(r"(?<![A-Za-z0-9])([AB])(?![A-Za-z0-9])")
 # 숫자 검사에서 빼는 농구 용어. 긴 것부터 (1-3-1 을 1-3 과 1 로 쪼개지 않게)
 TERM_RE = re.compile(r"1-3-1|2-3|3-2|1:1|2:2|[23]점|[1-5]번")
@@ -100,38 +97,12 @@ class Aliases:
         return self._by_player.get(player_id)
 
     def restore(self, text: str) -> str:
-        """가명 → 실명. 바로 뒤 조사는 실명의 받침에 맞춘다 ("P3가" → "서장훈이", "P1과" → "허재와")."""
-
-        def player(m: re.Match[str]) -> str:
-            alias, particle = f"P{m.group(1)}", m.group(2)
-            name = self._name.get(alias)
-            if name is None:
-                return m.group(0)
-            return name + (josa(name, particle) if particle else "")
-
-        def squad(m: re.Match[str]) -> str:
-            name = self._name.get(m.group(1))
-            if name is None:
-                return m.group(0)
-            return name + (josa(name, m.group(2)) if m.group(2) else "")
-
-        text = ALIAS_PARTICLE_RE.sub(player, text)
-        return SQUAD_PARTICLE_RE.sub(squad, text)
+        """가명 → 실명. 바로 뒤 조사는 실명의 받침에 맞춘다 ("P3가" → "서장훈이", "A와" → "블랙과")."""
+        text = substitute(text, r"(P\d+)(?!\d)", self._name.get)
+        return substitute(text, r"(?<![A-Za-z0-9])([AB])(?![A-Za-z0-9])", self._name.get)
 
     def player_id_of(self, alias: str) -> int | None:
         return next((pid for pid, a in self._by_player.items() if a == alias), None)
-
-
-def josa(word: str, particle: str) -> str:
-    """이/가 · 은/는 · 을/를 · 과/와 · 으로/로 를 word 의 마지막 글자 받침에 맞춘다. 한글로 끝나지 않으면 그대로."""
-    pair = _PARTICLE_PAIRS.get(particle)
-    last = word[-1:] if word else ""
-    if pair is None or not ("가" <= last <= "힣"):
-        return particle
-    final = (ord(last) - 0xAC00) % 28  # 0 = 받침 없음, 8 = ㄹ
-    if pair[0] == "으로":
-        return "로" if final in (0, 8) else "으로"
-    return pair[0] if final else pair[1]
 
 
 # ---------------------------------------------------------------------------

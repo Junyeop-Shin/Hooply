@@ -36,6 +36,7 @@ class PlayLineup(BaseModel):
     defense: Defense
     fit: float = Field(description="적합도 0~100: 전술판 5명의 역할 점수 평균")
     manual: bool = Field(description="매니저가 자리를 바꿔 저장한 배치면 true, 추천 배치면 false")
+    counter: str = Field(default="", description="막혔을 때의 대안 — 그날 배치의 선수 이름으로 바꾼 문장")
     slots: list[SlotLineup]
 
 
