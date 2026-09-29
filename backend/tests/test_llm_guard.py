@@ -53,7 +53,7 @@ def fake_model(monkeypatch):
             raise r
         return r
 
-    monkeypatch.setattr(llm_model, "structured", lambda schema: RunnableLambda(respond))
+    monkeypatch.setattr(llm_model, "structured", lambda schema, **_kw: RunnableLambda(respond))
     return state
 
 
@@ -257,6 +257,10 @@ def test_model_factory_builds_langchain_model_from_settings(monkeypatch):
     assert m.temperature == llm_model.TEMPERATURE and m.max_retries == 0 and m.timeout >= llm_model.MIN_PROVIDER_DEADLINE
     assert llm_model.structured(Explain) is not None
     assert llm_model.provider_of("openai:gpt-5-mini") == "openai"
+    monkeypatch.setattr(get_settings(), "llm_fallback_model", "google_genai:gemini-flash-latest")
+    assert llm_model.chat_model(fallback=True).model == "gemini-flash-latest"
+    monkeypatch.setattr(get_settings(), "llm_fallback_model", "")
+    assert llm_model.model_name(fallback=True) == get_settings().llm_model  # 비우면 같은 모델
     llm_model._build.cache_clear()
 
 
@@ -287,9 +291,16 @@ def test_transient_error_is_retried_once(db, fake_model, monkeypatch):
             raise r
         return r
 
-    monkeypatch.setattr(llm_model, "structured", lambda schema: RunnableLambda(respond))
+    asked = []
+
+    def structured(schema, fallback=False):
+        asked.append(fallback)
+        return RunnableLambda(respond)
+
+    monkeypatch.setattr(llm_model, "structured", structured)
     out = g.run(db, _call(), user_id=1)
     assert out.fallback is False and out.output["summary"] == "허재 좋아요."
+    assert asked == [False, True]  # 두 번째 시도는 예비 모델
 
 
 def test_transient_fallback_retried_sooner(db, fake_model):

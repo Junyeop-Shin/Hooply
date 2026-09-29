@@ -22,7 +22,7 @@ def fake(monkeypatch):
     """체인에 따라 고정 결과를 돌려준다. sent 에 보낸 human 메시지를 모은다."""
     state = {"calls": {"A": 0, "B": 0}, "sent": [], "b_text": "{p}는 {pos} 자리예요. 팀에 가드 {g}명이 있어 든든해요."}
 
-    def structured(schema):
+    def structured(schema, **_kw):
         def respond(messages):
             human = dict(messages)["human"]
             state["sent"].append(human)

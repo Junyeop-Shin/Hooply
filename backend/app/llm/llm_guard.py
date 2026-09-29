@@ -289,10 +289,10 @@ def _error_reason(e: Exception) -> str:
     return (f"error:{type(e).__name__}" + (f":{code}" if code else ""))[:40]
 
 
-def _store(db: Session, call: ChainCall, key: str, out: GuardOutcome) -> None:
+def _store(db: Session, call: ChainCall, key: str, out: GuardOutcome, model: str) -> None:
     values = {
         "chain": call.chain, "cache_key": key, "output": out.output, "fallback": out.fallback,
-        "fail_reason": out.fail_reason, "latency_ms": out.latency_ms, "model": llm_model.model_name()[:60],
+        "fail_reason": out.fail_reason, "latency_ms": out.latency_ms, "model": model[:60],
         "created_at": datetime.now(UTC),
     }
     stmt = insert(LlmResult).values(**values)
@@ -319,7 +319,8 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
     reason: str | None = None
     detail: str | None = None
     data: dict[str, Any] | None = None
-    for attempt in range(2):  # 일시적 오류면 남은 시간 안에서 한 번 더
+    used_model = llm_model.model_name()
+    for attempt in range(2):  # 일시적 오류면 남은 시간 안에서 한 번 더 (두 번째는 예비 모델)
         try:
             raw = _pool.submit(runner.invoke, call.messages).result(timeout=max(deadline - time.monotonic(), 0.01))
             data, reason = _validate(call, raw)
@@ -335,6 +336,8 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
             log.warning("llm chain=%s attempt=%d error=%s %s", call.chain, attempt + 1, type(e).__name__, detail)
             if attempt == 0 and is_transient(reason) and deadline - time.monotonic() > RETRY_WAIT + 2:
                 time.sleep(RETRY_WAIT)
+                runner = llm_model.structured(call.schema, fallback=True) or runner
+                used_model = llm_model.model_name(fallback=True)
                 continue
             break
     latency = int((time.monotonic() - t0) * 1000)
@@ -347,5 +350,5 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
         output={**out.output, "_error": detail}, fallback=True, fail_reason=reason, latency_ms=latency,
     )  # 공급자 오류 문구는 DB 에만 (원인 확인용). 응답에는 싣지 않는다
     log.info("llm chain=%s fallback=%s reason=%s latency_ms=%d", call.chain, out.fallback, out.fail_reason, latency)
-    _store(db, call, key, stored)
+    _store(db, call, key, stored, used_model)
     return out

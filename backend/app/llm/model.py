@@ -29,12 +29,16 @@ def provider_of(model: str) -> str:
     return model.split(":", 1)[0] if ":" in model else ""
 
 
-def available() -> bool:
+def _usable(model: str) -> bool:
     s = get_settings()
-    if not s.llm_enabled or not s.llm_model:
+    if not s.llm_enabled or not model:
         return False
-    env = PROVIDER_KEY_ENV.get(provider_of(s.llm_model))
+    env = PROVIDER_KEY_ENV.get(provider_of(model))
     return bool(s.llm_api_key or (env and os.environ.get(env)))
+
+
+def available() -> bool:
+    return _usable(get_settings().llm_model)
 
 
 @lru_cache(maxsize=4)
@@ -47,18 +51,21 @@ def _build(model: str, api_key: str, timeout: float) -> BaseChatModel:
     return init_chat_model(model, **kwargs)
 
 
-def chat_model() -> BaseChatModel | None:
-    if not available():
-        return None
+def chat_model(*, fallback: bool = False) -> BaseChatModel | None:
+    """기본 모델, 또는 fallback=True 면 예비 모델(LLM_FALLBACK_MODEL, 비었으면 기본 모델)."""
     s = get_settings()
-    return _build(s.llm_model, s.llm_api_key, max(s.llm_timeout_seconds, MIN_PROVIDER_DEADLINE))
+    name = model_name(fallback=fallback)
+    if not _usable(name):
+        return None
+    return _build(name, s.llm_api_key, max(s.llm_timeout_seconds, MIN_PROVIDER_DEADLINE))
 
 
-def structured(schema: type[BaseModel]) -> Runnable | None:
+def structured(schema: type[BaseModel], *, fallback: bool = False) -> Runnable | None:
     """스키마대로 답하는 Runnable. 모델을 쓸 수 없으면 None. 테스트는 이 함수를 가짜 Runnable 로 바꿔 끼운다."""
-    m = chat_model()
+    m = chat_model(fallback=fallback)
     return m.with_structured_output(schema) if m is not None else None
 
 
-def model_name() -> str:
-    return get_settings().llm_model
+def model_name(*, fallback: bool = False) -> str:
+    s = get_settings()
+    return (s.llm_fallback_model or s.llm_model) if fallback else s.llm_model
