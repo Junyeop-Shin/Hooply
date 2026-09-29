@@ -139,7 +139,7 @@ export function RoleBadge({ role }: { role: TeamRole }) {
 }
 
 /** 실력 등급 원형 배지. 등급 없음 = 데이터 부족 (5.4절 예외 시나리오) */
-export function GradeDot({ grade }: { grade: SkillGrade | null }) {
+export function GradeDot({ grade, small }: { grade: SkillGrade | null; small?: boolean }) {
   const tone: Record<SkillGrade, string> = {
     A: 'bg-brand text-on-brand',
     B: 'bg-court-300 text-navy-900',  // 밝은 주황 칩 — 두 모드 모두 글자가 진하다
@@ -151,7 +151,8 @@ export function GradeDot({ grade }: { grade: SkillGrade | null }) {
     <span
       title={grade ? `실력 등급 ${grade}` : '데이터 부족'}
       className={cx(
-        'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-bold',
+        'inline-flex shrink-0 items-center justify-center rounded-full font-bold',
+        small ? 'size-5 text-[10px]' : 'size-8 text-sm',
         grade ? tone[grade] : 'border border-dashed border-line-strong text-faint',
       )}
     >

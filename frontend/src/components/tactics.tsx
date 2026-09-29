@@ -16,6 +16,7 @@ import type { AiTacticItem, EventView, Play, PlayLineup, SlotLineup, SquadRecomm
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
 import { Thinking, TypedSections } from './ai-cards'
 import { FirstTimeTip } from './tutorial'
+import { squadStyle } from '../lib/squads'
 import { Badge, EmptyState, SectionTitle, Spinner } from './ui'
 
 export const CIRCLED = ['①', '②', '③', '④', '⑤']
@@ -143,7 +144,7 @@ function PresetList({ items, starred, canStar, onStar, onOpen }: { items: Play[]
 function SquadLabel({ no, name, count, mine }: { no: number; name: string; count: number; mine: boolean }) {
   return (
     <div className="flex items-center gap-2 px-1 pt-1">
-      <span className={`size-3 rounded-full ${no === 1 ? 'bg-team-black' : 'border border-line-strong bg-team-white'}`} aria-hidden="true" />
+      <span className={`size-3 rounded-full ${squadStyle(no).dot}`} aria-hidden="true" />
       <span className="text-sm font-bold text-ink">{name}</span>
       <span className="text-xs text-muted">{count}명</span>
       {mine && <span className="text-xs font-semibold text-brand-ink">내 팀</span>}
@@ -325,7 +326,7 @@ function LineupCard({ it, rank, open: initial, to, manager, ai }: { it: PlayLine
   )
 }
 
-/** 일정 화면(배정 확정 뒤)의 추천 전술 — 팀 배정 결과 바로 아래. 팀원은 내 팀 것만, 매니저는 두 팀 모두 */
+/** 일정 화면(배정 확정 뒤)의 추천 전술 — 팀 배정 결과 바로 아래. 팀원은 내 팀 것만, 매니저는 모든 팀 (2팀 · 3팀) */
 export function EventTactics({ event }: { event: EventView }) {
   const [zone, setZone] = useState(false)
   const rec = useRecommendation(event.id, zone)

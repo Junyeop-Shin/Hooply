@@ -26,7 +26,7 @@ export interface SquadImageInput {
 }
 
 export interface MemberRow { name: string; position: string; guest: boolean }
-export interface SquadColumn { title: string; count: number; dark: boolean; x: number; width: number; rows: MemberRow[] }
+export interface SquadColumn { title: string; count: number; dark: boolean; tone: 'black' | 'white' | 'red'; x: number; width: number; rows: MemberRow[] }
 export interface SquadImageLayout {
   width: number
   height: number
@@ -54,7 +54,8 @@ export function layoutSquadImage(input: SquadImageInput): SquadImageLayout {
   const columns: SquadColumn[] = squads.map((s, i) => ({
     title: `팀 ${s.squad_name}`,
     count: s.members.length,
-    dark: s.squad_no === 1,
+    dark: s.squad_no !== 2,  // 블랙 · 레드는 어두운 카드
+    tone: s.squad_no === 1 ? 'black' : s.squad_no === 3 ? 'red' : 'white',
     x: PAD + i * (colWidth + GAP),
     width: colWidth,
     rows: memberRows(s),
@@ -77,6 +78,7 @@ const C = {
   bg: '#14213d', headerInk: '#ffffff', headerSub: '#c2cde0', accent: '#f26b1d',
   black: '#111827', blackInk: '#ffffff', blackSub: '#d6d3d1',
   white: '#fafaf9', whiteInk: '#0f1b2d', whiteSub: '#78716c', whiteLine: '#e7e5e4',
+  red: '#b91c1c', redSub: '#fecaca',
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -117,8 +119,8 @@ export function drawSquadImage(ctx: CanvasRenderingContext2D, L: SquadImageLayou
 
   for (const col of L.columns) {
     const ink = col.dark ? C.blackInk : C.whiteInk
-    const sub = col.dark ? C.blackSub : C.whiteSub
-    ctx.fillStyle = col.dark ? C.black : C.white
+    const sub = col.tone === 'red' ? C.redSub : col.dark ? C.blackSub : C.whiteSub
+    ctx.fillStyle = col.tone === 'red' ? C.red : col.dark ? C.black : C.white
     roundRect(ctx, col.x, L.cardTop, col.width, L.cardHeight, 28); ctx.fill()
     if (!col.dark) { ctx.strokeStyle = C.whiteLine; ctx.lineWidth = 2; ctx.stroke() }
 

@@ -87,6 +87,9 @@
   --color-team-white: #fafaf9;
   --color-team-white-ink: #0f1b2d;
   --color-team-white-sub: #78716c;
+  --color-team-red: #b91c1c;       /* 3팀일 때 세 번째 팀 — 늘 진한 빨강에 흰 글자 */
+  --color-team-red-ink: #ffffff;
+  --color-team-red-sub: #fecaca;
 
   --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
 }
@@ -135,6 +138,7 @@
 
     --color-team-black: #0a0f18;
     --color-team-white: #dcd9d4;   /* 순백은 눈이 부셔 한 단계 낮춘다. 글자는 그대로 진하다 */
+    --color-team-red: #991b1b;
   }
 }
 

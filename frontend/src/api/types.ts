@@ -385,10 +385,13 @@ export interface LineupIn {
   position?: Position | null
 }
 
+/** 쿼터 한 건. black/white 는 두 칸(첫째 · 둘째)이고, 그 칸에 선 팀은 home/away_squad_no — 2팀이면 늘 1 · 2 */
 export interface QuarterIn {
   quarter_no: number
   black_score: number
   white_score: number
+  home_squad_no: number
+  away_squad_no: number
   duration_min: number
   lineups: LineupIn[]
 }
@@ -407,9 +410,14 @@ export interface QuarterView {
   quarter_no: number
   black_score: number
   white_score: number
+  home_squad_no: number
+  away_squad_no: number
   duration_min: number
   lineups: LineupView[]
 }
+
+/** 팀별 기록 — 3팀이면 칸 합계 대신 이것을 본다 */
+export interface SquadTally { squad_no: number; squad_name: string; quarters: number; points_for: number; points_against: number; wins: number; losses: number }
 
 export interface QuarterSummary {
   quarter_count: number
@@ -417,7 +425,9 @@ export interface QuarterSummary {
   white_total: number
   black_wins: number
   white_wins: number
-  per_player: { player_id: number; display_name: string; side: Side; quarters: number }[]
+  per_player: { player_id: number; display_name: string; side: Side; squad_no: number; quarters: number }[]
+  team_count: number
+  squads: SquadTally[]
 }
 
 export interface QuarterListView {

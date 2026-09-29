@@ -21,9 +21,10 @@ import { TacticComments } from '../components/tactic-comments'
 import { CIRCLED, SlotPeople, TacticExplain, useAiTactics } from '../components/tactics'
 import { Alert, Badge, Button, SectionTitle, Spinner } from '../components/ui'
 import { DEFENSE_LABEL, ROLE_LABEL, renderCounter } from '../lib/tactics'
+import { squadStyle, squadTone } from '../lib/squads'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
-const toneOf = (squadNo: number): BoardTone => (squadNo === 1 ? 'black' : 'white')
+const toneOf = (squadNo: number): BoardTone => squadTone(squadNo)
 
 export function TacticBoardPage() {
   const { key = '' } = useParams()
@@ -174,7 +175,7 @@ function EventBoard({ play, view, eventId, editPath }: { play: Play; view: Event
   const context = lineup && (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
       <span className="inline-flex items-center gap-1.5 font-semibold text-ink-2">
-        <span className={`size-2.5 rounded-full ${sq.squad_no === 1 ? 'bg-team-black' : 'border border-line-strong bg-team-white'}`} aria-hidden="true" />
+        <span className={`size-2.5 rounded-full ${squadStyle(sq.squad_no).dot}`} aria-hidden="true" />
         {sq.squad_name}{view.my_squad_no === sq.squad_no ? ' · 내 팀' : ''}
       </span>
       <span>적합도 <b className="text-brand-ink">{Math.round(lineup.fit)}</b></span>

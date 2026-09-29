@@ -31,8 +31,9 @@ export const assignmentsApi = {
   move: (candidateId: number, playerId: number, toSquadNo: number) =>
     api<CandidateView>(`/assignments/candidates/${candidateId}`, { method: 'PATCH', body: { moves: [{ player_id: playerId, to_squad_no: toSquadNo }] } }),
   /** 그룹 교환: a 쪽(같은 팀)은 상대 팀으로, b 쪽은 a 팀으로. 한쪽이 비면 일방 이동. 묶음은 서버가 통째로 움직인다 */
-  exchange: (candidateId: number, aIds: number[], bIds: number[]) =>
-    api<CandidateView>(`/assignments/candidates/${candidateId}`, { method: 'PATCH', body: { exchanges: [{ a_player_ids: aIds, b_player_ids: bIds }] } }),
+  /** a 는 b 의 팀으로, b 는 a 의 팀으로. 한쪽만 보내면 일방 이동 — 3팀이면 toSquadNo 로 옮길 팀을 준다 */
+  exchange: (candidateId: number, aIds: number[], bIds: number[], toSquadNo?: number) =>
+    api<CandidateView>(`/assignments/candidates/${candidateId}`, { method: 'PATCH', body: { exchanges: [{ a_player_ids: aIds, b_player_ids: bIds, to_squad_no: toSquadNo ?? null }] } }),
   reset: (candidateId: number) => api<CandidateView>(`/assignments/candidates/${candidateId}:reset`, { method: 'POST' }),
   adopt: (candidateId: number) => api<CandidateView>(`/assignments/candidates/${candidateId}:adopt`, { method: 'POST' }),
   adopted: (eventId: number) => api<AdoptedAssignment>(`/events/${eventId}/assignment/adopted`),

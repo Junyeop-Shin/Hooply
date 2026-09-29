@@ -3197,7 +3197,7 @@ components:
       properties:
         team_count:
           type: integer
-          maximum: 4.0
+          maximum: 3.0
           minimum: 2.0
         strategies:
           items:
@@ -3790,6 +3790,10 @@ components:
           items:
             type: integer
           type: array
+        to_squad_no:
+          type: integer
+          minimum: 1.0
+          nullable: true
       type: object
     ForgotPasswordRequest:
       properties:
@@ -4608,6 +4612,8 @@ components:
           type: string
         side:
           $ref: '#/components/schemas/Side'
+        squad_no:
+          type: integer
         quarters:
           type: integer
       type: object
@@ -4864,6 +4870,14 @@ components:
           type: integer
           maximum: 200.0
           minimum: 0.0
+        home_squad_no:
+          type: integer
+          maximum: 3.0
+          minimum: 1.0
+        away_squad_no:
+          type: integer
+          maximum: 3.0
+          minimum: 1.0
         duration_min:
           type: integer
           maximum: 10.0
@@ -4946,6 +4960,12 @@ components:
           items:
             $ref: '#/components/schemas/PlayerQuarterCount'
           type: array
+        team_count:
+          type: integer
+        squads:
+          items:
+            $ref: '#/components/schemas/SquadTally'
+          type: array
       type: object
       required:
       - quarter_count
@@ -4964,6 +4984,16 @@ components:
           type: integer
           maximum: 200.0
           minimum: 0.0
+          nullable: true
+        home_squad_no:
+          type: integer
+          maximum: 3.0
+          minimum: 1.0
+          nullable: true
+        away_squad_no:
+          type: integer
+          maximum: 3.0
+          minimum: 1.0
           nullable: true
         duration_min:
           type: integer
@@ -4988,6 +5018,10 @@ components:
           type: integer
         white_score:
           type: integer
+        home_squad_no:
+          type: integer
+        away_squad_no:
+          type: integer
         duration_min:
           type: integer
         lineups:
@@ -5000,6 +5034,8 @@ components:
       - quarter_no
       - black_score
       - white_score
+      - home_squad_no
+      - away_squad_no
       - duration_min
       - lineups
     RankInfo:
@@ -5385,6 +5421,31 @@ components:
       - squad_name
       - member_count
       - items
+    SquadTally:
+      properties:
+        squad_no:
+          type: integer
+        squad_name:
+          type: string
+        quarters:
+          type: integer
+        points_for:
+          type: integer
+        points_against:
+          type: integer
+        wins:
+          type: integer
+        losses:
+          type: integer
+      type: object
+      required:
+      - squad_no
+      - squad_name
+      - quarters
+      - points_for
+      - points_against
+      - wins
+      - losses
     SquadView:
       properties:
         squad_no:

@@ -4,6 +4,7 @@
  * 0명이어도 제출 가능. 이유 칩은 선택한 사람 아래에 인라인.
  */
 import { useState } from 'react'
+import { squadStyle } from '../lib/squads'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
@@ -191,10 +192,9 @@ export function VotePage() {
 
 function SquadBadge({ c }: { c: VoteCandidate }) {
   if (c.squad_no === null) return c.player.kind === 'GUEST' ? <Badge>게스트</Badge> : null
-  const black = c.squad_no === 1
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${black ? 'bg-team-black text-team-black-ink' : 'border border-line-strong bg-surface text-ink'}`}>
-      {c.squad_name ?? (black ? '블랙' : '화이트')}
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${squadStyle(c.squad_no).card}`}>
+      {c.squad_name ?? ['블랙', '화이트', '레드'][c.squad_no - 1]}
     </span>
   )
 }

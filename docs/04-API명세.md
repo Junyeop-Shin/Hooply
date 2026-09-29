@@ -139,12 +139,12 @@
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
 | GET | `/events/{event_id}/assignment/suggestions` | 게스트 묶기 제안 목록 | 200 · 403 |
-| POST | `/events/{event_id}/assignments` | 팀 배정 실행 | 201 |
+| POST | `/events/{event_id}/assignments` | 팀 배정 실행 — `team_count` 2(완전 탐색) · 3(지역 탐색, 15명 이상) | 201 |
 | GET | `/events/{event_id}/assignments` | 배정 실행 이력 | 200 |
 | POST | `/events/{event_id}/assignments:validate` | 배정 제약 실현가능성 검사 | 200 |
 | GET | `/events/{event_id}/assignments/last-constraints` | 직전 회차 제약 불러오기 | 200 · 404 |
 | GET | `/assignments/runs/{run_id}` | 배정 실행 결과 조회 | 200 |
-| PATCH | `/assignments/candidates/{candidate_id}` | 후보안 선수 교체 | 200 · 409 |
+| PATCH | `/assignments/candidates/{candidate_id}` | 후보안 선수 교체 — 3팀 일방 이동은 `exchanges[].to_squad_no` 또는 `moves[].to_squad_no` | 200 · 409 · 422 |
 | POST | `/assignments/candidates/{candidate_id}:reset` | 수동 수정 초기화 | 200 · 409 |
 | POST | `/assignments/candidates/{candidate_id}:adopt` | 후보안 확정 | 200 · 409 |
 | GET | `/events/{event_id}/assignment/adopted` | 확정된 배정 결과 | 200 · 404 |
@@ -156,8 +156,8 @@
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
 | POST | `/events/{event_id}/quarters` | 쿼터 1건 추가 | 201 · 400 · 409 |
-| PUT | `/events/{event_id}/quarters` | 쿼터 일괄 저장 | 200 · 400 |
-| GET | `/events/{event_id}/quarters` | 쿼터 기록 조회 | 200 |
+| PUT | `/events/{event_id}/quarters` | 쿼터 일괄 저장 — 쿼터마다 `home_squad_no` · `away_squad_no`(3팀 대진, 기본 1 · 2) | 200 · 400 |
+| GET | `/events/{event_id}/quarters` | 쿼터 기록 조회 — 요약에 `team_count` · 팀별 `squads[]{quarters, points_for, points_against, wins, losses}` | 200 |
 | PATCH | `/quarters/{quarter_id}` | 쿼터 수정 | 200 · 400 · 403 |
 | DELETE | `/quarters/{quarter_id}` | 쿼터 삭제 (마진 롤백) | 204 · 403 |
 

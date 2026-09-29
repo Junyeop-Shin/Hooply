@@ -1,7 +1,8 @@
 /**
  * S-12 배정 실행 · S-13 배정 결과(매니저) · S-14 배정 결과(플레이어) — F5 · F6 · F7 · F15.
  *
- * S-12: 대기 칸(참석자 칩) + 블랙/화이트 팀 칸. 칩을 길게(여기서는 탭) 다중 선택 → 같은 팀으로 묶기 / 갈라놓기 /
+ * 3팀(v1.7): 참석이 15명을 넘으면 "3팀으로 나누기" 체크 → 블랙 · 화이트 · 레드 세 칸. 결과에서는 한 명을 고른 뒤 옮길 팀을 고른다.
+ * S-12: 대기 칸(참석자 칩) + 블랙/화이트(/레드) 팀 칸. 칩을 길게(여기서는 탭) 다중 선택 → 같은 팀으로 묶기 / 갈라놓기 /
  *       블랙·화이트에 사전 배치. 제약을 바꿀 때마다 프리플라이트(validate)로 실행 버튼을 잠근다 (FR-20).
  *       게스트의 "묶기 제안"은 배지로 보이고 승인하면 묶음이 된다 (guest-feature-spec 6절).
  * S-13: 전략 3탭, 팀 카드(평균·편차·포지션), 설명, 두 선수 탭해서 교체, 확정.
@@ -23,9 +24,17 @@ import { teamsApi } from '../api/teams'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
 import { AiExplainCard, AiMessageCard } from '../components/ai-cards'
+import { THREE_TEAM_FROM, squadStyle } from '../lib/squads'
+import { josa } from '../lib/josa'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
 const STRATEGY_LABEL: Record<Strategy, string> = { SKILL: '실력 우선', CHEMISTRY: '친화도 우선', BALANCED: '종합' }
+const TEAM_NAMES = ['블랙', '화이트', '레드']
+const teamName = (no: number) => TEAM_NAMES[no - 1] ?? `${no}팀`
+/** 참석 N명을 T팀으로 가장 고르게: 21·3 → "7·7·7" */
+const splitText = (n: number, t: number) => Array.from({ length: t }, (_, i) => Math.floor(n / t) + (i < n % t ? 1 : 0)).join('·')
+/** "블랙으로" · "화이트로" · "레드로" — 받침에 맞춘다 */
+const toTeam = (no: number) => `${teamName(no)}${josa(teamName(no), '으로')}`
 const LOCK_COLORS = ['border-court-500 ring-brand-line', 'border-navy-500 ring-navy-200', 'border-emerald-500 ring-emerald-200', 'border-amber-500 ring-amber-200']
 
 /* ============================ S-12 배정 실행 ============================ */
@@ -39,17 +48,23 @@ export function AssignPage() {
   const [selected, setSelected] = useState<number[]>([])
   const [locks, setLocks] = useState<number[][]>([])
   const [seps, setSeps] = useState<number[][]>([])
-  const [pins, setPins] = useState<Record<number, 1 | 2>>({})
+  const [pins, setPins] = useState<Record<number, number>>({})
+  const [threeChosen, setThreeChosen] = useState(false)
   const [dismissed, setDismissed] = useState<number[]>([])
   const [msg, setMsg] = useState<string | null>(null)
 
   const attendees: AttendanceView[] = useMemo(() => att.data?.items.filter((a) => a.status === 'ATTEND') ?? [], [att.data])
   const byId = useMemo(() => new Map(attendees.map((a) => [a.player.id, a.player])), [attendees])
+  // 15명이 넘으면 3팀으로 나눌지 묻는다. 인원이 줄면 다시 2팀
+  const canThree = attendees.length >= THREE_TEAM_FROM
+  const teams: 2 | 3 = canThree && threeChosen ? 3 : 2
+  const squadNos = teams === 3 ? [1, 2, 3] : [1, 2]
+  const activePins = useMemo(() => Object.fromEntries(Object.entries(pins).filter(([, sq]) => sq <= teams)) as Record<number, number>, [pins, teams])
   const body = useMemo(() => ({
-    team_count: 2,
+    team_count: teams,
     strategies: ['SKILL', 'CHEMISTRY', 'BALANCED'] as Strategy[],
-    constraints: { lock_groups: locks, separate_groups: seps, pins: Object.entries(pins).map(([pid, sq]) => ({ player_id: Number(pid), squad_no: sq })) } as ConstraintSet,
-  }), [locks, seps, pins])
+    constraints: { lock_groups: locks, separate_groups: seps, pins: Object.entries(activePins).map(([pid, sq]) => ({ player_id: Number(pid), squad_no: sq })) } as ConstraintSet,
+  }), [locks, seps, activePins, teams])
 
   const validate = useQuery({ queryKey: ['events', id, 'validate', body], queryFn: () => assignmentsApi.validate(id, body), enabled: attendees.length > 0 })
   const run = useMutation({
@@ -69,7 +84,7 @@ export function AssignPage() {
       const ids = new Set(byId.keys())
       setLocks(c.lock_groups.map((g) => g.filter((p) => ids.has(p))).filter((g) => g.length >= 2))
       setSeps(c.separate_groups.map((g) => g.filter((p) => ids.has(p))).filter((g) => g.length >= 2))
-      setPins(Object.fromEntries(c.pins.filter((p) => ids.has(p.player_id)).map((p) => [p.player_id, p.squad_no as 1 | 2])))
+      setPins(Object.fromEntries(c.pins.filter((p) => ids.has(p.player_id)).map((p) => [p.player_id, p.squad_no])))
       setMsg('지난 일정의 조건을 불러왔어요. 이번에 불참인 사람은 뺐어요.')
     },
     onError: (e) => setMsg(errMsg(e, '지난 일정의 배정 기록이 없어요.')),
@@ -82,14 +97,15 @@ export function AssignPage() {
   const toggle = (pid: number) => setSelected((s) => (s.includes(pid) ? s.filter((x) => x !== pid) : [...s, pid]))
   const addLock = (ids: number[]) => { setLocks((l) => mergeLock(l, ids)); setSelected([]) }  // 이미 묶인 사람이 있으면 그 묶음에 합친다
   const addSep = (ids: number[]) => { setSeps((l) => [...l, ids.slice(-2)]); setSelected([]) }  // 3명 이상이면 가장 오래 전에 고른 사람부터 뺀다
-  const pinTo = (sq: 1 | 2) => { setPins((p) => ({ ...p, ...Object.fromEntries(selected.map((pid) => [pid, sq])) })); setSelected([]) }
+  const pinTo = (sq: number) => { setPins((p) => ({ ...p, ...Object.fromEntries(selected.map((pid) => [pid, sq])) })); setSelected([]) }
   const unpin = (pid: number) => setPins((p) => { const n = { ...p }; delete n[pid]; return n })
-  const flipPin = (pid: number) => setPins((p) => ({ ...p, [pid]: p[pid] === 1 ? 2 : 1 }))
+  const nextTeam = (sq: number) => (sq % teams) + 1
+  const flipPin = (pid: number) => setPins((p) => ({ ...p, [pid]: nextTeam(p[pid]) }))
 
   if (ev.isLoading || att.isLoading) return <Screen><TopBar title="팀 배정" back={`/events/${id}`} /><Spinner /></Screen>
   if (!ev.data) return <Screen><TopBar title="팀 배정" back={`/events/${id}`} /><Content><Alert>일정을 불러오지 못했어요.</Alert></Content></Screen>
   const GRADE_ORDER: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4 }
-  const pool = attendees.filter((a) => !pins[a.player.id]).sort((x, y) => {  // 등급순 — 게스트도 회원과 같이 섞어 정렬
+  const pool = attendees.filter((a) => !activePins[a.player.id]).sort((x, y) => {  // 등급순 — 게스트도 회원과 같이 섞어 정렬
     const gx = x.player.skill_grade ? GRADE_ORDER[x.player.skill_grade] : 9, gy = y.player.skill_grade ? GRADE_ORDER[y.player.skill_grade] : 9
     return gx - gy || x.player.display_name.localeCompare(y.player.display_name)
   })
@@ -115,6 +131,16 @@ export function AssignPage() {
           </Card>
         )}
         {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 짠 배정안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
+
+        {canThree && (
+          <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-line bg-surface p-4">
+            <input type="checkbox" checked={teams === 3} onChange={(e) => setThreeChosen(e.target.checked)} className="size-5 shrink-0 accent-brand" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-ink">3팀으로 나누기</span>
+              <span className="block text-xs text-muted">참석 {attendees.length}명을 {splitText(attendees.length, 3)}명씩 블랙 · 화이트 · 레드로 나눠요. 경기 기록은 쿼터마다 뛴 두 팀을 골라요.</span>
+            </span>
+          </label>
+        )}
 
         {suggestions.length > 0 && (
           <section>
@@ -156,7 +182,7 @@ export function AssignPage() {
               )}
             </span>
           }>
-            대기 칸 · 참석자 {attendees.length}명 {pins && Object.keys(pins).length > 0 && `(사전 배치 ${Object.keys(pins).length}명 제외)`}
+            대기 칸 · 참석자 {attendees.length}명 {Object.keys(activePins).length > 0 && `(사전 배치 ${Object.keys(activePins).length}명 제외)`}
           </SectionTitle>
           <Card>
             <div className="flex flex-wrap gap-2">
@@ -189,8 +215,9 @@ export function AssignPage() {
             )}
             {selected.length >= 1 && (
               <div className="mt-2 flex gap-2">
-                <button onClick={() => pinTo(1)} className="min-h-10 flex-1 rounded-xl bg-team-black text-sm font-semibold text-team-black-ink">블랙에 배치</button>
-                <button onClick={() => pinTo(2)} className="min-h-10 flex-1 rounded-xl border border-line-strong bg-team-white text-sm font-semibold text-team-white-ink">화이트에 배치</button>
+                {squadNos.map((sq) => (
+                  <button key={sq} onClick={() => pinTo(sq)} className={`min-h-10 flex-1 rounded-xl border text-sm font-semibold ${squadStyle(sq).card}`}>{teamName(sq)}에 배치</button>
+                ))}
               </div>
             )}
             {(locks.length > 0 || seps.length > 0) && (
@@ -202,20 +229,21 @@ export function AssignPage() {
           </Card>
         </section>
 
-        <div className="grid grid-cols-2 gap-2">
-          {([1, 2] as const).map((sq) => {
-            const list = attendees.filter((a) => pins[a.player.id] === sq)
-            const dark = sq === 1
+        <div className={`grid gap-2 ${teams === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          {squadNos.map((sq) => {
+            const list = attendees.filter((a) => activePins[a.player.id] === sq)
+            const st = squadStyle(sq)
+            const narrow = teams === 3
             return (
-              <div key={sq} className={`min-h-24 rounded-2xl border-2 p-3 ${dark ? 'border-team-black bg-team-black text-team-black-ink' : 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]'}`}>
-                <p className="text-sm font-bold">{dark ? '블랙' : '화이트'} 사전 배치 ({list.length}명)</p>
-                {list.length === 0 ? <p className={`mt-3 text-center text-xs ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>이름을 고른 뒤 배치하세요</p> : (
-                  <ul className="mt-2 space-y-1 text-sm">
+              <div key={sq} className={`min-h-24 rounded-2xl border-2 ${narrow ? 'p-2' : 'p-3'} ${st.card}`}>
+                <p className={`${narrow ? 'text-xs' : 'text-sm'} font-bold`}>{teamName(sq)} {narrow ? '' : '사전 배치 '}({list.length}명)</p>
+                {list.length === 0 ? <p className={`mt-3 text-center text-[11px] ${st.sub}`}>{narrow ? '고른 뒤 배치' : '이름을 고른 뒤 배치하세요'}</p> : (
+                  <ul className={`mt-2 space-y-1 ${narrow ? 'text-xs' : 'text-sm'}`}>
                     {list.map((a) => (
-                      <li key={a.player.id} className="flex items-center justify-between gap-2">
-                        <span className="truncate">{a.player.display_name}</span>
+                      <li key={a.player.id} className={narrow ? 'space-y-0.5' : 'flex items-center justify-between gap-2'}>
+                        <span className="block truncate">{a.player.display_name}</span>
                         <span className="flex shrink-0 gap-2">
-                          <button onClick={() => flipPin(a.player.id)} className="text-[11px] opacity-80">{dark ? '화이트로 →' : '← 블랙으로'}</button>
+                          <button onClick={() => flipPin(a.player.id)} className="text-[11px] opacity-80">{teams === 2 ? (sq === 1 ? '화이트로 →' : '← 블랙으로') : `${toTeam(nextTeam(sq))} →`}</button>
                           <button onClick={() => unpin(a.player.id)} className="text-[11px] opacity-60">빼기</button>
                         </span>
                       </li>
@@ -235,7 +263,7 @@ export function AssignPage() {
         )}
       </Content>
       <BottomAction>
-        <Button full loading={run.isPending} disabled={!feasible} onClick={() => run.mutate()}>3가지 배정안 만들기</Button>
+        <Button full loading={run.isPending} disabled={!feasible} onClick={() => run.mutate()}>{teams === 3 ? '3팀으로 ' : ''}3가지 배정안 만들기</Button>
       </BottomAction>
     </Screen>
   )
@@ -252,13 +280,13 @@ export function RunResultPage() {
   const qc = useQueryClient()
   const run = useQuery({ queryKey: ['runs', id], queryFn: () => assignmentsApi.getRun(id) })
   const [tab, setTab] = useState(0)
-  // a: 블랙에서 고른 사람들, b: 화이트에서 고른 사람들. 묶음은 한 명을 탭해도 그룹 전체가 들어온다
-  const [pick, setPick] = useState<{ a: number[]; b: number[] }>({ a: [], b: [] })
-  const noPick = { a: [] as number[], b: [] as number[] }
+  // 팀 번호 → 그 팀에서 고른 사람들 (많아야 두 팀). 묶음은 한 명을 탭해도 그룹 전체가 들어온다
+  const [pick, setPick] = useState<Record<number, number[]>>({})
+  const noPick: Record<number, number[]> = {}
   const [msg, setMsg] = useState<string | null>(null)
   const refresh = () => { qc.invalidateQueries({ queryKey: ['runs', id] }); qc.invalidateQueries({ queryKey: ['events'] }) }
   const exchange = useMutation({
-    mutationFn: ({ cid, a, b }: { cid: number; a: number[]; b: number[] }) => assignmentsApi.exchange(cid, a, b),
+    mutationFn: ({ cid, a, b, to }: { cid: number; a: number[]; b: number[]; to?: number }) => assignmentsApi.exchange(cid, a, b, to),
     onSuccess: () => { setPick(noPick); setMsg(null); refresh() },
     onError: (e) => setMsg(errMsg(e, '옮기지 못했어요.')),
   })
@@ -287,30 +315,34 @@ export function RunResultPage() {
   const onPick = (squadNo: number, pid: number) => {
     if (cand.is_adopted) return
     const partner = sepPartner(pid)
-    if (partner !== undefined && squadOf(partner) !== squadNo) {
-      // 갈라놓은 사람은 상대 팀의 짝과 함께 잡힌다 → 두 사람의 팀을 통째로 바꾸는 것만 가능
-      const already = pick.a.includes(pid) || pick.b.includes(pid)
-      setPick(already ? noPick : squadNo === 1 ? { a: lockMates(pid), b: lockMates(partner) } : { a: lockMates(partner), b: lockMates(pid) })
+    const partnerSq = partner !== undefined ? squadOf(partner) : undefined
+    if (partner !== undefined && partnerSq !== undefined && partnerSq !== squadNo) {
+      // 갈라놓은 사람은 다른 팀의 짝과 함께 잡힌다 → 두 사람의 팀을 통째로 바꾸는 것만 가능
+      const already = Object.values(pick).some((ids) => ids.includes(pid))
+      setPick(already ? noPick : { [squadNo]: lockMates(pid), [partnerSq]: lockMates(partner) })
       return
     }
     setPick((p) => {
-      // 상대 칸에 갈라놓은 쌍이 잡혀 있으면 풀고 새로 고른다
-      const other = squadNo === 1 ? p.b : p.a
-      const base = other.some((x) => sepPartner(x) !== undefined) ? noPick : p
-      const ids = lockMates(pid)
-      return squadNo === 1 ? { ...base, a: toggleMany(base.a, ids) } : { ...base, b: toggleMany(base.b, ids) }
+      const others = Object.entries(p).filter(([k, ids]) => Number(k) !== squadNo && ids.length)
+      // 다른 팀에 갈라놓은 쌍이 잡혀 있거나, 이미 다른 두 팀에서 골랐으면 풀고 새로 고른다
+      const reset = others.some(([, ids]) => ids.some((x) => sepPartner(x) !== undefined)) || (others.length >= 2)
+      const base = reset ? noPick : p
+      const next = { ...base, [squadNo]: toggleMany(base[squadNo] ?? [], lockMates(pid)) }
+      return Object.fromEntries(Object.entries(next).filter(([, ids]) => ids.length)) as Record<number, number[]>
     })
   }
-  const pickedSep = [...pick.a, ...pick.b].some((x) => sepPartner(x) !== undefined)
-  const hasPick = pick.a.length > 0 || pick.b.length > 0
-  const label = (ids: number[]) => (ids.length === 1 ? '1명' : `${ids.length}명`)
+  const picked = Object.entries(pick).map(([k, ids]) => [Number(k), ids] as const).filter(([, ids]) => ids.length).sort((x, y) => x[0] - y[0])
+  const pickedSep = picked.some(([, ids]) => ids.some((x) => sepPartner(x) !== undefined))
+  const hasPick = picked.length > 0
+  const three = cand.squads.length === 3
+  const label = (ids: readonly number[]) => (ids.length === 1 ? '1명' : `${ids.length}명`)
 
   return (
     <Screen>
       <TopBar title="배정 결과" back={`/events/${r.event_id}/assign`} />
       <div className="grid grid-cols-3 border-b border-line bg-surface">
         {r.candidates.map((c, i) => (
-          <button key={c.id} onClick={() => { setTab(i); setPick(noPick) }} className={`min-h-11 text-sm font-semibold ${tab === i ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
+          <button key={c.id} onClick={() => { setTab(i); setPick({}) }} className={`min-h-11 text-sm font-semibold ${tab === i ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
             {STRATEGY_LABEL[c.strategy]}{c.is_adopted ? ' ✓' : ''}
           </button>
         ))}
@@ -323,7 +355,7 @@ export function RunResultPage() {
             <span>예상 실력 차이 <b className="text-ink">{cand.metrics.skill_spread}</b>점/쿼터</span>
             <span title="실력 차이, 포지션, 같이 뛰고 싶은 사람, 게스트가 한쪽에 몰리지 않는지를 합친 점수예요">균형 점수 {cand.total_score} <span className="text-faint">(낮을수록 좋음)</span></span>
           </div>
-          <p className="mt-0.5 text-[11px] text-faint">두 팀이 붙었을 때 한 쿼터에 날 것으로 예상되는 점수 차예요. 0에 가까울수록 균형이 좋아요.</p>
+          <p className="mt-0.5 text-[11px] text-faint">{three ? '가장 강한 팀과 가장 약한 팀이 붙었을 때' : '두 팀이 붙었을 때'} 한 쿼터에 날 것으로 예상되는 점수 차예요. 0에 가까울수록 균형이 좋아요.</p>
         </div>
         {cand.metrics.manually_edited && (
           <div className="flex items-center justify-between rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn-ink">
@@ -331,27 +363,30 @@ export function RunResultPage() {
             <button className="font-semibold text-brand-ink" disabled={reset.isPending} onClick={() => confirm('수동으로 옮긴 것을 모두 되돌릴까요?') && reset.mutate(cand.id)}>수동 수정 초기화</button>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-2">
+        <div className={`grid gap-2 ${three ? 'grid-cols-3' : 'grid-cols-2'}`}>
           {cand.squads.map((s) => (
-            <SquadCard key={s.squad_no} squad={s} dark={s.squad_no === 1} picked={s.squad_no === 1 ? pick.a : pick.b} onPick={(pid) => onPick(s.squad_no, pid)} showSkill marks={marks} />
+            <SquadCard key={s.squad_no} squad={s} picked={pick[s.squad_no] ?? []} onPick={(pid) => onPick(s.squad_no, pid)} showSkill marks={marks} narrow={three} />
           ))}
         </div>
         {!cand.is_adopted && hasPick && (
           <div className="space-y-2">
-            {pick.a.length > 0 && pick.b.length === 0 && <Button variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: pick.a, b: [] })}>선택한 {label(pick.a)}을 화이트로 옮기기 →</Button>}
-            {pick.b.length > 0 && pick.a.length === 0 && <Button variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: [], b: pick.b })}>← 선택한 {label(pick.b)}을 블랙으로 옮기기</Button>}
-            {pick.a.length > 0 && pick.b.length > 0 && (
-              <Button variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: pick.a, b: pick.b })}>
-                {pickedSep ? '갈라놓은 두 사람의 팀을 서로 바꾸기 ↔' : `맞교체 ↔ (블랙 ${label(pick.a)} ↔ 화이트 ${label(pick.b)})`}
+            {picked.length === 1 && cand.squads.filter((s) => s.squad_no !== picked[0][0]).map((s) => (
+              <Button key={s.squad_no} variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: [...picked[0][1]], b: [], to: s.squad_no })}>
+                선택한 {label(picked[0][1])}을 {toTeam(s.squad_no)} 옮기기 →
+              </Button>
+            ))}
+            {picked.length === 2 && (
+              <Button variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: [...picked[0][1]], b: [...picked[1][1]] })}>
+                {pickedSep ? '갈라놓은 두 사람의 팀을 서로 바꾸기 ↔' : `맞교체 ↔ (${teamName(picked[0][0])} ${label(picked[0][1])} ↔ ${teamName(picked[1][0])} ${label(picked[1][1])})`}
               </Button>
             )}
             {pickedSep && <p className="px-1 text-center text-xs text-muted">갈라놓기로 설정된 사람은 한 명만 옮길 수 없어요. 두 사람의 팀을 통째로 바꾸는 것만 가능해요.</p>}
-            {!pickedSep && [...pick.a, ...pick.b].some((x) => marks.locked.has(x)) && <p className="px-1 text-center text-xs text-muted">묶인 사람은 그룹이 함께 선택되고 함께 움직여요.</p>}
+            {!pickedSep && picked.some(([, ids]) => ids.some((x) => marks.locked.has(x))) && <p className="px-1 text-center text-xs text-muted">묶인 사람은 그룹이 함께 선택되고 함께 움직여요.</p>}
           </div>
         )}
         {!hasPick && !cand.is_adopted && (
           <p className="px-1 text-center text-xs text-faint">
-            한 명을 탭하면 다른 팀으로 옮기고, 양 팀에서 골라 맞교체할 수 있어요. 팀에는 최소 5명이 남아야 해요.
+            {three ? '사람을 탭한 뒤 옮길 팀을 고르거나, 두 팀에서 골라 맞교체할 수 있어요.' : '한 명을 탭하면 다른 팀으로 옮기고, 양 팀에서 골라 맞교체할 수 있어요.'} 팀에는 최소 5명이 남아야 해요.
             {(marks.locked.size > 0 || marks.pinned.size > 0 || marks.sepGroup.size > 0) && <><br />묶음은 함께 움직이고, 고정은 그대로, 분리는 짝과 팀을 바꿔요.</>}
           </p>
         )}
@@ -384,14 +419,18 @@ function constraintMarks(c: ConstraintSet): Marks {
   return { locked, lockGroups, pinned, sepGroup }
 }
 
-function SquadCard({ squad, dark, picked, onPick, showSkill, highlightId, marks, title, compact }: { squad: SquadView; dark: boolean; picked?: number[]; onPick?: (pid: number) => void; showSkill?: boolean; highlightId?: number; marks?: Marks; title?: string; compact?: boolean }) {
+/** 팀 카드. narrow = 3팀을 한 줄에 셋 놓을 때 — 글자를 줄이고 표시를 한 글자로 */
+function SquadCard({ squad, picked, onPick, showSkill, highlightId, marks, title, compact, narrow }: { squad: SquadView; picked?: number[]; onPick?: (pid: number) => void; showSkill?: boolean; highlightId?: number; marks?: Marks; title?: string; compact?: boolean; narrow?: boolean }) {
+  const st = squadStyle(squad.squad_no)
+  const dark = squad.squad_no !== 2
+  const tag = (full: string, short: string) => (narrow ? short : full)
   return (
-    <div className={`rounded-2xl border-2 p-3 ${dark ? 'border-team-black bg-team-black text-team-black-ink' : 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]'}`}>
-      <div className="flex items-center justify-between text-sm font-bold">
+    <div className={`min-w-0 rounded-2xl border-2 ${narrow ? 'p-2' : 'p-3'} ${st.card}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-1 font-bold ${narrow ? 'text-xs' : 'text-sm'}`}>
         <span>{title ?? squad.squad_name} ({squad.members.length})</span>
-        {!compact && showSkill && squad.avg_skill !== null && <Badge tone={dark ? 'court' : 'navy'}>쿼터당 {Number(squad.avg_skill) > 0 ? '+' : ''}{squad.avg_skill}</Badge>}
+        {!compact && showSkill && squad.avg_skill !== null && <Badge tone={dark ? 'court' : 'navy'}>{narrow ? '' : '쿼터당 '}{Number(squad.avg_skill) > 0 ? '+' : ''}{squad.avg_skill}</Badge>}
       </div>
-      {!compact && squad.avg_height_cm !== null && <p className={`text-[11px] ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>평균 신장 {squad.avg_height_cm}cm</p>}
+      {!compact && squad.avg_height_cm !== null && <p className={`text-[11px] ${st.sub}`}>{narrow ? '' : '평균 신장 '}{squad.avg_height_cm}cm</p>}
       <ul className="mt-2 space-y-1">
         {squad.members.map((m) => {
           const pos = squad.assigned_positions[m.id]
@@ -401,16 +440,16 @@ function SquadCard({ squad, dark, picked, onPick, showSkill, highlightId, marks,
             <li key={m.id}>
               <button
                 onClick={onPick ? () => onPick(m.id) : undefined}
-                className={`flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-sm ${on ? (dark ? 'bg-court-500 text-white' : 'bg-court-100') : me ? (dark ? 'bg-white/15' : 'bg-court-50') : ''}`}
+                className={`flex w-full items-center gap-1 rounded-lg ${narrow ? 'px-1 py-0.5 text-xs' : 'gap-1.5 px-1.5 py-1 text-sm'} text-left ${on ? st.picked : me ? st.soft : ''}`}
               >
-                <span className={`w-6 text-[10px] font-bold ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>{pos ?? '—'}</span>
-                <span className="truncate font-medium">{m.display_name}{me ? ' (나)' : ''}</span>
-                {m.kind === 'GUEST' && <span className={`text-[10px] ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>G</span>}
+                <span className={`${narrow ? 'w-4 text-[9px]' : 'w-6 text-[10px]'} shrink-0 font-bold ${st.sub}`}>{pos ?? '—'}</span>
+                <span className="min-w-0 truncate font-medium">{m.display_name}{me ? ' (나)' : ''}</span>
+                {m.kind === 'GUEST' && <span className={`shrink-0 text-[10px] ${st.sub}`}>G</span>}
                 {squad.manual_override_ids.includes(m.id) && <span className="text-[10px] text-amber-400">↔</span>}
-                {marks?.locked.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-team-black-sub' : 'bg-navy-100 text-navy-700'}`} title="같은 팀으로 묶음">묶음{marks.locked.get(m.id)}</span>}
-                {marks?.pinned.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-team-black-sub' : 'bg-navy-100 text-navy-700'}`} title="사전 배치">고정</span>}
-                {marks?.sepGroup.has(m.id) && <span className={`rounded px-1 text-[9px] font-semibold ${dark ? 'bg-white/15 text-team-black-sub' : 'bg-rose-100 text-rose-700'}`} title="갈라놓기">분리</span>}
-                {showSkill && <span className="ml-auto"><GradeDot grade={m.skill_grade} /></span>}
+                {marks?.locked.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-navy-100 text-navy-700'}`} title="같은 팀으로 묶음">{tag('묶음', '묶')}{marks.locked.get(m.id)}</span>}
+                {marks?.pinned.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-navy-100 text-navy-700'}`} title="사전 배치">{tag('고정', '고')}</span>}
+                {marks?.sepGroup.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-rose-100 text-rose-700'}`} title="갈라놓기">{tag('분리', '분')}</span>}
+                {showSkill && <span className="ml-auto shrink-0"><GradeDot grade={m.skill_grade} small={narrow} /></span>}
               </button>
             </li>
           )
@@ -481,7 +520,7 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
       <SectionTitle>팀 배정 결과</SectionTitle>
       <FirstTimeTip id="adopted" />
       {mine && (
-        <div className={`flex items-center gap-3 rounded-2xl px-4 py-3 ${mine.squad_no === 1 ? 'bg-team-black text-team-black-ink' : 'border border-line-strong bg-team-white text-team-white-ink'}`}>
+        <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${squadStyle(mine.squad_no).card}`}>
           <span className="text-xs opacity-70">내 팀</span>
           <span className="text-xl font-black">{mine.squad_name}</span>
           {v.my_assigned_position && <span className="rounded-lg bg-court-500 px-2 py-0.5 text-sm font-bold text-white">{v.my_assigned_position}</span>}
@@ -494,7 +533,7 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
         <Card className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-ink">단체방에 팀 구성 보내기</p>
-            <p className="text-xs text-muted">{shareMsg ?? '두 팀 명단을 이미지 한 장으로 보내요.'}</p>
+            <p className="text-xs text-muted">{shareMsg ?? `${v.squads.length === 3 ? '세' : '두'} 팀 명단을 이미지 한 장으로 보내요.`}</p>
           </div>
           <button
             onClick={() => share.mutate()} disabled={share.isPending}
@@ -506,12 +545,12 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
       )}
       {mine ? (
         <>
-          <SquadCard squad={mine} dark={mine.squad_no === 1} showSkill={isManager} highlightId={me?.id} title={`내 팀 · 팀 ${mine.squad_name}`} />
-          {others.map((s) => <SquadCard key={s.squad_no} squad={s} dark={s.squad_no === 1} showSkill={isManager} title={`상대 · 팀 ${s.squad_name}`} />)}
+          <SquadCard squad={mine} showSkill={isManager} highlightId={me?.id} title={`내 팀 · 팀 ${mine.squad_name}`} />
+          {others.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`상대 · 팀 ${s.squad_name}`} />)}
         </>
       ) : (
-        <div className="grid grid-cols-2 gap-2">
-          {v.squads.map((s) => <SquadCard key={s.squad_no} squad={s} dark={s.squad_no === 1} showSkill={isManager} title={`팀 ${s.squad_name}`} />)}
+        <div className={`grid gap-2 ${v.squads.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          {v.squads.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`팀 ${s.squad_name}`} narrow={v.squads.length === 3} />)}
         </div>
       )}
       {!isManager && <p className="px-1 text-center text-xs text-faint">실력 수치는 표시하지 않아요. 등급은 8쿼터마다 갱신돼요.</p>}
@@ -540,9 +579,9 @@ export function AdoptedSummary({ eventId, isManager }: { eventId: number; isMana
         <p className="text-sm font-bold text-ink">팀 배정 확정</p>
         <button onClick={() => nav(`/events/${eventId}`)} className="text-xs font-semibold text-brand-ink">자세히 →</button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid gap-2 ${ordered.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
         {ordered.map((s) => (
-          <SquadCard key={s.squad_no} squad={s} dark={s.squad_no === 1} showSkill={isManager} highlightId={myId} title={`팀 ${s.squad_name}`} compact />
+          <SquadCard key={s.squad_no} squad={s} showSkill={isManager} highlightId={myId} title={`팀 ${s.squad_name}`} compact narrow={ordered.length === 3} />
         ))}
       </div>
       {v.total_score !== null && v.total_score !== undefined && (

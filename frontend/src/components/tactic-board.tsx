@@ -22,11 +22,12 @@ const HOLD_MS = 450 // 연속 재생 때 단계 사이 멈춤
 const SPEEDS = [1, 2, 0.5] as const
 export const OOB_H = 13 // 코트 밖 띠 높이 (베이스라인 뒤 약 1.3m)
 
-export type BoardTone = 'black' | 'white' | 'neutral'
+export type BoardTone = 'black' | 'white' | 'red' | 'neutral'
 
 export const TONE: Record<BoardTone, { fill: string; ink: string; stroke: string }> = {
   black: { fill: 'var(--color-team-black)', ink: 'var(--color-team-black-ink)', stroke: 'var(--color-team-black-sub)' },
   white: { fill: 'var(--color-team-white)', ink: 'var(--color-team-white-ink)', stroke: 'var(--color-team-white-ink)' },
+  red: { fill: 'var(--color-team-red)', ink: 'var(--color-team-red-ink)', stroke: 'var(--color-team-red-sub)' },
   neutral: { fill: 'var(--color-inverse)', ink: 'var(--color-on-inverse)', stroke: 'var(--color-on-inverse)' },
 }
 

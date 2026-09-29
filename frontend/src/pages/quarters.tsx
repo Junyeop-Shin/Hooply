@@ -10,8 +10,10 @@
  * - "+ 쿼터 추가" 는 직전 쿼터의 라인업을 복사한다 (로테이션 1~2명만 바꾸면 되도록).
  * - 저장 전 입력은 localStorage 에 임시 저장한다 (5.4절 네트워크 오류 대비).
  * - 플레이어에게는 읽기 전용 결과 화면.
+ * - 3팀(v1.7): 쿼터 카드 위에 작게 "대진"(첫째 칸 팀 vs 둘째 칸 팀)을 고른다. 두 칸은 그 쿼터에 뛴 두 팀이 되고,
+ *   명단·색·득점 칸 이름이 그 팀을 따른다. 결과 화면은 칸 합계 대신 팀별 쿼터 · 득실 · 승패를 보여 준다.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
@@ -19,15 +21,18 @@ import { assignmentsApi } from '../api/assignments'
 import { eventsApi } from '../api/events'
 import { quartersApi } from '../api/quarters'
 import { teamsApi } from '../api/teams'
-import type { PlayerCard, QuarterIn, Side } from '../api/types'
+import type { PlayerCard, QuarterIn, Side, SquadTally } from '../api/types'
+import { squadStyle } from '../lib/squads'
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
 
-type Draft = { quarter_no: number; black_score: number; white_score: number; duration_min: number; black: number[]; white: number[] }
+/** 쿼터 입력. black/white 는 두 칸(첫째 · 둘째)의 득점·출전이고, 그 칸에 선 팀이 home/away (2팀이면 늘 1 · 2) */
+type Draft = { quarter_no: number; black_score: number; white_score: number; duration_min: number; black: number[]; white: number[]; home: number; away: number }
 type SideKey = 'black' | 'white'
-/** 확정 배정 밖에서 매니저가 명단에 넣은 사람 (그날 늦게 온 회원·게스트·팀을 옮긴 사람) */
-type Extra = Record<SideKey, number[]>
+/** 확정 배정 밖에서 매니저가 팀 명단에 넣은 사람 (그날 늦게 온 회원·게스트·팀을 옮긴 사람). 팀 번호 → player_id */
+type Extra = Record<number, number[]>
+const DEFAULT_NAMES = ['블랙', '화이트', '레드']
 
 /** 쿼터 길이 — 백엔드 app/schemas/game.py 와 같은 값 */
 const DEFAULT_DURATION = 8
@@ -36,7 +41,7 @@ const MAX_DURATION = 10
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
 const draftKey = (eventId: number) => `quarters-draft-${eventId}`
-const emptyExtra: Extra = { black: [], white: [] }
+const emptyExtra: Extra = {}
 const uniq = (ids: number[]) => [...new Set(ids)]
 const stub = (id: number, name: string): PlayerCard => ({
   id, user_id: null, kind: 'MEMBER', display_name: name, role: 'PLAYER', profile_image_url: null,
@@ -77,21 +82,22 @@ export function QuartersPage() {
   }, [att.data, adopted.data, members.data, teamGuests.data, saved.data])
 
   const attendIds = useMemo(() => (att.data?.items ?? []).filter((a) => a.status === 'ATTEND').map((a) => a.player.id), [att.data])
-  const squadIds = useMemo(() => ({
-    black: adopted.data?.squads.find((s) => s.squad_no === 1)?.members.map((m) => m.id) ?? [],
-    white: adopted.data?.squads.find((s) => s.squad_no === 2)?.members.map((m) => m.id) ?? [],
-  }), [adopted.data])
-  const hasAssignment = squadIds.black.length > 0
+  /** 팀 번호 → 확정 배정 명단 */
+  const squadIds = useMemo(() => Object.fromEntries((adopted.data?.squads ?? []).map((s) => [s.squad_no, s.members.map((m) => m.id)])) as Record<number, number[]>, [adopted.data])
+  const hasAssignment = (squadIds[1]?.length ?? 0) > 0
+  const teamCount = Math.max(2, adopted.data?.squads.length ?? 2)
+  const squadNos = useMemo(() => Array.from({ length: teamCount }, (_, i) => i + 1), [teamCount])
+  const nameOfSquad = (no: number) => adopted.data?.squads.find((s) => s.squad_no === no)?.squad_name ?? DEFAULT_NAMES[no - 1] ?? `${no}팀`
 
-  /** 사이드별 출전 후보: 확정 배정(없으면 참석자 전원) + 이미 그 사이드로 기록된 사람 + 매니저가 추가한 사람 */
+  /** 팀별 출전 후보: 확정 배정(없으면 참석자 전원) + 이미 그 팀으로 기록된 사람 + 매니저가 추가한 사람 */
   const pool = useMemo(() => {
-    const used = (side: SideKey) => (quarters ?? []).flatMap((q) => q[side])
-    const build = (side: SideKey) => {
-      const base = hasAssignment ? squadIds[side] : attendIds
-      return uniq([...base, ...used(side), ...extra[side]]).map((pid) => people.get(pid) ?? stub(pid, `#${pid}`))
+    const used = (sq: number) => (quarters ?? []).flatMap((q) => [...(q.home === sq ? q.black : []), ...(q.away === sq ? q.white : [])])
+    const build = (sq: number) => {
+      const base = hasAssignment ? squadIds[sq] ?? [] : attendIds
+      return uniq([...base, ...used(sq), ...(extra[sq] ?? [])]).map((pid) => people.get(pid) ?? stub(pid, `#${pid}`))
     }
-    return { black: build('black'), white: build('white') }
-  }, [quarters, extra, people, squadIds, attendIds, hasAssignment])
+    return Object.fromEntries(squadNos.map((sq) => [sq, build(sq)])) as Record<number, PlayerCard[]>
+  }, [quarters, extra, people, squadIds, attendIds, hasAssignment, squadNos])
 
   const nameOf = (pid: number) => people.get(pid)?.display_name ?? `#${pid}`
 
@@ -99,25 +105,28 @@ export function QuartersPage() {
   useEffect(() => {
     if (quarters || saved.isLoading || adopted.isLoading) return
     if (saved.data && saved.data.items.length > 0) {
-      setQuarters(saved.data.items.map((q) => ({ quarter_no: q.quarter_no, black_score: q.black_score, white_score: q.white_score, duration_min: q.duration_min, black: q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.player_id), white: q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.player_id) })))
+      setQuarters(saved.data.items.map((q) => ({ quarter_no: q.quarter_no, black_score: q.black_score, white_score: q.white_score, duration_min: q.duration_min, home: q.home_squad_no ?? 1, away: q.away_squad_no ?? 2, black: q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.player_id), white: q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.player_id) })))
       return
     }
     try {
       const raw = localStorage.getItem(draftKey(id))
       if (raw) {
-        const parsed = JSON.parse(raw) as Draft[] | { quarters: Draft[]; extra?: Extra }
-        const qs = Array.isArray(parsed) ? parsed : parsed.quarters  // 예전 형식(배열)도 읽는다
+        const parsed = JSON.parse(raw) as Draft[] | { quarters: Draft[]; extra?: Extra & { black?: number[]; white?: number[] } }
+        const qs = (Array.isArray(parsed) ? parsed : parsed.quarters)?.map((q) => ({ ...q, home: q.home ?? 1, away: q.away ?? 2 }))  // 예전 형식(배열 · 대진 없음)도 읽는다
         if (qs?.length) {
           setQuarters(qs)
-          if (!Array.isArray(parsed) && parsed.extra) setExtra({ black: parsed.extra.black ?? [], white: parsed.extra.white ?? [] })
+          if (!Array.isArray(parsed) && parsed.extra) {
+            const e = parsed.extra
+            setExtra(e.black || e.white ? { 1: e.black ?? [], 2: e.white ?? [] } : e)  // 예전 형식은 칸(black/white) 기준
+          }
           setRestored(true)
           return
         }
       }
     } catch { /* 저장소 없음 */ }
-    const b = hasAssignment ? squadIds.black.slice(0, 5) : []
-    const w = hasAssignment ? squadIds.white.slice(0, 5) : []
-    setQuarters([{ quarter_no: 1, black_score: 0, white_score: 0, duration_min: DEFAULT_DURATION, black: b, white: w }])
+    const b = hasAssignment ? (squadIds[1] ?? []).slice(0, 5) : []
+    const w = hasAssignment ? (squadIds[2] ?? []).slice(0, 5) : []
+    setQuarters([{ quarter_no: 1, black_score: 0, white_score: 0, duration_min: DEFAULT_DURATION, black: b, white: w, home: 1, away: 2 }])
   }, [quarters, saved.data, saved.isLoading, adopted.isLoading, hasAssignment, squadIds, id])
 
   // 임시 저장
@@ -130,6 +139,7 @@ export function QuartersPage() {
     mutationFn: () => {
       const payload: QuarterIn[] = quarters!.map((q) => ({
         quarter_no: q.quarter_no, black_score: q.black_score, white_score: q.white_score, duration_min: q.duration_min,
+        home_squad_no: q.home, away_squad_no: q.away,
         lineups: [...q.black.map((pid) => ({ player_id: pid, side: 'BLACK' as Side })), ...q.white.map((pid) => ({ player_id: pid, side: 'WHITE' as Side }))],
       }))
       return quartersApi.bulkSave(id, payload)
@@ -156,13 +166,24 @@ export function QuartersPage() {
       if (other.includes(pid)) return q  // 같은 쿼터에 양 팀으로 동시에 뛸 수 없다
       return { ...q, [side]: list.includes(pid) ? list.filter((x) => x !== pid) : [...list, pid] }
     }))
-  const addQuarter = () => setQuarters((qs) => { const last = qs![qs!.length - 1]; return [...qs!, { quarter_no: (last?.quarter_no ?? 0) + 1, black_score: 0, white_score: 0, duration_min: last?.duration_min ?? DEFAULT_DURATION, black: last?.black ?? [], white: last?.white ?? [] }] })
+  const addQuarter = () => setQuarters((qs) => { const last = qs![qs!.length - 1]; return [...qs!, { quarter_no: (last?.quarter_no ?? 0) + 1, black_score: 0, white_score: 0, duration_min: last?.duration_min ?? DEFAULT_DURATION, black: last?.black ?? [], white: last?.white ?? [], home: last?.home ?? 1, away: last?.away ?? 2 }] })
+  /** 3팀 대진 바꾸기 — 한 칸의 팀을 바꾸면 그 칸 출전은 새 팀 앞 5명으로. 이미 다른 칸에 있는 팀을 고르면 두 칸을 맞바꾼다 */
+  const setMatchup = (i: number, side: SideKey, sq: number) => setQuarters((qs) => qs!.map((q, j) => {
+    if (j !== i) return q
+    const cur = side === 'black' ? q.home : q.away
+    const other = side === 'black' ? q.away : q.home
+    if (sq === cur) return q
+    if (sq === other) return { ...q, home: q.away, away: q.home, black: q.white, white: q.black, black_score: q.white_score, white_score: q.black_score }
+    const firstFive = (pool[sq] ?? []).map((p) => p.id).filter((pid) => !(side === 'black' ? q.white : q.black).includes(pid)).slice(0, 5)
+    return side === 'black' ? { ...q, home: sq, black: firstFive } : { ...q, away: sq, white: firstFive }
+  }))
   const removeQuarter = (i: number) => setQuarters((qs) => qs!.filter((_, j) => j !== i).map((q, j) => ({ ...q, quarter_no: j + 1 })))
-  const addToSide = (side: SideKey, pid: number) => setExtra((e) => (e[side].includes(pid) ? e : { ...e, [side]: [...e[side], pid] }))
-  const dropFromSide = (side: SideKey, pid: number) => setExtra((e) => ({ ...e, [side]: e[side].filter((x) => x !== pid) }))
-  /** 어떤 쿼터에도 체크되지 않았고 확정 배정에도 없는 사람만 명단에서 뺄 수 있다 */
-  const removable = (side: SideKey, pid: number) =>
-    extra[side].includes(pid) && !quarters.some((q) => q[side].includes(pid))
+  const addToSquad = (sq: number, pid: number) => setExtra((e) => ((e[sq] ?? []).includes(pid) ? e : { ...e, [sq]: [...(e[sq] ?? []), pid] }))
+  const dropFromSquad = (sq: number, pid: number) => setExtra((e) => ({ ...e, [sq]: (e[sq] ?? []).filter((x) => x !== pid) }))
+  /** 어떤 쿼터에도 그 팀으로 체크되지 않았고 확정 배정에도 없는 사람만 명단에서 뺄 수 있다 */
+  const removable = (sq: number, pid: number) =>
+    (extra[sq] ?? []).includes(pid) && !quarters.some((q) => (q.home === sq && q.black.includes(pid)) || (q.away === sq && q.white.includes(pid)))
+  const three = teamCount === 3
 
   // ---- 플레이어: 읽기 전용 ----
   if (!isManager) {
@@ -173,15 +194,17 @@ export function QuartersPage() {
         <Content>
           {!s || s.quarter_count === 0 ? <Alert kind="info">아직 기록된 쿼터가 없어요.</Alert> : (
             <>
-              <ScoreBoard black={s.black_total} white={s.white_total} sub={`${s.quarter_count}쿼터 · 블랙 ${s.black_wins}승 / 화이트 ${s.white_wins}승`} />
+              {(s.team_count ?? 2) === 3
+                ? <SquadTable squads={s.squads} quarters={s.quarter_count} />
+                : <ScoreBoard black={s.black_total} white={s.white_total} sub={`${s.quarter_count}쿼터 · 블랙 ${s.black_wins}승 / 화이트 ${s.white_wins}승`} />}
               {saved.data!.items.map((q) => (
                 <Card key={q.id} className="space-y-1">
-                  <div className="flex items-center justify-between"><p className="font-bold text-ink">{q.quarter_no}쿼터</p><p className="text-sm font-bold"><span className="text-ink">{q.black_score}</span> : <span className="text-muted">{q.white_score}</span></p></div>
-                  <p className="text-xs text-muted"><b>블랙</b> {q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.display_name).join(' · ')}</p>
-                  <p className="text-xs text-muted"><b>화이트</b> {q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.display_name).join(' · ')}</p>
+                  <div className="flex items-center justify-between"><p className="font-bold text-ink">{q.quarter_no}쿼터</p><p className="text-sm font-bold"><span className="text-ink">{nameOfSquad(q.home_squad_no)} {q.black_score}</span> : <span className="text-muted">{q.white_score} {nameOfSquad(q.away_squad_no)}</span></p></div>
+                  <p className="text-xs text-muted"><b>{nameOfSquad(q.home_squad_no)}</b> {q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.display_name).join(' · ')}</p>
+                  <p className="text-xs text-muted"><b>{nameOfSquad(q.away_squad_no)}</b> {q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.display_name).join(' · ')}</p>
                 </Card>
               ))}
-              <PlayTime per={s.per_player} />
+              <PlayTime per={s.per_player} squadNos={squadNos} nameOf={nameOfSquad} />
             </>
           )}
         </Content>
@@ -192,12 +215,13 @@ export function QuartersPage() {
   // ---- 매니저: 입력 ----
   return (
     <Screen>
-      <TopBar title="경기 기록" back={`/events/${id}`} right={<span className="mr-2 text-sm font-bold"><span className="text-ink">블랙 {total.black}</span> <span className="text-faint">:</span> <span className="text-muted">{total.white} 화이트</span></span>} />
+      <TopBar title="경기 기록" back={`/events/${id}`} right={three ? undefined : <span className="mr-2 text-sm font-bold"><span className="text-ink">블랙 {total.black}</span> <span className="text-faint">:</span> <span className="text-muted">{total.white} 화이트</span></span>} />
       <Content>
         <FirstTimeTip id="quarters" />
         <p className="px-1 text-xs text-muted">경기 후 한 번에 입력하세요. 저장 전 내용은 이 기기에 임시 보관돼요.</p>
         {restored && <Alert kind="info">저장하지 않은 입력을 되살렸어요.</Alert>}
         {!hasAssignment && <Alert kind="warn">확정된 팀 배정이 없어 참석자 전원이 양쪽에 보여요. 팀마다 5명씩 골라 주세요.</Alert>}
+        {three && <p className="px-1 text-xs text-muted">세 팀이에요. 쿼터마다 위의 <b>대진</b>에서 뛴 두 팀을 골라 주세요.</p>}
         {msg && <Alert>{msg}</Alert>}
 
         {quarters.map((q, i) => (
@@ -215,22 +239,37 @@ export function QuartersPage() {
               </p>
               {quarters.length > 1 && <button className="text-xs text-danger-ink" onClick={() => removeQuarter(i)}>삭제</button>}
             </div>
+            {three && (
+              <div className="flex items-center gap-2 text-xs" aria-label={`${q.quarter_no}쿼터 대진`}>
+                <span className="font-semibold text-muted">대진</span>
+                <select value={q.home} onChange={(e) => setMatchup(i, 'black', Number(e.target.value))} aria-label={`${q.quarter_no}쿼터 첫째 팀`} className="min-h-9 flex-1 rounded-lg border border-line bg-surface px-2 font-semibold text-ink">
+                  {squadNos.map((sq) => <option key={sq} value={sq}>{nameOfSquad(sq)}</option>)}
+                </select>
+                <span className="text-faint">vs</span>
+                <select value={q.away} onChange={(e) => setMatchup(i, 'white', Number(e.target.value))} aria-label={`${q.quarter_no}쿼터 둘째 팀`} className="min-h-9 flex-1 rounded-lg border border-line bg-surface px-2 font-semibold text-ink">
+                  {squadNos.map((sq) => <option key={sq} value={sq}>{nameOfSquad(sq)}</option>)}
+                </select>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
-              <Stepper label="블랙" dark value={q.black_score} onChange={(v) => update(i, { black_score: v })} />
-              <Stepper label="화이트" value={q.white_score} onChange={(v) => update(i, { white_score: v })} />
+              <Stepper label={nameOfSquad(q.home)} squadNo={q.home} value={q.black_score} onChange={(v) => update(i, { black_score: v })} />
+              <Stepper label={nameOfSquad(q.away)} squadNo={q.away} value={q.white_score} onChange={(v) => update(i, { white_score: v })} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               {(['black', 'white'] as const).map((side) => {
                 const list = q[side]
                 const ok = list.length === 5
                 const otherSide: SideKey = side === 'black' ? 'white' : 'black'
-                const ownIds = new Set(pool[side].map((p) => p.id))
-                const others = pool[otherSide].filter((p) => !ownIds.has(p.id))  // 팀을 옮긴 경우를 대비해 아래에 둔다
+                const sq = side === 'black' ? q.home : q.away
+                const st = squadStyle(sq)
+                const ownIds = new Set((pool[sq] ?? []).map((p) => p.id))
+                // 다른 팀 사람들 — 팀을 옮긴 경우를 대비해 아래에 둔다
+                const others = uniq(squadNos.filter((x) => x !== sq).flatMap((x) => (pool[x] ?? []).map((p) => p.id))).filter((pid) => !ownIds.has(pid)).map((pid) => people.get(pid) ?? stub(pid, `#${pid}`))
                 const row = (p: PlayerCard, dim: boolean) => {
                   const on = list.includes(p.id)
                   const blocked = q[otherSide].includes(p.id)
                   return (
-                    <label key={p.id} className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm ${on ? (side === 'black' ? 'bg-court-500 text-white' : 'bg-court-100') : dim ? 'opacity-60' : ''} ${blocked ? 'opacity-30' : ''}`}>
+                    <label key={p.id} className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm ${on ? st.picked : dim ? 'opacity-60' : ''} ${blocked ? 'opacity-30' : ''}`}>
                       <input type="checkbox" checked={on} disabled={blocked} onChange={() => toggle(i, side, p.id)} className="accent-brand" />
                       <span className="truncate">{p.display_name}</span>
                       {p.kind === 'GUEST' && <span className="text-[10px] opacity-60">G</span>}
@@ -238,9 +277,9 @@ export function QuartersPage() {
                   )
                 }
                 return (
-                  <div key={side} className={`rounded-xl border p-2 ${side === 'black' ? 'border-team-black bg-team-black text-team-black-ink [color-scheme:dark]' : 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]'}`}>
-                    <p className={`mb-1 text-[11px] font-bold ${ok ? '' : 'text-rose-400'}`}>{side === 'black' ? '블랙' : '화이트'} 출전 {list.length}/5</p>
-                    <div className="space-y-0.5" data-roster={`${side}-own`}>{pool[side].map((p) => row(p, false))}</div>
+                  <div key={side} className={`rounded-xl border p-2 ${st.card}`}>
+                    <p className={`mb-1 text-[11px] font-bold ${ok ? '' : 'text-rose-400'}`}>{nameOfSquad(sq)} 출전 {list.length}/5</p>
+                    <div className="space-y-0.5" data-roster={`${side}-own`}>{(pool[sq] ?? []).map((p) => row(p, false))}</div>
                     {others.length > 0 && (
                       <>
                         <p className="mb-0.5 mt-2 border-t border-current/20 pt-1.5 text-[10px] font-semibold opacity-60">다른 팀 · 옮겼으면 여기서 체크</p>
@@ -259,8 +298,8 @@ export function QuartersPage() {
             </button>
             {addFor === i && (
               <RosterEditor
-                eventId={id} people={people} pool={pool} attendIds={attendIds}
-                onAdd={addToSide} removable={removable} onRemove={dropFromSide}
+                eventId={id} people={people} pool={pool} attendIds={attendIds} squadNos={squadNos} nameOf={nameOfSquad}
+                onAdd={addToSquad} removable={removable} onRemove={dropFromSquad}
                 onError={(m) => setMsg(m)}
                 onGuestAdded={() => { qc.invalidateQueries({ queryKey: ['events', id, 'attendances'] }); qc.invalidateQueries({ queryKey: ['team', teamId, 'guests'] }) }}
               />
@@ -269,8 +308,8 @@ export function QuartersPage() {
         ))}
         <Button variant="ghost" full onClick={addQuarter}>+ 쿼터 추가 (앞 쿼터 명단 그대로)</Button>
         {invalid.length > 0 && <Alert kind="warn">{invalid.map((q) => `${q.quarter_no}쿼터`).join(', ')}의 출전 인원이 5명이 아니에요.</Alert>}
-        {saved.data && saved.data.summary.quarter_count > 0 && <PlayTime per={saved.data.summary.per_player} />}
-        <p className="px-1 text-[11px] text-faint">명단에 넣은 사람: {[...extra.black, ...extra.white].length ? uniq([...extra.black, ...extra.white]).map(nameOf).join(' · ') : '없음'}</p>
+        {saved.data && saved.data.summary.quarter_count > 0 && <PlayTime per={saved.data.summary.per_player} squadNos={squadNos} nameOf={nameOfSquad} />}
+        <p className="px-1 text-[11px] text-faint">명단에 넣은 사람: {Object.values(extra).flat().length ? uniq(Object.values(extra).flat()).map(nameOf).join(' · ') : '없음'}</p>
       </Content>
       <BottomAction>
         <Button full loading={save.isPending} disabled={invalid.length > 0 || quarters.length === 0} onClick={() => save.mutate()}>
@@ -283,38 +322,40 @@ export function QuartersPage() {
 
 /** 새 멤버 추가 — 팀 회원·게스트를 어느 팀 명단에 넣을지 고르고, 당일 처음 온 게스트는 여기서 바로 등록한다. 두 팀 공통 */
 function RosterEditor({
-  eventId, people, pool, attendIds, onAdd, removable, onRemove, onError, onGuestAdded,
+  eventId, people, pool, attendIds, squadNos, nameOf, onAdd, removable, onRemove, onError, onGuestAdded,
 }: {
   eventId: number
   people: Map<number, PlayerCard>
-  pool: Record<SideKey, PlayerCard[]>
+  pool: Record<number, PlayerCard[]>
   attendIds: number[]
-  onAdd: (side: SideKey, pid: number) => void
+  squadNos: number[]
+  nameOf: (sq: number) => string
+  onAdd: (sq: number, pid: number) => void
   /** 매니저가 넣었고 아직 어느 쿼터에도 체크되지 않은 사람만 뺄 수 있다 */
-  removable: (side: SideKey, pid: number) => boolean
-  onRemove: (side: SideKey, pid: number) => void
+  removable: (sq: number, pid: number) => boolean
+  onRemove: (sq: number, pid: number) => void
   onError: (m: string) => void
   onGuestAdded: () => void
 }) {
   const [q, setQ] = useState('')
   const [guestName, setGuestName] = useState('')
-  const inBlack = new Set(pool.black.map((p) => p.id))
-  const inWhite = new Set(pool.white.map((p) => p.id))
+  const inSquad = Object.fromEntries(squadNos.map((sq) => [sq, new Set((pool[sq] ?? []).map((p) => p.id))])) as Record<number, Set<number>>
+  const inAny = (pid: number) => squadNos.some((sq) => inSquad[sq].has(pid))
   const attend = new Set(attendIds)
   const rows = [...people.values()]
-    .filter((p) => !inBlack.has(p.id) || !inWhite.has(p.id) || removable('black', p.id) || removable('white', p.id))
+    .filter((p) => squadNos.some((sq) => !inSquad[sq].has(p.id) || removable(sq, p.id)))
     .filter((p) => !q.trim() || p.display_name.includes(q.trim()))
     // 아직 어느 명단에도 없는 사람(늦게 온 회원·게스트)이 먼저, 그다음 참석 응답자, 그다음 이름순
-    .sort((a, b) => Number(inBlack.has(b.id) || inWhite.has(b.id)) - Number(inBlack.has(a.id) || inWhite.has(a.id)) || Number(attend.has(b.id)) - Number(attend.has(a.id)) || a.display_name.localeCompare(b.display_name, 'ko'))
+    .sort((a, b) => Number(inAny(b.id)) - Number(inAny(a.id)) || Number(attend.has(b.id)) - Number(attend.has(a.id)) || a.display_name.localeCompare(b.display_name, 'ko'))
     .slice(0, 40)
 
   const addGuest = useMutation({
-    mutationFn: async (side: SideKey) => {
+    mutationFn: async (sq: number) => {
       const res = await eventsApi.registerGuest(eventId, { display_name: guestName.trim(), force_new: true })
       if (res.kind !== 'registered') throw new Error('등록하지 못했어요.')
-      return { side, player: res.view.player }
+      return { sq, player: res.view.player }
     },
-    onSuccess: ({ side, player }) => { onAdd(side, player.id); setGuestName(''); onGuestAdded() },
+    onSuccess: ({ sq, player }) => { onAdd(sq, player.id); setGuestName(''); onGuestAdded() },
     onError: (e) => onError(errMsg(e, '게스트를 등록하지 못했어요.')),
   })
 
@@ -334,16 +375,16 @@ function RosterEditor({
                 {p.kind === 'GUEST' && <Badge>게스트</Badge>}
                 {!attend.has(p.id) && <span className="ml-1 text-[10px] text-faint">참석 응답 없음</span>}
               </span>
-              {(['black', 'white'] as const).map((side) => {
-                const already = side === 'black' ? inBlack.has(p.id) : inWhite.has(p.id)
-                const canRemove = already && removable(side, p.id)
+              {squadNos.map((sq) => {
+                const already = inSquad[sq].has(p.id)
+                const canRemove = already && removable(sq, p.id)
                 return (
                   <button
-                    key={side} disabled={already && !canRemove} onClick={() => (canRemove ? onRemove(side, p.id) : onAdd(side, p.id))}
-                    aria-label={canRemove ? `${p.display_name} ${side === 'black' ? '블랙' : '화이트'} 명단에서 빼기` : undefined}
-                    className={`min-h-8 rounded-lg px-2 text-xs font-semibold ${canRemove ? 'border border-danger-line text-danger-ink' : already ? 'bg-sunken text-faint' : side === 'black' ? 'bg-team-black text-team-black-ink' : 'border border-line-strong text-ink'}`}
+                    key={sq} disabled={already && !canRemove} onClick={() => (canRemove ? onRemove(sq, p.id) : onAdd(sq, p.id))}
+                    aria-label={canRemove ? `${p.display_name} ${nameOf(sq)} 명단에서 빼기` : undefined}
+                    className={`min-h-8 rounded-lg border px-2 text-xs font-semibold ${canRemove ? 'border-danger-line text-danger-ink' : already ? 'border-transparent bg-sunken text-faint' : squadStyle(sq).card}`}
                   >
-                    {canRemove ? (side === 'black' ? '블랙 빼기' : '화이트 빼기') : already ? '있음' : side === 'black' ? '＋블랙' : '＋화이트'}
+                    {canRemove ? `${nameOf(sq)} 빼기` : already ? '있음' : `＋${nameOf(sq)}`}
                   </button>
                 )
               })}
@@ -359,12 +400,12 @@ function RosterEditor({
             value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="이름" aria-label="새 게스트 이름"
             className="min-w-0 flex-1 rounded-xl border border-line px-3 py-2 text-sm"
           />
-          {(['black', 'white'] as const).map((side) => (
+          {squadNos.map((sq) => (
             <button
-              key={side} disabled={!guestName.trim() || addGuest.isPending} onClick={() => addGuest.mutate(side)}
-              className={`min-h-9 rounded-lg px-2 text-xs font-semibold disabled:opacity-40 ${side === 'black' ? 'bg-navy-900 text-white' : 'border border-line-strong text-ink'}`}
+              key={sq} disabled={!guestName.trim() || addGuest.isPending} onClick={() => addGuest.mutate(sq)}
+              className={`min-h-9 rounded-lg border px-2 text-xs font-semibold disabled:opacity-40 ${squadStyle(sq).card}`}
             >
-              {side === 'black' ? '＋블랙' : '＋화이트'}
+              ＋{nameOf(sq)}
             </button>
           ))}
         </div>
@@ -374,9 +415,10 @@ function RosterEditor({
   )
 }
 
-function Stepper({ label, dark, value, onChange }: { label: string; dark?: boolean; value: number; onChange: (v: number) => void }) {
+function Stepper({ label, squadNo, value, onChange }: { label: string; squadNo: number; value: number; onChange: (v: number) => void }) {
+  const dark = squadNo !== 2
   return (
-    <div className={`rounded-xl p-2 ${dark ? 'bg-team-black text-team-black-ink' : 'border border-line-strong bg-team-white text-team-white-ink'}`}>
+    <div className={`rounded-xl border p-2 ${squadStyle(squadNo).card}`}>
       <p className="text-[11px] font-semibold opacity-70">{label}</p>
       <div className="flex items-center justify-between">
         <button onClick={() => onChange(Math.max(0, value - 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-white/10' : 'bg-stone-200'}`}>−</button>
@@ -403,19 +445,41 @@ export function ScoreBoard({ black, white, sub }: { black: number; white: number
   )
 }
 
-function PlayTime({ per }: { per: { player_id: number; display_name: string; side: Side; quarters: number }[] }) {
+function PlayTime({ per, squadNos, nameOf }: { per: { player_id: number; display_name: string; side: Side; squad_no: number; quarters: number }[]; squadNos: number[]; nameOf: (sq: number) => string }) {
   if (!per.length) return null
+  // 팀(마지막으로 뛴 팀) 기준으로 묶는다. 예전 응답(squad_no 없음)은 칸으로
+  const squadOf = (p: { side: Side; squad_no?: number }) => p.squad_no ?? (p.side === 'BLACK' ? 1 : 2)
   return (
     <Card>
       <p className="mb-1 text-sm font-bold text-ink">출전 쿼터 수</p>
-      <div className="grid grid-cols-2 gap-x-3 text-xs">
-        {(['BLACK', 'WHITE'] as const).map((side) => (
-          <div key={side}>
-            <p className="mb-0.5 font-semibold text-muted">{side === 'BLACK' ? '블랙' : '화이트'}</p>
-            {per.filter((p) => p.side === side).map((p) => <p key={p.player_id} className="flex justify-between text-ink-2"><span>{p.display_name}</span><Badge>{p.quarters}</Badge></p>)}
+      <div className={`grid gap-x-3 text-xs ${squadNos.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        {squadNos.map((sq) => (
+          <div key={sq} className="min-w-0">
+            <p className="mb-0.5 font-semibold text-muted">{nameOf(sq)}</p>
+            {per.filter((p) => squadOf(p) === sq).map((p) => <p key={p.player_id} className="flex justify-between gap-1 text-ink-2"><span className="truncate">{p.display_name}</span><Badge>{p.quarters}</Badge></p>)}
           </div>
         ))}
       </div>
     </Card>
+  )
+}
+
+/** 3팀 결과표 — 팀별 쿼터 · 득실 · 승패 */
+function SquadTable({ squads, quarters }: { squads: SquadTally[]; quarters: number }) {
+  return (
+    <div className="rounded-2xl bg-bar px-4 py-3 text-bar-ink">
+      <p className="mb-2 text-xs text-bar-sub">{quarters}쿼터 · 쿼터마다 두 팀</p>
+      <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-4 gap-y-1 text-sm">
+        <span className="text-[11px] text-bar-sub">팀</span><span className="text-[11px] text-bar-sub">쿼터</span><span className="text-[11px] text-bar-sub">득 : 실</span><span className="text-[11px] text-bar-sub">승 · 패</span>
+        {squads.map((t) => (
+          <Fragment key={t.squad_no}>
+            <span className="flex items-center gap-1.5 font-bold"><span className={`size-2.5 rounded-full ${squadStyle(t.squad_no).dot}`} aria-hidden="true" />{t.squad_name}</span>
+            <span className="text-center tabular-nums">{t.quarters}</span>
+            <span className="text-center tabular-nums">{t.points_for} : {t.points_against}</span>
+            <span className="text-center tabular-nums">{t.wins} · {t.losses}</span>
+          </Fragment>
+        ))}
+      </div>
+    </div>
   )
 }

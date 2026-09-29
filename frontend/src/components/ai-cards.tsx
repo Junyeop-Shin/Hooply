@@ -94,7 +94,7 @@ export function AiExplainCard({ candidateId, rosterKey, fallbackText }: { candid
   const d = q.data
   if (q.isError || (d && d.fallback)) return <Fallback title="이렇게 나눈 이유" text={d?.text ?? fallbackText} />
   if (!d || settled !== rosterKey) {
-    return <Frame ai title="AI 배정 설명"><Thinking label={settled !== rosterKey ? '바뀐 구성으로 다시 읽고 있어요…' : 'AI가 두 팀을 읽고 있어요…'} /></Frame>
+    return <Frame ai title="AI 배정 설명"><Thinking label={settled !== rosterKey ? '바뀐 구성으로 다시 읽고 있어요…' : 'AI가 팀 구성을 읽고 있어요…'} /></Frame>
   }
   return (
     <Frame ai title="AI 배정 설명">
