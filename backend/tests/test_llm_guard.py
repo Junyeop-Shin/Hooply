@@ -89,6 +89,8 @@ def test_restore_reads_whole_numbers():
     assert a.restore("P1과 P10이 P3가 같은 팀") == "허재와 선수10이 서장훈이 같은 팀"
     assert a.restore("P3는 P1을 P2로") == "서장훈은 허재를 강동희로"
     assert a.restore("P1가드 역할") == "허재가드 역할"  # 뒤에 한글이 이어지면 조사가 아니다
+    assert a.restore("P1와 P3와는 호흡이 좋아요") == "허재와 서장훈과는 호흡이 좋아요"  # 겹조사
+    assert a.restore("P3와도 P3로는") == "서장훈과도 서장훈으로는"
     assert a.restore("A팀이 B보다") == "블랙팀이 화이트보다"
     assert a.restore("A와 B는") == "블랙과 화이트는"
     assert a.restore("PG 포지션 · APP") == "PG 포지션 · APP"  # 가명이 아닌 글자는 그대로
@@ -330,7 +332,7 @@ def test_raw_response_records_actual_model_version(db, monkeypatch):
     """include_raw 응답이면 파싱 결과를 쓰고, 별칭이 가리킨 실제 모델 버전을 기록한다."""
     from langchain_core.messages import AIMessage
 
-    raw = AIMessage(content="{}", response_metadata={"model_version": "gemini-9-flash-lite"})
+    raw = AIMessage(content="{}", response_metadata={"model_name": "gemini-9-flash-lite"})
     reply = {"raw": raw, "parsed": Explain(summary="P1 좋아요.", reasons=["x"]), "parsing_error": None}
     monkeypatch.setattr(llm_model, "structured", lambda schema, **_kw: RunnableLambda(lambda _m: reply))
     out = g.run(db, _call(), user_id=1)

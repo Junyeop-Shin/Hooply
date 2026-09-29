@@ -8,7 +8,7 @@
 
 from pydantic import BaseModel, Field
 
-PROMPT_VERSION = 3  # 3: 역할 · 포지션 이유 · 호흡 맞출 동료 (팀원) / 활약 · 조합 · 부족한 역할 (매니저)
+PROMPT_VERSION = 4  # 3: 역할 · 포지션 이유 · 호흡 맞출 동료 (팀원) / 활약 · 조합 · 부족한 역할 (매니저). 4: 겹조사 복원 수정 — 저장된 결과를 새로 만들게
 
 _COMMON = """
 [공통 규칙]

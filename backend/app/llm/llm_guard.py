@@ -45,7 +45,8 @@ log = logging.getLogger("hooply.llm")
 
 ALIAS_RE = re.compile(r"P(\d+)(?!\d)")
 # 가명 뒤에 바로 붙은 조사 (다음 글자가 한글이면 조사가 아니라 낱말 — "P3가드" 는 건드리지 않는다)
-_PARTICLE = r"(?:(으로|로|이|가|은|는|을|를|과|와)(?![가-힣]))"
+# 뒤에 보조사(는·도·만·의·요)가 한 글자 더 붙은 겹조사("와는", "과도")도 조사로 본다
+_PARTICLE = r"(?:(으로|로|이|가|은|는|을|를|과|와)(?=(?:는|도|만|의|요)?(?![가-힣])))"
 ALIAS_PARTICLE_RE = re.compile(r"P(\d+)(?!\d)" + _PARTICLE + "?")
 SQUAD_PARTICLE_RE = re.compile(r"(?<![A-Za-z0-9])([AB])(?![A-Za-z0-9])" + _PARTICLE + "?")
 # (받침 있을 때, 없을 때)
@@ -324,7 +325,8 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
         try:
             raw = _pool.submit(runner.invoke, call.messages).result(timeout=max(deadline - time.monotonic(), 0.01))
             if isinstance(raw, dict) and "parsed" in raw:  # include_raw=True 응답
-                version = (getattr(raw.get("raw"), "response_metadata", None) or {}).get("model_version")
+                meta = getattr(raw.get("raw"), "response_metadata", None) or {}
+                version = meta.get("model_version") or meta.get("model_name")  # Gemini 는 model_name 에 실제 버전을 담는다
                 used_model = version or used_model
                 if raw.get("parsing_error") is not None or raw.get("parsed") is None:
                     reason = "schema"
