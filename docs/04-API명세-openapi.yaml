@@ -2200,6 +2200,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /assignments/candidates/{candidate_id}/ai-explanation:
+    post:
+      summary: AI 배정 설명 (매니저용)
+      tags:
+      - AI 설명
+      parameters:
+      - name: candidate_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiExplanation'
+        '403':
+          description: FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /events/{event_id}/assignment/adopted/ai-message:
+    get:
+      summary: AI 한마디 (팀원용)
+      tags:
+      - AI 설명
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiMessage'
+        '403':
+          description: NOT_A_MEMBER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_ADOPTED_YET
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /admin/users:
     get:
       summary: 전체 사용자 검색
@@ -2483,6 +2555,40 @@ components:
       - candidate_id
       - strategy
       - squads
+    AiExplanation:
+      properties:
+        summary:
+          type: string
+        reasons:
+          items:
+            type: string
+          type: array
+        watch_point:
+          type: string
+        fallback:
+          type: boolean
+        text:
+          type: string
+          nullable: true
+        cached:
+          type: boolean
+      type: object
+      required:
+      - summary
+      - reasons
+      - watch_point
+      - fallback
+    AiMessage:
+      properties:
+        message:
+          type: string
+          nullable: true
+        fallback:
+          type: boolean
+      type: object
+      required:
+      - message
+      - fallback
     AnswerType:
       type: string
       enum:

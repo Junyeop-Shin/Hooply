@@ -23,6 +23,7 @@ import { teamsApi } from '../api/teams'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
 import { AdoptedTactics } from '../components/tactics'
+import { AiExplainCard, AiMessageCard } from '../components/ai-cards'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
 const STRATEGY_LABEL: Record<Strategy, string> = { SKILL: '실력 우선', CHEMISTRY: '친화도 우선', BALANCED: '종합' }
@@ -242,6 +243,9 @@ export function AssignPage() {
 }
 
 /* ============================ S-13 결과 (매니저) ============================ */
+/** 명단이 바뀌면 달라지는 값 — AI 설명을 새로 부를지 가르는 데 쓴다 */
+const rosterKey = (squads: SquadView[]) => squads.map((sq) => sq.members.map((m) => m.id).sort((a, b) => a - b).join('.')).join('|')
+
 export function RunResultPage() {
   const { runId } = useParams()
   const id = Number(runId)
@@ -356,6 +360,7 @@ export function RunResultPage() {
           <p className="mb-1 text-sm font-bold text-ink">이렇게 나눈 이유</p>
           <p className="whitespace-pre-line text-sm text-muted">{cand.explanation}</p>
         </Card>
+        <AiExplainCard candidateId={cand.id} rosterKey={rosterKey(cand.squads)} />
         <PositionTable squads={cand.squads} />
       </Content>
       <BottomAction>
@@ -486,6 +491,7 @@ export function AdoptedPage() {
       <Content>
         <FirstTimeTip id="adopted" />
         <Card><p className="text-sm text-ink-2 whitespace-pre-line">{v.explanation}</p></Card>
+        {isManager ? <AiExplainCard candidateId={v.candidate_id} rosterKey={rosterKey(v.squads)} /> : v.my_squad_no !== null && <AiMessageCard eventId={id} />}
         <Card className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-ink">단체방에 팀 구성 보내기</p>

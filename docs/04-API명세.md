@@ -45,7 +45,7 @@
 | VoteTargets, VoteCandidate, VoteIn, PostGameSurveyIn, ShareMessage, PlayerStats, MarginPoint, QuarterRecord, RatingChange, LeaderboardEntry | 투표·통계 |
 | AdminUserRow, PlayerRawData, RatingAdjust, AuditLogView | 관리자 |
 
-## 4. 엔드포인트 요약 (85개)
+## 4. 엔드포인트 요약 (87개)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -148,6 +148,8 @@
 | POST | `/assignments/candidates/{candidate_id}:reset` | 수동 수정 초기화 | 200 · 409 |
 | POST | `/assignments/candidates/{candidate_id}:adopt` | 후보안 확정 | 200 · 409 |
 | GET | `/events/{event_id}/assignment/adopted` | 확정된 배정 결과 | 200 · 404 |
+| POST | `/assignments/candidates/{candidate_id}/ai-explanation` | AI 배정 설명 — LangChain 체인 A (매니저, 같은 배정이면 저장한 결과) | 200 · 403 · 404 · 429 |
+| GET | `/events/{event_id}/assignment/adopted/ai-message` | AI 한마디 — 체인 B (팀원, 내 것만, 팀마다 한 번 호출) | 200 · 403 · 404 · 429 |
 
 ### 경기 기록
 
@@ -217,7 +219,7 @@
 | S-05/06/07 팀 | POST /teams, POST /teams/join, GET /teams/{id}, GET /teams/{id}/players, GET /teams/{id}/events, GET /events/{id}/assignment/adopted |
 | S-08 팀 관리 · S-19 정렬 · S-20 지표 · S-21 리더보드 | PATCH /teams/{id}, POST …/code:regenerate, PATCH …/players/{pid}/role, DELETE …/players/{pid}, GET …/guests/merge-candidates, POST /players/{id}:merge, GET/POST /teams/{id}/rankings, GET /players/{id}/stats, GET /teams/{id}/stats/leaderboard |
 | S-09/10/11 일정·참석·게스트 | POST /teams/{id}/events, GET/PATCH/DELETE /events/{id}, POST /events/{id}/rsvp:close, PUT /events/{id}/attendance, PUT /events/{id}/attendances/{pid}, GET /events/{id}/attendances, POST/PATCH/DELETE /events/{id}/guests…, GET /events/{id}/guests/presets |
-| S-12/13/14 배정 | GET /events/{id}/assignment/suggestions, POST /events/{id}/assignments:validate, POST /events/{id}/assignments, GET /events/{id}/assignments/last-constraints, GET /assignments/runs/{id}, PATCH /assignments/candidates/{id}, POST …:reset, POST …:adopt, GET /events/{id}/assignment/adopted |
+| S-12/13/14 배정 | POST /assignments/candidates/{id}/ai-explanation, GET /events/{id}/assignment/adopted/ai-message, GET /events/{id}/assignment/suggestions, POST /events/{id}/assignments:validate, POST /events/{id}/assignments, GET /events/{id}/assignments/last-constraints, GET /assignments/runs/{id}, PATCH /assignments/candidates/{id}, POST …:reset, POST …:adopt, GET /events/{id}/assignment/adopted |
 | S-15 쿼터 · S-22 지난 기록 | GET/PUT/POST /events/{id}/quarters, PATCH/DELETE /quarters/{id} (+ 일정·참석·게스트 API) |
 | S-16 투표 | GET/POST /events/{id}/post-game-survey, GET …/candidates, GET …/share-message |
 | S-18 관리자 | GET /admin/users, GET /admin/teams, POST /admin/teams/{id}:approve|:reject, GET /admin/players/{id}/raw, PATCH /admin/players/{id}/rating, GET /admin/audit-logs |

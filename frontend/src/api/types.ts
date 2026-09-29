@@ -673,3 +673,18 @@ export interface EventPlayView {
   my_squad_no: number | null
   squads: SquadBoard[]
 }
+
+// --- AI 배정 설명 (docs/07 F19) ---
+
+/** 체인 A (매니저용). fallback 이면 AI 문장 대신 text(기존 규칙 설명) */
+export interface AiExplanation {
+  summary: string
+  reasons: string[]
+  watch_point: string
+  fallback: boolean
+  text: string | null
+  cached: boolean
+}
+
+/** 체인 B (팀원용) — 내 것만 */
+export interface AiMessage { message: string | null; fallback: boolean }

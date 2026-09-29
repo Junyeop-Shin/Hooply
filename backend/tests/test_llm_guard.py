@@ -85,8 +85,12 @@ def _call(**over) -> g.ChainCall:
 
 def test_restore_reads_whole_numbers():
     a = _aliases()
-    assert a.restore("P1과 P10이 P3가 같은 팀") == "허재과 선수10이 서장훈가 같은 팀"
+    # 조사는 실명 받침에 맞춘다 (명세 O6). 숫자로 끝나는 이름은 조사를 그대로 둔다
+    assert a.restore("P1과 P10이 P3가 같은 팀") == "허재와 선수10이 서장훈이 같은 팀"
+    assert a.restore("P3는 P1을 P2로") == "서장훈은 허재를 강동희로"
+    assert a.restore("P1가드 역할") == "허재가드 역할"  # 뒤에 한글이 이어지면 조사가 아니다
     assert a.restore("A팀이 B보다") == "블랙팀이 화이트보다"
+    assert a.restore("A와 B는") == "블랙과 화이트는"
     assert a.restore("PG 포지션 · APP") == "PG 포지션 · APP"  # 가명이 아닌 글자는 그대로
 
 
@@ -135,7 +139,7 @@ def test_success_restores_names_and_drops_bad_sentence(db, fake_model):
     fake_model["reply"] = Explain(summary="A팀 P1이 볼을 운반해요.", reasons=["평균 차이 30%예요.", "슛 성공률 0.9 예요.", "P3가 골밑을 맡아요."])
     out = g.run(db, _call(), user_id=1)
     assert out.fallback is False and out.cached is False
-    assert out.output == {"summary": "블랙팀 허재이 볼을 운반해요.", "reasons": ["평균 차이 30%예요.", "서장훈가 골밑을 맡아요."]}
+    assert out.output == {"summary": "블랙팀 허재가 볼을 운반해요.", "reasons": ["평균 차이 30%예요.", "서장훈이 골밑을 맡아요."]}
     row = db.scalar(select(LlmResult))
     assert row.chain == "A" and row.fallback is False and "허재" in row.output["summary"]
 

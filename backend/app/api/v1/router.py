@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin,
+    ai,
     assignments,
     auth,
     events,
@@ -29,4 +30,5 @@ api_router.include_router(quarters.router)
 api_router.include_router(peer.router)
 api_router.include_router(tutorial.router)
 api_router.include_router(tactics.router)
+api_router.include_router(ai.router)
 api_router.include_router(admin.router)
