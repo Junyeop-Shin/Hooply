@@ -112,3 +112,5 @@ cd backend && uv run pytest -q
 | CI | `.github/workflows/ci.yml` | 푸시·PR 마다 위 세 가지를 GitHub Actions 에서 실행 (PostgreSQL 서비스 컨테이너 + 마이그레이션 + 데모 시드) |
 
 메일 발송은 `RESEND_API_KEY` 와 `MAIL_FROM` 을 넣으면 Resend 로 나가고, 없으면 재설정 링크가 서버 로그에 찍힌다 (로컬 확인용).
+
+AI 설명(docs/07)은 LangChain 으로 부른다. `LLM_API_KEY`(Gemini 는 Google AI Studio 키)를 넣으면 켜지고, 없으면 모든 AI 카드가 규칙 문장을 보여 준다. 다른 모델로 바꿀 때는 `LLM_MODEL`(예: `openai:gpt-5-mini`)과 키, 공급자 패키지만 바꾼다.

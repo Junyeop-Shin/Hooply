@@ -18,6 +18,8 @@ dependencies = [
     "numpy>=2.0",
     "sqladmin>=0.18",
     "itsdangerous>=2.2.0",
+    "langchain>=1.0",
+    "langchain-google-genai>=3.0",
 ]
 
 [dependency-groups]

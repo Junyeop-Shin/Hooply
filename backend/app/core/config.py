@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True  # 로그인·가입·비밀번호 경로 요청 제한 (core/ratelimit.py). 테스트에서는 끈다
     admin_cookie_secure: bool = False  # HTTPS 배포에서는 True (SQLAdmin 세션 쿠키 https_only + same_site=lax)
 
+    # --- AI 설명 (docs/07 D1·D2) --- LangChain 으로 부른다. 키가 없거나 꺼져 있으면 모든 AI 카드가 규칙 문장(폴백)을 보여 준다
+    llm_enabled: bool = True
+    # init_chat_model 형식 "<공급자>:<모델명>". 다른 모델로 바꿀 때는 이 값·LLM_API_KEY·공급자 패키지(langchain-openai 등)만 바꾼다
+    llm_model: str = "google_genai:gemini-2.5-flash"
+    llm_api_key: str = ""  # 서버 전용. 비우면 공급자 기본 환경 변수(GOOGLE_API_KEY 등)를 본다
+    llm_timeout_seconds: float = 8.0  # 넘으면 폴백 (FR-50)
+    llm_rate_per_minute: int = 5  # 사용자당 실제 호출 횟수 (캐시 적중은 세지 않는다)
+
     # --- 실력 지표 ---
     # 13.2절 1항: 첫 2회 모임 데이터는 실력 지표에 미반영
     # 팀 생성 직후의 노이즈가 설문 사전값을 망치지 않도록, 팀의 처음 N회 모임(events)은
