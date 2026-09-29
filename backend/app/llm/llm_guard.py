@@ -276,6 +276,12 @@ def _validate(call: ChainCall, raw: Any) -> tuple[dict[str, Any] | None, str | N
     return data, None
 
 
+def _error_reason(e: Exception) -> str:
+    """공급자 오류 → "error:<예외 이름>:<HTTP 상태>" (llm_results.fail_reason 40자). 모델 이름 오류(404) · 키 오류(400/403) · 한도(429)를 가른다."""
+    code = next((getattr(e, a) for a in ("status_code", "code", "status") if isinstance(getattr(e, a, None), int)), None)
+    return (f"error:{type(e).__name__}" + (f":{code}" if code else ""))[:40]
+
+
 def _store(db: Session, call: ChainCall, key: str, out: GuardOutcome) -> None:
     values = {
         "chain": call.chain, "cache_key": key, "output": out.output, "fallback": out.fallback,
@@ -307,9 +313,10 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
         data, reason = _validate(call, raw)
     except FutureTimeout:
         reason = "timeout"
-    except Exception as e:  # noqa: BLE001 — 공급자 오류는 모두 폴백. 이름이 섞일 수 있는 메시지는 남기지 않는다
-        reason = "schema" if type(e).__name__ == "OutputParserException" else "error"
-        log.warning("llm chain=%s error=%s", call.chain, type(e).__name__)
+    except Exception as e:  # noqa: BLE001 — 공급자 오류는 모두 폴백
+        reason = "schema" if type(e).__name__ == "OutputParserException" else _error_reason(e)
+        # 보낸 입력은 가명뿐이라 공급자 오류 문구에 실명이 섞이지 않는다. 원인(모델 이름·키·한도)을 알 수 있게 앞부분을 남긴다
+        log.warning("llm chain=%s error=%s %s", call.chain, type(e).__name__, str(e)[:300])
     latency = int((time.monotonic() - t0) * 1000)
     out = (
         GuardOutcome(output=data, fallback=False, latency_ms=latency)

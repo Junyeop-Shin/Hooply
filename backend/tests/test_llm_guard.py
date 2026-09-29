@@ -258,3 +258,12 @@ def test_model_factory_builds_langchain_model_from_settings(monkeypatch):
     assert llm_model.structured(Explain) is not None
     assert llm_model.provider_of("openai:gpt-5-mini") == "openai"
     llm_model._build.cache_clear()
+
+
+def test_provider_error_reason_keeps_type_and_status(db, fake_model):
+    class ClientError(Exception):
+        code = 404
+
+    fake_model["reply"] = ClientError("models/x is not found")
+    out = g.run(db, _call(), user_id=1)
+    assert out.fallback is True and out.fail_reason == "error:ClientError:404"
