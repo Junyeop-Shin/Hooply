@@ -63,7 +63,8 @@ def chat_model(*, fallback: bool = False) -> BaseChatModel | None:
 def structured(schema: type[BaseModel], *, fallback: bool = False) -> Runnable | None:
     """스키마대로 답하는 Runnable. 모델을 쓸 수 없으면 None. 테스트는 이 함수를 가짜 Runnable 로 바꿔 끼운다."""
     m = chat_model(fallback=fallback)
-    return m.with_structured_output(schema) if m is not None else None
+    # include_raw: 파싱 결과와 함께 원본 응답도 받아, 별칭(…-latest)이 실제로 가리킨 모델 버전을 기록한다
+    return m.with_structured_output(schema, include_raw=True) if m is not None else None
 
 
 def model_name(*, fallback: bool = False) -> str:

@@ -33,7 +33,8 @@ export function TacticBoardPage() {
   })
   const play: Play | undefined = view.data?.play ?? presets.data?.items.find((p) => p.key === key)
 
-  if (!play) {
+  // 일정 배치를 불러오는 동안 일정 없는 전술판을 먼저 그리면, 다 불러온 뒤 전술판이 새로 그려지며 그 사이 누른 재생·다음이 사라진다
+  if (!play || (eventId !== null && view.isLoading)) {
     return (
       <Screen>
         <TopBar title="전술" back="/" />

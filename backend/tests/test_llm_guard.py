@@ -232,7 +232,7 @@ def test_rate_limit_per_user(db, fake_model, monkeypatch):
     ratelimit.reset()
     fake_model["reply"] = Explain(summary="P1 좋아요.", reasons=["x"])
     try:
-        for i in range(5):
+        for i in range(get_settings().llm_rate_per_minute):
             g.run(db, _call(key_parts={"n": i}), user_id=7)
         g.run(db, _call(key_parts={"n": 0}), user_id=7)  # 캐시 적중은 세지 않는다
         with pytest.raises(errors.RateLimited):
@@ -324,3 +324,18 @@ def test_transient_fallback_retried_sooner(db, fake_model):
 def test_is_transient():
     assert g.is_transient("timeout") and g.is_transient("error:GoogleAPIError:503") and g.is_transient("error:X:429")
     assert not g.is_transient("error:GoogleInvalidRequestError") and not g.is_transient("leak") and not g.is_transient(None)
+
+
+def test_raw_response_records_actual_model_version(db, monkeypatch):
+    """include_raw 응답이면 파싱 결과를 쓰고, 별칭이 가리킨 실제 모델 버전을 기록한다."""
+    from langchain_core.messages import AIMessage
+
+    raw = AIMessage(content="{}", response_metadata={"model_version": "gemini-9-flash-lite"})
+    reply = {"raw": raw, "parsed": Explain(summary="P1 좋아요.", reasons=["x"]), "parsing_error": None}
+    monkeypatch.setattr(llm_model, "structured", lambda schema, **_kw: RunnableLambda(lambda _m: reply))
+    out = g.run(db, _call(), user_id=1)
+    assert out.fallback is False and out.output["summary"] == "허재 좋아요."
+    assert db.scalar(select(LlmResult)).model == "gemini-9-flash-lite"
+    bad = {"raw": raw, "parsed": None, "parsing_error": ValueError("bad")}
+    monkeypatch.setattr(llm_model, "structured", lambda schema, **_kw: RunnableLambda(lambda _m: bad))
+    assert g.run(db, _call(key_parts={"z": 1}), user_id=1).fail_reason == "schema"

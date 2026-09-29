@@ -679,7 +679,9 @@ export interface EventPlayView {
 /** 체인 A (매니저용). fallback 이면 AI 문장 대신 text(기존 규칙 설명) */
 export interface AiExplanation {
   summary: string
-  reasons: string[]
+  key_players: string[] // 활약이 기대되는 선수
+  chemistry: string[] // 호흡이 좋을 조합
+  gaps: string[] // 부족한 역할
   watch_point: string
   fallback: boolean
   text: string | null
@@ -687,4 +689,11 @@ export interface AiExplanation {
 }
 
 /** 체인 B (팀원용) — 내 것만 */
-export interface AiMessage { message: string | null; fallback: boolean }
+export interface AiMessage {
+  in_assignment: boolean
+  why_position: string
+  role: string
+  partner: string
+  fallback: boolean
+  text: string | null
+}

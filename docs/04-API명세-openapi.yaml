@@ -2559,7 +2559,15 @@ components:
       properties:
         summary:
           type: string
-        reasons:
+        key_players:
+          items:
+            type: string
+          type: array
+        chemistry:
+          items:
+            type: string
+          type: array
+        gaps:
           items:
             type: string
           type: array
@@ -2575,19 +2583,28 @@ components:
       type: object
       required:
       - summary
-      - reasons
+      - key_players
+      - chemistry
+      - gaps
       - watch_point
       - fallback
     AiMessage:
       properties:
-        message:
+        in_assignment:
+          type: boolean
+        why_position:
           type: string
-          nullable: true
+        role:
+          type: string
+        partner:
+          type: string
         fallback:
           type: boolean
+        text:
+          type: string
+          nullable: true
       type: object
       required:
-      - message
       - fallback
     AnswerType:
       type: string

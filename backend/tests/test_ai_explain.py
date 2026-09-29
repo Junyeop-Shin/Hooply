@@ -19,8 +19,8 @@ NAMES = [r[0] for r in ROSTER]
 
 @pytest.fixture
 def fake(monkeypatch):
-    """체인에 따라 고정 결과를 돌려준다. sent 에 보낸 human 메시지를 모은다."""
-    state = {"calls": {"A": 0, "B": 0}, "sent": [], "b_text": "{p}는 {pos} 자리예요. 팀에 가드 {g}명이 있어 든든해요."}
+    """체인에 따라 입력의 판단을 그대로 옮긴 고정 결과를 돌려준다. sent 에 보낸 human 메시지를 모은다."""
+    state = {"calls": {"A": 0, "B": 0}, "sent": [], "leak": False}
 
     def structured(schema, **_kw):
         def respond(messages):
@@ -29,16 +29,22 @@ def fake(monkeypatch):
             data = json.loads(human)
             if schema is ExplainA:
                 state["calls"]["A"] += 1
-                spread = data["balance"]["skill_spread"]
+                teams = data["teams"]
                 return ExplainA(
-                    summary="A와 B의 실력이 비슷해요.",
-                    reasons=[f"평균 실력 차가 {spread}점이에요.", f"A는 {data['teams'][0]['size']}명이에요.", "P1이 볼을 운반해요."],
-                    watch_point="게스트 실력은 평균으로 가정했어요.",
+                    summary="A와 B가 고르게 나뉜 구성이에요.",
+                    key_players=[f"{t['team']} · {k['player']} — {k['role']}로 활약이 기대돼요" for t in teams for k in t["key_players"]],
+                    chemistry=[f"{t['team']} · {p['players'][0]}과 {p['players'][1]} — {p['why']}" for t in teams for p in t["pairs"]],
+                    gaps=[f"{t['team']} · {g}가 부족해요" for t in teams for g in t["gaps"]],
+                    watch_point="",
                 )
             state["calls"]["B"] += 1
-            guards = next((t for t in data["team_traits"] if t.startswith("가드")), "가드 0명").split()[1].rstrip("명")
             return TeamMessagesB(messages=[
-                PlayerMessage(player=p["id"], message=state["b_text"].format(p=p["id"], pos=p["position"] or "자유", g=guards))
+                PlayerMessage(
+                    player=p["id"],
+                    why_position=f"{p['id']}님은 {p['position_why'][0] if p['position_why'] else '팀 구성상'} 자리예요.",
+                    role=("등급이 높은 편이라 " if state["leak"] else "") + f"{p['role']} 역할이 기대돼요.",
+                    partner=f"{p['partners'][0]['with']}와 {p['partners'][0]['why']}를 맞춰 보세요." if p["partners"] else "",
+                )
                 for p in data["players"]
             ])
         return RunnableLambda(respond)
@@ -64,9 +70,9 @@ def test_no_key_everything_falls_back(client, club, monkeypatch):
     r = client.post(f"{API}/assignments/candidates/{cand['id']}/ai-explanation", headers=club["manager"])
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["fallback"] is True and body["text"] == cand["explanation"] and body["reasons"] == []
+    assert body["fallback"] is True and body["text"] == cand["explanation"] and body["key_players"] == []
     r = client.get(f"{API}/events/{eid}/assignment/adopted/ai-message", headers=club["members"][3])
-    assert r.status_code == 200 and r.json()["fallback"] is True and r.json()["message"]
+    assert r.status_code == 200 and r.json()["fallback"] is True and r.json()["text"]
 
 
 def test_manager_explanation_uses_aliases_and_restores(client, club, fake):
@@ -76,10 +82,13 @@ def test_manager_explanation_uses_aliases_and_restores(client, club, fake):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["fallback"] is False and body["cached"] is False and body["text"] is None
-    assert body["summary"] == "블랙과 화이트의 실력이 비슷해요."  # 팀 가명도 실명으로, 조사는 받침에 맞게
-    assert len(body["reasons"]) == 3 and not any(r.startswith("P1") for r in body["reasons"])
-    # 보낸 입력에는 실명이 없다
+    assert body["summary"] == "블랙과 화이트가 고르게 나뉜 구성이에요."  # 팀 가명도 실명으로, 조사는 받침에 맞게
+    assert body["key_players"] and all(k.startswith(("블랙 · ", "화이트 · ")) for k in body["key_players"])
+    assert not any("P" in c.split("—")[0] for c in body["chemistry"])  # 가명이 남지 않는다
+    # 보낸 입력: 실명 없음, 판단 재료(활약 · 조합 · 부족한 역할)는 들어 있다
+    sent = json.loads(fake["sent"][0])
     assert not any(name in fake["sent"][0] for name in NAMES)
+    assert {"key_players", "pairs", "gaps"} <= set(sent["teams"][0])
     # T11: 같은 배정은 다시 부르지 않는다
     again = client.post(f"{API}/assignments/candidates/{cand['id']}/ai-explanation", headers=m).json()
     assert again["cached"] is True and fake["calls"]["A"] == 1
@@ -113,28 +122,63 @@ def test_member_messages_one_call_per_team(client, club, fake):
         r = client.get(f"{API}/events/{eid}/assignment/adopted/ai-message", headers=h)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["fallback"] is False and body["message"]
-        seen.add(body["message"])
+        assert body["fallback"] is False and body["role"] and body["why_position"]
+        seen.add(body["why_position"])
     assert fake["calls"]["B"] == 2
     assert len(seen) == len(club["members"])  # 사람마다 자기 문장
     for sent in fake["sent"]:
         data = json.loads(sent)
-        assert "avg_skill" not in sent and "skill" not in sent
+        assert "skill" not in sent and "avg" not in sent  # 실력 값 없음
         assert not any(name in sent for name in NAMES)
-        assert set(data) == {"team", "players", "team_traits", "mutual_picks"}
-    # 받은 문장은 실명으로 돌아와 있고 조사도 받침에 맞다 (예: "이정현은")
-    me = client.get(f"{API}/events/{eid}/assignment/adopted/ai-message", headers=club["members"][1]).json()["message"]
-    assert me.startswith("이정현은 ")
+        assert set(data) == {"team", "players"}
+        assert set(data["players"][0]) == {"id", "position", "position_why", "role", "strengths", "partners"}
+    # 받은 문장은 실명으로 돌아와 있다
+    me = client.get(f"{API}/events/{eid}/assignment/adopted/ai-message", headers=club["members"][1]).json()
+    assert me["why_position"].startswith("이정현님은 ")
 
 
 def test_member_message_leak_falls_back(client, club, fake):
-    fake["b_text"] = "{p}는 등급이 높은 편이라 공을 자주 잡아요."
+    fake["leak"] = True
     eid, _, _ = _adopt(client, club)
     body = client.get(f"{API}/events/{eid}/assignment/adopted/ai-message", headers=club["members"][2]).json()
-    assert body["fallback"] is True and "등급" not in body["message"]
+    assert body["fallback"] is True and body["role"] == "" and "등급" not in (body["text"] or "")
 
 
 def test_member_message_requires_adoption(client, club):
     eid, _ = _event_with_attendance(client, club)
     r = client.get(f"{API}/events/{eid}/assignment/adopted/ai-message", headers=club["members"][2])
     assert r.status_code == 404 and r.json()["code"] == "NOT_ADOPTED_YET"
+
+
+def test_insight_pairs_gaps_and_position_reasons(client, club, fake, monkeypatch):
+    """판단은 규칙이 한다: 역할 궁합(픽앤롤 등) · 상호 지목 · 부족한 역할 · 포지션 이유가 입력에 들어간다."""
+    from collections import defaultdict
+
+    from app.services import ai_insight
+    from app.tactics.play import ROLES
+    from app.tactics.roles import PlayerRoles
+
+    cycle = ["ball_handler", "screener_roll", "shooter", "post", "cutter", "spacer"]
+
+    def fake_scores(_db, _event, players):
+        out = {}
+        for i, pid in enumerate(sorted(players)):
+            top = cycle[i % len(cycle)]
+            out[pid] = PlayerRoles(player_id=pid, scores={r: (0.9 if r == top else 0.3) for r in ROLES}, terms=defaultdict(float))
+        return out
+
+    monkeypatch.setattr(ai_insight, "role_scores_for", fake_scores)
+    eid, _, cand = _adopt(client, club)
+    client.post(f"{API}/assignments/candidates/{cand['id']}/ai-explanation", headers=club["manager"])
+    sent = json.loads(fake["sent"][-1])
+    whys = {p["why"] for t in sent["teams"] for p in t["pairs"]}
+    assert whys & {"픽앤롤", "인사이드-아웃", "돌파 후 킥아웃 3점", "컷인 패스", "포스트에서 컷인 패스", "스크린으로 슈터 살리기"}
+    for t in sent["teams"]:
+        assert all(g in ai_insight.ROLE_KO.values() for g in t["gaps"])
+        assert len(t["key_players"]) <= 2
+
+    client.get(f"{API}/events/{eid}/assignment/adopted/ai-message", headers=club["members"][1])
+    team = json.loads(fake["sent"][-1])
+    p = team["players"][0]
+    assert p["position_why"] and p["role"] in ai_insight.ROLE_KO.values()
+    assert all(q["with"].startswith("P") for q in p["partners"]) and len(p["partners"]) <= 2

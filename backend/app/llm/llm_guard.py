@@ -323,6 +323,13 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
     for attempt in range(2):  # 일시적 오류면 남은 시간 안에서 한 번 더 (두 번째는 예비 모델)
         try:
             raw = _pool.submit(runner.invoke, call.messages).result(timeout=max(deadline - time.monotonic(), 0.01))
+            if isinstance(raw, dict) and "parsed" in raw:  # include_raw=True 응답
+                version = (getattr(raw.get("raw"), "response_metadata", None) or {}).get("model_version")
+                used_model = version or used_model
+                if raw.get("parsing_error") is not None or raw.get("parsed") is None:
+                    reason = "schema"
+                    break
+                raw = raw["parsed"]
             data, reason = _validate(call, raw)
             detail = None
             break

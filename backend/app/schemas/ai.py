@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field
 class AiExplanation(BaseModel):
     """체인 A (매니저용). `fallback=true` 면 AI 문장 대신 `text`(기존 규칙 설명)를 보여 준다."""
 
-    summary: str
-    reasons: list[str]
+    summary: str = Field(description="두 팀 색깔을 대비한 핵심 한 문장")
+    key_players: list[str] = Field(description="활약이 기대되는 선수 (팀 · 선수 · 기대 장면)")
+    chemistry: list[str] = Field(description="호흡이 좋을 조합 (두 사람 · 이유)")
+    gaps: list[str] = Field(description="부족한 역할이 있는 팀")
     watch_point: str
     fallback: bool
     text: str | None = Field(default=None, description="폴백일 때 보여 줄 규칙 설명")
@@ -15,7 +17,11 @@ class AiExplanation(BaseModel):
 
 
 class AiMessage(BaseModel):
-    """체인 B (팀원용) — 내 것만. 배정에 들지 않았으면 message=None."""
+    """체인 B (팀원용) — 내 것만. 배정에 들지 않았으면 in_assignment=false."""
 
-    message: str | None
+    in_assignment: bool = True
+    why_position: str = ""  # 왜 이 포지션을 맡았는지
+    role: str = ""  # 이 팀에서 기대하는 역할
+    partner: str = ""  # 호흡을 맞추면 좋을 동료
     fallback: bool
+    text: str | None = Field(default=None, description="폴백일 때 보여 줄 규칙 설명")

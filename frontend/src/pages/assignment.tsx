@@ -356,11 +356,7 @@ export function RunResultPage() {
             {(marks.locked.size > 0 || marks.pinned.size > 0 || marks.sepGroup.size > 0) && <><br />묶음은 함께 움직이고, 고정은 그대로, 분리는 짝과 팀을 바꿔요.</>}
           </p>
         )}
-        <Card>
-          <p className="mb-1 text-sm font-bold text-ink">이렇게 나눈 이유</p>
-          <p className="whitespace-pre-line text-sm text-muted">{cand.explanation}</p>
-        </Card>
-        <AiExplainCard candidateId={cand.id} rosterKey={rosterKey(cand.squads)} />
+        <AiExplainCard candidateId={cand.id} rosterKey={rosterKey(cand.squads)} fallbackText={cand.explanation} />
         <PositionTable squads={cand.squads} />
       </Content>
       <BottomAction>
@@ -490,8 +486,9 @@ export function AdoptedPage() {
       </div>
       <Content>
         <FirstTimeTip id="adopted" />
-        <Card><p className="text-sm text-ink-2 whitespace-pre-line">{v.explanation}</p></Card>
-        {isManager ? <AiExplainCard candidateId={v.candidate_id} rosterKey={rosterKey(v.squads)} /> : v.my_squad_no !== null && <AiMessageCard eventId={id} />}
+        {isManager
+          ? <AiExplainCard candidateId={v.candidate_id} rosterKey={rosterKey(v.squads)} fallbackText={v.explanation} />
+          : v.my_squad_no !== null ? <AiMessageCard eventId={id} fallbackText={v.explanation} /> : <Card><p className="whitespace-pre-line text-sm text-ink-2">{v.explanation}</p></Card>}
         <Card className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-ink">단체방에 팀 구성 보내기</p>

@@ -87,7 +87,8 @@ class Settings(BaseSettings):
     llm_api_key: str = ""  # 서버 전용. 비우면 공급자 기본 환경 변수(GOOGLE_API_KEY 등)를 본다
     # 넘으면 폴백 (FR-50). 명세는 8초였지만 Gemini 는 10초 미만 마감을 거절하고(400), 최신 Flash 는 답 전에 생각하는 시간이 있어 15초로
     llm_timeout_seconds: float = 15.0
-    llm_rate_per_minute: int = 5  # 사용자당 실제 호출 횟수 (캐시 적중은 세지 않는다)
+    # 사용자당 분당 실제 호출 횟수 (캐시 적중은 세지 않는다). 설명이 화면에 바로 뜨고 배정안 3개를 오가므로 5에서 10으로
+    llm_rate_per_minute: int = 10
 
     # --- 실력 지표 ---
     # 13.2절 1항: 첫 2회 모임 데이터는 실력 지표에 미반영
