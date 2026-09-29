@@ -121,7 +121,7 @@ def explain_candidate(db: Session, cand: AssignmentCandidate, user: User) -> AiE
     return AiExplanation(
         summary=o.get("summary", ""), key_players=o.get("key_players", []), chemistry=o.get("chemistry", []),
         gaps=o.get("gaps", []), watch_point=o.get("watch_point", ""),
-        text=o.get("text") if out.fallback else None, fallback=out.fallback, cached=out.cached,
+        text=o.get("text") if out.fallback else None, fallback=out.fallback, cached=out.cached, fail_reason=out.fail_reason,
     )
 
 
@@ -170,8 +170,8 @@ def member_message(db: Session, event: Event, me: Player, user: User) -> AiMessa
     out = llm_guard.run(db, call, user_id=user.id)
     mine_msg = out.output.get("by_player", {}).get(str(me.id))
     if not mine_msg:
-        return AiMessage(fallback=True, text=fallback_text)
-    return AiMessage(fallback=out.fallback, **mine_msg)
+        return AiMessage(fallback=True, text=fallback_text, cached=out.cached, fail_reason=out.fail_reason or "missing_player")
+    return AiMessage(fallback=out.fallback, cached=out.cached, fail_reason=out.fail_reason, **mine_msg)
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +255,6 @@ def explain_tactics(db: Session, event: Event, me: Player, user: User, *, squad_
     out = llm_guard.run(db, call, user_id=user.id)
     o = out.output
     return AiTactics(
-        squad_no=squad_no, one_liner=o.get("one_liner", ""), fallback=out.fallback, cached=out.cached,
+        squad_no=squad_no, one_liner=o.get("one_liner", ""), fallback=out.fallback, cached=out.cached, fail_reason=out.fail_reason,
         items=[AiTacticItem(play_key=f"preset:{it['play_id']}", reason=it["reason"], key_roles=it["key_roles"], caution=it["caution"]) for it in o["items"]],
     )

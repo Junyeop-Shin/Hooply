@@ -2626,6 +2626,9 @@ components:
           nullable: true
         cached:
           type: boolean
+        fail_reason:
+          type: string
+          nullable: true
       type: object
       required:
       - summary
@@ -2647,6 +2650,11 @@ components:
         fallback:
           type: boolean
         text:
+          type: string
+          nullable: true
+        cached:
+          type: boolean
+        fail_reason:
           type: string
           nullable: true
       type: object
@@ -2684,6 +2692,9 @@ components:
           type: boolean
         cached:
           type: boolean
+        fail_reason:
+          type: string
+          nullable: true
       type: object
       required:
       - squad_no

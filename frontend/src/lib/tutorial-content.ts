@@ -2,7 +2,7 @@
  * 시작 안내 문장 — 기능별 첫 안내(TIPS)와 체크리스트를 마친 뒤 보여 주는 흐름표(FLOW). 화면은 components/tutorial.tsx.
  * TIPS 의 키는 서버 tutorial_service.TIP_IDS 와 같아야 한다. help 는 도움말 주제 id (/help#id).
  */
-export type TipId = 'assign' | 'quarters' | 'vote' | 'adopted' | 'records'
+export type TipId = 'assign' | 'quarters' | 'vote' | 'adopted' | 'records' | 'tactics'
 
 export const TIPS: Record<TipId, { title: string; lines: string[]; help: string }> = {
   assign: {
@@ -46,6 +46,15 @@ export const TIPS: Record<TipId, { title: string; lines: string[]; help: string 
       '배지: 함께한 행동으로 얻어요. 칸을 누르면 다음 단계까지 남은 양이 보여요.',
     ],
     help: 'records-tab',
+  },
+  tactics: {
+    title: '전술 탭에서 할 수 있는 것',
+    lines: [
+      '팀 배정이 확정되면 그날 팀에 맞는 전술이 자동으로 추천돼요. 괄호 안은 그 자리의 예비예요.',
+      '전술을 누르면 전술판에서 단계별로 재생돼요. 멈춰 있을 때는 다음 움직임이 화살표로 보여요.',
+      '"AI 코치"는 전술이 왜 맞는지를 문장으로 풀어 줘요. 추천과 자리는 앱의 규칙이 정해요.',
+    ],
+    help: 'tactics',
   },
 }
 

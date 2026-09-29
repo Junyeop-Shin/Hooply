@@ -29,7 +29,7 @@ from app.models.enums import (
 from app.schemas.tutorial import TutorialStep, TutorialUpdate, TutorialView
 
 # 기능별 첫 안내 — 화면 쪽 lib/tutorial-content.ts 의 키와 같아야 한다
-TIP_IDS = frozenset({"assign", "quarters", "vote", "adopted", "records"})
+TIP_IDS = frozenset({"assign", "quarters", "vote", "adopted", "records", "tactics"})
 
 
 def update(db: Session, user: User, body: TutorialUpdate) -> User:

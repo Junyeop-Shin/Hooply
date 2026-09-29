@@ -16,6 +16,7 @@ import { tacticsApi } from '../api/tactics'
 import { localISODate, type AiTacticItem, type EventView, type PlayLineup, type SlotLineup, type SquadRecommendation } from '../api/types'
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
 import { Thinking, TypedSections } from './ai-cards'
+import { FirstTimeTip } from './tutorial'
 import { Badge, Card, EmptyState, SectionTitle, Spinner } from './ui'
 
 export const CIRCLED = ['①', '②', '③', '④', '⑤']
@@ -63,6 +64,7 @@ export function TacticsTab({ teamId }: { teamId: number }) {
 
   return (
     <div className="space-y-5">
+      <FirstTimeTip id="tactics" />
       {loading ? <Spinner /> : event && !(rec.error instanceof ApiError && rec.error.status === 403) && (
         <EventRecommend event={event} zone={zone} setZone={setZone} rec={rec} />
       )}

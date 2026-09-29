@@ -14,6 +14,7 @@ class AiExplanation(BaseModel):
     fallback: bool
     text: str | None = Field(default=None, description="폴백일 때 보여 줄 규칙 설명")
     cached: bool = False
+    fail_reason: str | None = Field(default=None, description="폴백 사유 코드 (timeout · leak · schema · error:… · disabled)")
 
 
 class AiMessage(BaseModel):
@@ -25,6 +26,8 @@ class AiMessage(BaseModel):
     partner: str = ""  # 호흡을 맞추면 좋을 동료
     fallback: bool
     text: str | None = Field(default=None, description="폴백일 때 보여 줄 규칙 설명")
+    cached: bool = False
+    fail_reason: str | None = None
 
 
 class AiTacticItem(BaseModel):
@@ -42,3 +45,4 @@ class AiTactics(BaseModel):
     items: list[AiTacticItem]
     fallback: bool
     cached: bool = False
+    fail_reason: str | None = None

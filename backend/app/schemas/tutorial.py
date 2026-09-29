@@ -32,4 +32,4 @@ class TutorialUpdate(BaseModel):
 
     state: Literal["ACTIVE", "CLOSED", "DONE", "DECLINED"] | None = None
     path: Literal["PLAYER", "MANAGER"] | None = None
-    tip_seen: str | None = Field(default=None, description="닫은 기능별 첫 안내 id (assign · quarters · vote · adopted · records)")
+    tip_seen: str | None = Field(default=None, description="닫은 기능별 첫 안내 id (assign · quarters · vote · adopted · records · tactics)")
