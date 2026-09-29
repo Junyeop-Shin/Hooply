@@ -1,6 +1,8 @@
 /**
- * S-29 전술판 (docs/07 FR-47). 경로: /tactics/:key?event=일정&squad=팀번호
+ * S-29 전술판 (docs/07 FR-47). 경로: /tactics/:key?event=일정&squad=팀번호&team=팀
  *
+ * - `key` 는 프리셋 키("high_pnr") 또는 팀이 만든 전술("team_12", docs/07 FR-57). 팀 전술은 `team`(또는 일정의 팀)이 있어야 연다.
+ * - 아래에 팀 안의 전술 댓글(FR-60). 팀 전술이면 매니저에게 "고치기".
  * - `event` 가 없으면 전술 설명만 (전술 탭 목록에서 들어왔고 그날 참석자가 아닌 경우).
  * - `event` 가 있으면 그날 그 팀(`squad`, 없으면 내 팀)의 자리 배치를 함께 보여 준다. 상대 팀으로 바꿔 보는 칸은 없다. 배치는 서버가 자동으로 추천한 것이고,
  *   매니저가 자리를 바꿔 저장했으면 그 배치다. 자리 목록에는 괄호로 예비(같은 전술판 5명 중 그 역할도 맞는 사람)를 단다.
@@ -8,12 +10,13 @@
  */
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
-import { tacticsApi } from '../api/tactics'
+import { tacticsApi, teamPlaysApi } from '../api/tactics'
 import type { EventPlayView, Play, SlotLineup, SquadBoard } from '../api/types'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { TacticBoard, type BoardTone } from '../components/tactic-board'
+import { TacticComments } from '../components/tactic-comments'
 import { CIRCLED, SlotPeople, TacticExplain, useAiTactics } from '../components/tactics'
 import { Alert, Badge, Button, SectionTitle, Spinner } from '../components/ui'
 import { DEFENSE_LABEL, ROLE_LABEL, renderCounter } from '../lib/tactics'
@@ -25,25 +28,39 @@ export function TacticBoardPage() {
   const { key = '' } = useParams()
   const [sp] = useSearchParams()
   const eventId = Number(sp.get('event')) || null
-  const playKey = `preset:${key}`
-  const presets = useQuery({ queryKey: ['tactics', 'presets'], queryFn: tacticsApi.presets, staleTime: Infinity })
+  const teamPlayId = key.startsWith('team_') ? Number(key.slice(5)) || null : null
+  const playKey = teamPlayId ? `team:${teamPlayId}` : `preset:${key}`
+  const presets = useQuery({ queryKey: ['tactics', 'presets'], queryFn: tacticsApi.presets, staleTime: Infinity, enabled: !teamPlayId })
   const view = useQuery({
     queryKey: ['tactics', 'event', eventId, playKey], queryFn: () => tacticsApi.play(eventId!, playKey), enabled: eventId !== null,
     retry: false,
   })
-  const play: Play | undefined = view.data?.play ?? presets.data?.items.find((p) => p.key === key)
+  const teamId = view.data?.team_id ?? (Number(sp.get('team')) || null)
+  const own = useQuery({
+    queryKey: ['tactics', 'team-play', teamId, teamPlayId], queryFn: () => teamPlaysApi.get(teamId!, teamPlayId!),
+    enabled: teamPlayId !== null && teamId !== null && !view.data, retry: false,
+  })
+  const play: Play | undefined = view.data?.play ?? (teamPlayId ? own.data?.play : presets.data?.items.find((p) => p.key === key))
+  const loading = presets.isLoading || view.isLoading || own.isLoading
 
   // 일정 배치를 불러오는 동안 일정 없는 전술판을 먼저 그리면, 다 불러온 뒤 전술판이 새로 그려지며 그 사이 누른 재생·다음이 사라진다
   if (!play || (eventId !== null && view.isLoading)) {
     return (
       <Screen>
         <TopBar title="전술" back="/" />
-        {presets.isLoading || view.isLoading ? <Spinner /> : <Content><Alert>없는 전술이에요.</Alert></Content>}
+        {loading ? <Spinner /> : <Content><Alert>없는 전술이에요.</Alert></Content>}
       </Screen>
     )
   }
+  const editPath = teamPlayId && teamId && (view.data?.can_edit ?? own.data?.can_edit) ? `/teams/${teamId}/plays/${teamPlayId}/edit` : null
   const withEvent = view.data && view.data.squads.length > 0 ? view.data : null
-  return withEvent ? <EventBoard play={play} view={withEvent} eventId={eventId!} /> : <PlainBoard play={play} note={view.isError ? errMsg(view.error, '') : null} />
+  return withEvent
+    ? <EventBoard play={play} view={withEvent} eventId={eventId!} editPath={editPath} />
+    : <PlainBoard play={play} note={view.isError ? errMsg(view.error, '') : null} teamId={teamId} playKey={playKey} editPath={editPath} />
+}
+
+function EditLink({ to }: { to: string | null }) {
+  return to ? <Link to={to} className="mr-1 text-sm font-semibold text-brand-ink">고치기</Link> : null
 }
 
 function PlayHeader({ play, context }: { play: Play; context?: ReactNode }) {
@@ -91,16 +108,17 @@ function RoleList({ play, slots, onTap }: { play: Play; slots?: SlotLineup[]; on
 }
 
 /** 일정 없이 전술만 볼 때 — 자리는 번호로 */
-function PlainBoard({ play, note }: { play: Play; note: string | null }) {
+function PlainBoard({ play, note, teamId, playKey, editPath }: { play: Play; note: string | null; teamId: number | null; playKey: string; editPath: string | null }) {
   return (
     <Screen>
-      <TopBar title="전술판" back="/" />
+      <TopBar title="전술판" back="/" right={<EditLink to={editPath} />} />
       <Content>
         <PlayHeader play={play} />
         <TacticExplain summary={play.summary} counter={renderCounter(play.counter)} />
         {note && <Alert kind="info">{note}</Alert>}
         <TacticBoard key={play.key} play={play} />
         <RoleList play={play} />
+        {teamId && <TacticComments teamId={teamId} playKey={playKey} />}
       </Content>
     </Screen>
   )
@@ -110,7 +128,7 @@ function PlainBoard({ play, note }: { play: Play; note: string | null }) {
  * 추천 전술에서 들어온 전술판 — 그 팀 전용. 상대 팀으로 바꿔 보는 칸은 없다 (팀원은 내 팀, 매니저는 들어온 팀).
  * 전술 소개 바로 아래에 추천 카드와 같은 "전술 설명"(AI 이유 · 핵심 자리 · 주의할 점 · 막히면)을 둔다.
  */
-function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; eventId: number }) {
+function EventBoard({ play, view, eventId, editPath }: { play: Play; view: EventPlayView; eventId: number; editPath: string | null }) {
   const [sp] = useSearchParams()
   const qc = useQueryClient()
   const zone = sp.get('zone') === '1'
@@ -164,7 +182,7 @@ function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; 
 
   return (
     <Screen>
-      <TopBar title="전술판" back="/" />
+      <TopBar title="전술판" back="/" right={<EditLink to={editPath} />} />
       <Content>
         <PlayHeader play={play} context={context} />
         {!lineup ? (
@@ -178,6 +196,7 @@ function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; 
             <RoleList play={play} slots={slots} onTap={view.can_edit ? setPicking : undefined} />
           </>
         )}
+        <TacticComments teamId={view.team_id} playKey={view.play_key} />
       </Content>
       {view.can_edit && lineup && (dirty || lineup.manual) && (
         <BottomAction>

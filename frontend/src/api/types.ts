@@ -675,8 +675,58 @@ export interface EventPlayView {
   play_key: string
   play: Play
   can_edit: boolean
+  team_id: number // 전술 댓글용
   my_squad_no: number | null
   squads: SquadBoard[]
+}
+
+// --- 팀이 직접 만든 전술 · 역할 태깅 · 댓글 (docs/07 FR-57 ~ FR-60) ---
+
+export type RoleSource = 'RULE' | 'AI' | 'MANAGER'
+
+/** 편집기가 보내는 전술. roles 를 비우면 서버가 규칙으로 채운다 */
+export interface TeamPlayIn {
+  name: string
+  summary: string
+  defense: Defense
+  situation: Situation
+  counter: string
+  start: CourtPoint[]
+  ball: number
+  steps: PlayStep[]
+  roles: TacticRole[] | null
+  role_source: RoleSource
+}
+
+export interface PlayCheck { playable: boolean; errors: string[]; roles: TacticRole[]; reasons: string[] }
+
+export interface RoleSuggestion {
+  roles: TacticRole[]
+  reasons: string[]
+  source: 'AI' | 'RULE'
+  fallback: boolean
+  cached: boolean
+  fail_reason: string | null
+}
+
+export interface TeamPlayView {
+  id: number
+  play_key: string // "team:<id>"
+  play: Play // key "team_<id>"
+  role_source: RoleSource
+  updated_at: string
+  updated_by_name: string | null
+  can_edit: boolean
+}
+
+export interface TacticComment {
+  id: number
+  body: string
+  author_player_id: number
+  author_name: string
+  created_at: string
+  mine: boolean
+  can_delete: boolean
 }
 
 // --- AI 배정 설명 (docs/07 F19) ---

@@ -14,24 +14,24 @@ import type { CourtPoint, Play, PlayAction } from '../api/types'
 import { RIM, frameAt, shownStep, stepStates, zigzag } from '../lib/tactics'
 import { SCREEN_CALL_LABEL, defenseFrameAt, simulateDefense, type DefenseKind, type ScreenCall } from '../lib/defense'
 
-const W = 150, H = 140
-const R = 5.6 // 선수 동그라미 반지름
+export const W = 150, H = 140
+export const R = 5.6 // 선수 동그라미 반지름
 const DR = 4.3 // 수비 동그라미 반지름
 const STEP_MS = 1300 // 1× 에서 한 단계 재생 시간
 const HOLD_MS = 450 // 연속 재생 때 단계 사이 멈춤
 const SPEEDS = [1, 2, 0.5] as const
-const OOB_H = 13 // 코트 밖 띠 높이 (베이스라인 뒤 약 1.3m)
+export const OOB_H = 13 // 코트 밖 띠 높이 (베이스라인 뒤 약 1.3m)
 
 export type BoardTone = 'black' | 'white' | 'neutral'
 
-const TONE: Record<BoardTone, { fill: string; ink: string; stroke: string }> = {
+export const TONE: Record<BoardTone, { fill: string; ink: string; stroke: string }> = {
   black: { fill: 'var(--color-team-black)', ink: 'var(--color-team-black-ink)', stroke: 'var(--color-team-black-sub)' },
   white: { fill: 'var(--color-team-white)', ink: 'var(--color-team-white-ink)', stroke: 'var(--color-team-white-ink)' },
   neutral: { fill: 'var(--color-inverse)', ink: 'var(--color-on-inverse)', stroke: 'var(--color-on-inverse)' },
 }
 
-const sx = (p: CourtPoint) => p.x * W
-const sy = (p: CourtPoint) => p.y * H
+export const sx = (p: CourtPoint) => p.x * W
+export const sy = (p: CourtPoint) => p.y * H
 
 function useReducedMotion() {
   const [reduced, setReduced] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
@@ -287,7 +287,7 @@ function CtrlButton({ label, onClick, disabled, primary, children }: { label: st
 }
 
 /** 하프코트 (FIBA). 라인은 반투명 오렌지 글자색이라 밝은·어두운 모드 모두에서 보인다 */
-function Court() {
+export function Court() {
   const line = { stroke: 'var(--color-brand-ink)', strokeOpacity: 0.45, strokeWidth: 0.7, fill: 'none' }
   return (
     <g>
@@ -313,7 +313,7 @@ function trim(x1: number, y1: number, x2: number, y2: number, a: number, b: numb
   return [x1 + ux * a, y1 + uy * a, x2 - ux * b, y2 - uy * b]
 }
 
-function ActionMark({ a, from, to, arrow, brandArrow }: { a: PlayAction; from: CourtPoint[]; to: CourtPoint[]; arrow: string; brandArrow: string }) {
+export function ActionMark({ a, from, to, arrow, brandArrow }: { a: PlayAction; from: CourtPoint[]; to: CourtPoint[]; arrow: string; brandArrow: string }) {
   const p = from[a.slot - 1]
   const ink = { stroke: 'var(--color-ink)', fill: 'none' }
   if ((a.type === 'move' || a.type === 'cut' || a.type === 'dribble') && a.to) {
@@ -354,7 +354,7 @@ function ActionMark({ a, from, to, arrow, brandArrow }: { a: PlayAction; from: C
 }
 
 /** 범례 한 줄 — 전술판과 같은 선 모양 */
-function Legend({ defense = false }: { defense?: boolean }) {
+export function Legend({ defense = false }: { defense?: boolean }) {
   const ink = { stroke: 'var(--color-ink)', fill: 'none' }
   const items: [string, ReactNode][] = [
     ['이동', <line key="m" x1={1} y1={4} x2={19} y2={4} style={ink} strokeWidth={1} />],

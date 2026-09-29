@@ -5,14 +5,14 @@
  *     (서버 `fit_min`)을 넘은 전술 중 상위 3개. 그날 참석자는 누구나 본다. 자리마다 가장 잘 맞는 사람과 괄호 안에
  *     예비(같은 전술판 5명 중 그 역할도 맞는 사람)를 보여 준다. 자리별 점수·속성은 설문에서 나온 개인 특성이라 매니저에게만.
  *     팀마다 "AI 코치" 한 줄과, 카드 안에 AI 가 쓴 이유 · 핵심 자리 · 주의할 점 (체인 C, docs/07 FR-52). 실패하면 규칙 정보만.
- * 아래: 전체 전술 목록. 누르면 전술판으로.
+ * 아래: 우리 팀이 직접 만든 전술(매니저는 "새 전술 만들기", docs/07 FR-57) · 전체 전술 목록 · 인바운드. 누르면 전술판으로.
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { eventsApi } from '../api/events'
-import { tacticsApi } from '../api/tactics'
+import { tacticsApi, teamPlaysApi } from '../api/tactics'
 import { localISODate, type AiTacticItem, type EventView, type Play, type PlayLineup, type SlotLineup, type SquadRecommendation } from '../api/types'
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
 import { Thinking, TypedSections } from './ai-cards'
@@ -21,7 +21,8 @@ import { Badge, Card, EmptyState, SectionTitle, Spinner } from './ui'
 
 export const CIRCLED = ['①', '②', '③', '④', '⑤']
 const mmdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`
-const keyOf = (playKey: string) => playKey.replace(/^preset:/, '')
+/** play_key → 전술판 주소의 키 ("preset:high_pnr" → "high_pnr", "team:12" → "team_12") */
+export const keyOf = (playKey: string) => playKey.replace(/^preset:/, '').replace(/^team:/, 'team_')
 export const boardPath = (playKey: string, eventId: number, squadNo: number, zone = false) =>
   `/tactics/${keyOf(playKey)}?event=${eventId}&squad=${squadNo}${zone ? '&zone=1' : ''}`
 
@@ -54,14 +55,15 @@ export function useRecommendation(eventId: number | null, zone: boolean) {
   })
 }
 
-export function TacticsTab({ teamId }: { teamId: number }) {
+export function TacticsTab({ teamId, manager = false }: { teamId: number; manager?: boolean }) {
   const nav = useNavigate()
   const { event, loading } = useUpcomingAdopted(teamId)
   const presets = useQuery({ queryKey: ['tactics', 'presets'], queryFn: tacticsApi.presets, staleTime: Infinity })
+  const own = useQuery({ queryKey: ['tactics', 'team-plays', teamId], queryFn: () => teamPlaysApi.list(teamId) })
   const [zone, setZone] = useState(false)
   const rec = useRecommendation(event?.id ?? null, zone)
-  // 그날 참석자면 목록에서 들어가도 전술판에 그날 자리 배치를 함께 보여 준다
-  const eventParam = event && rec.isSuccess ? `?event=${event.id}` : ''
+  // 그날 참석자면 목록에서 들어가도 전술판에 그날 자리 배치를 함께 보여 준다. team 은 댓글용
+  const eventParam = event && rec.isSuccess ? `?event=${event.id}&team=${teamId}` : `?team=${teamId}`
 
   return (
     <div className="space-y-5">
@@ -69,6 +71,17 @@ export function TacticsTab({ teamId }: { teamId: number }) {
       {loading ? <Spinner /> : event && !(rec.error instanceof ApiError && rec.error.status === 403) && (
         <EventRecommend event={event} zone={zone} setZone={setZone} rec={rec} />
       )}
+
+      <section>
+        <SectionTitle action={manager ? <Link to={`/teams/${teamId}/plays/new`} className="text-sm font-semibold text-brand-ink">+ 새 전술 만들기</Link> : undefined}>우리 팀 전술</SectionTitle>
+        {own.isLoading ? <Spinner /> : own.data?.items.length ? (
+          <PresetList items={own.data.items.map((v) => v.play)} onOpen={(k) => nav(`/tactics/${k}${eventParam}`)} />
+        ) : (
+          <p className="px-1 text-sm text-muted">
+            {manager ? '코트 위에 다섯 명의 움직임을 그려 우리 팀만의 전술을 만들 수 있어요. 역할은 AI가 붙여 줘요.' : '매니저가 만든 우리 팀 전술이 여기에 보여요.'}
+          </p>
+        )}
+      </section>
 
       <PresetGroup title="전술 목록" items={presets.data?.items.filter((p) => p.situation === 'half_court')} loading={presets.isLoading} onOpen={(k) => nav(`/tactics/${k}${eventParam}`)} />
       <PresetGroup
@@ -85,21 +98,25 @@ function PresetGroup({ title, desc, items, loading, onOpen }: { title: string; d
     <section>
       <SectionTitle>{title}</SectionTitle>
       {desc && <p className="-mt-1 mb-2 px-1 text-[11px] text-muted">{desc}</p>}
-      {loading ? <Spinner /> : (
-        <div className="space-y-2">
-          {items?.map((p) => (
-            <Card key={p.key} onClick={() => onOpen(p.key)} className="space-y-1 py-3" label={`${p.name} 전술판 보기`}>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-ink">{p.name}</span>
-                {p.situation === 'half_court' && <Badge tone={p.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[p.defense]}</Badge>}
-                <span className="ml-auto text-faint" aria-hidden="true">›</span>
-              </div>
-              <p className="text-xs text-muted">{p.summary}</p>
-            </Card>
-          ))}
-        </div>
-      )}
+      {loading ? <Spinner /> : <PresetList items={items ?? []} onOpen={onOpen} />}
     </section>
+  )
+}
+
+function PresetList({ items, onOpen }: { items: Play[]; onOpen: (key: string) => void }) {
+  return (
+    <div className="space-y-2">
+      {items.map((p) => (
+        <Card key={p.key} onClick={() => onOpen(p.key)} className="space-y-1 py-3" label={`${p.name} 전술판 보기`}>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-ink">{p.name}</span>
+            {p.situation === 'half_court' && <Badge tone={p.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[p.defense]}</Badge>}
+            <span className="ml-auto text-faint" aria-hidden="true">›</span>
+          </div>
+          <p className="text-xs text-muted">{p.summary}</p>
+        </Card>
+      ))}
+    </div>
   )
 }
 

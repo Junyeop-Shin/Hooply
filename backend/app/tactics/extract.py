@@ -11,7 +11,7 @@
   5. 골밑에서, 또는 안쪽(엘보·하이포스트)에서 시작해 미드레인지에서 공을 받는다 → 포스트
   6. 안쪽에서 시작해 3점 밖으로 빠진다 → 팝
   7. 3점 밖에서 공을 받거나 코너에서 기다린다 → 슈터
-  8. 엘보·하이포스트에 선다 → 포스트, 그 밖 → 스페이서 (외곽에서 자리만 지킨다)
+  8. 엘보·하이포스트나 골밑에 선다 → 포스트, 그 밖 → 스페이서 (외곽에서 자리만 지킨다)
 볼 핸들러가 한 명도 없으면 스크리너·커터가 아닌 사람 중 패스를 가장 많이 한 사람(같으면 처음 공을 가진 사람)으로 한다.
 프리셋 22개의 사람이 붙인 역할과 약 3분의 2가 같다 — 나머지는 "킥아웃을 기다리는 코너" 처럼 동작에 드러나지 않는 의도라서,
 AI 태깅과 매니저 수정으로 채운다.
@@ -100,6 +100,8 @@ def extract_roles(play: Play) -> list[tuple[Role, str]]:
             out.append(("shooter", "3점 밖(코너)에서 킥아웃을 기다려요"))
         elif inside_start and start_zone == "mid":
             out.append(("post", "하이포스트·엘보에서 공을 받을 자리를 잡아요"))
+        elif start_zone == "paint" and end_zone == "paint":
+            out.append(("post", "골밑에 자리를 잡고 공을 기다려요"))
         else:
             out.append(("spacer", f"{ZONE_KO[end_zone]}에서 자리를 지켜 공간을 넓혀요"))
     if not any(r == "ball_handler" for r, _ in out):
