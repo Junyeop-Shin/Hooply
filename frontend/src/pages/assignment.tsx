@@ -207,7 +207,7 @@ export function AssignPage() {
             const dark = sq === 1
             return (
               <div key={sq} className={`min-h-24 rounded-2xl border-2 p-3 ${dark ? 'border-team-black bg-team-black text-team-black-ink' : 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]'}`}>
-                <p className="text-sm font-bold">{dark ? '블랙' : '화이트'} 사전 배치 ({list.length}/{Math.ceil(attendees.length / 2)})</p>
+                <p className="text-sm font-bold">{dark ? '블랙' : '화이트'} 사전 배치 ({list.length}명)</p>
                 {list.length === 0 ? <p className={`mt-3 text-center text-xs ${dark ? 'text-team-black-sub' : 'text-team-white-sub'}`}>이름을 고른 뒤 배치하세요</p> : (
                   <ul className="mt-2 space-y-1 text-sm">
                     {list.map((a) => (

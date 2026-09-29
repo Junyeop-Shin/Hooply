@@ -148,10 +148,24 @@ def build_roster(db: Session, event: Event) -> list[RosterPlayer]:
     return roster
 
 
+MIN_SQUAD = 5  # 팀마다 코트에 설 5명은 있어야 한다
+
+
 def _squad_sizes(n: int, t: int) -> list[int]:
     """N명을 T팀으로 최대한 고르게. 13명 2팀 → [7, 6]."""
     base, extra = divmod(n, t)
     return [base + (1 if i < extra else 0) for i in range(t)]
+
+
+def _size_levels(n: int) -> list[list[int]]:
+    """2팀일 때 첫 팀(블랙) 인원 후보를 '고른 정도' 순으로 묶는다. 16명 → [[8], [7, 9], [6, 10], [5, 11]].
+
+    배정은 가장 고른 단계부터 해를 찾고, 묶음 때문에 그 단계에 해가 없을 때만 다음 단계(한 명씩 더 벌어진 인원)로
+    넘어간다 — 게스트 여럿을 한 팀으로 묶어 9:7 로 뛰려는 경우를 막지 않기 위해서. 어느 팀이든 5명 밑으로는 내려가지 않는다.
+    """
+    xs = [x for x in range(MIN_SQUAD, n - MIN_SQUAD + 1)]
+    gaps = sorted({abs(2 * x - n) for x in xs})
+    return [[x for x in xs if abs(2 * x - n) == g] for g in gaps]
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +211,8 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
         v.append(ConstraintViolation(code="PLAYER_NOT_IN_TEAM", message="참석 확정자가 아닌 인원이 제약에 들어 있어요.", player_ids=unknown))
 
     sizes = _squad_sizes(n, t) if t > 0 else []
-    capacity = max(sizes) if sizes else 0
+    # 한 팀이 가질 수 있는 최대 인원 = 상대 팀에 5명을 남기는 선. 고르게 못 나누면 인원을 벌려서라도 묶음을 지킨다
+    capacity = n - MIN_SQUAD * (t - 1) if t > 1 else n
 
     # Union-Find 로 LOCK 병합
     parent = {pid: pid for pid in rmap}
@@ -220,7 +235,7 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
 
     for i, ids in enumerate(supernodes):
         if len(ids) > capacity > 0:
-            v.append(ConstraintViolation(code="LOCK_GROUP_TOO_LARGE", message=f"묶음 그룹 인원({len(ids)}명)이 팀 정원({capacity}명)을 넘어요.", player_ids=ids, group_no=i))
+            v.append(ConstraintViolation(code="LOCK_GROUP_TOO_LARGE", message=f"묶음 그룹이 {len(ids)}명이라 상대 팀에 {MIN_SQUAD}명이 남지 않아요 (한 팀 최대 {capacity}명).", player_ids=ids, group_no=i))
 
     # SEPARATE: 슈퍼노드 쌍으로 변환. 같은 슈퍼노드 안에 있으면 충돌
     sep_pairs: set[tuple[int, int]] = set()
@@ -250,8 +265,8 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
     for node, sq in pins.items():
         pinned_count[sq] += len(supernodes[node])
     for sq, cnt in enumerate(pinned_count):
-        if sizes and cnt > sizes[sq]:
-            v.append(ConstraintViolation(code="SQUAD_OVERFLOW", message=f"{SQUAD_NAMES[sq]} 팀에 정원({sizes[sq]}명)보다 많은 {cnt}명이 배치됐어요."))
+        if sizes and cnt > capacity:
+            v.append(ConstraintViolation(code="SQUAD_OVERFLOW", message=f"{SQUAD_NAMES[sq]} 팀에 {cnt}명을 미리 배치하면 상대 팀에 {MIN_SQUAD}명이 남지 않아요 (한 팀 최대 {capacity}명)."))
     # SEPARATE 인데 같은 팀에 PIN
     for a, b in sep_pairs:
         if a in pins and b in pins and pins[a] == pins[b]:
@@ -285,31 +300,46 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
 
 
 def enumerate_partitions(prep: Prepared):
-    """슈퍼노드를 두 팀으로 나누는 모든 방법을 (squad index per node) 튜플로 낸다. PIN·SEPARATE·정원을 지킨다."""
+    """슈퍼노드를 두 팀으로 나누는 모든 방법을 (squad index per node) 튜플로 낸다. PIN·SEPARATE 를 지킨다.
+
+    인원은 가장 고른 단계(16명이면 8:8)의 해만 낸다. 묶음·사전 배치 때문에 그 단계에 해가 하나도 없을 때만
+    한 명씩 더 벌어진 단계(9:7 → 10:6 …, 팀마다 5명 이상)로 넘어간다. 해를 찾은 단계의 인원을 `prep.sizes` 에 적는다.
+    """
     nodes = list(range(len(prep.supernodes)))
     free = [i for i in nodes if i not in prep.pins]
     size = [len(prep.supernodes[i]) for i in nodes]
-    need0 = prep.sizes[0] - sum(size[i] for i, sq in prep.pins.items() if sq == 0)
-    if need0 < 0:
-        return
-    # 대칭 제거: PIN 이 없으면 첫 자유 노드는 항상 팀 0 (블랙/화이트 이름만 바뀌는 중복 해 제거)
+    n = sum(size)
+    pinned0 = sum(size[i] for i, sq in prep.pins.items() if sq == 0)
+    # 대칭 제거: PIN 이 없으면 첫 자유 노드는 항상 팀 0 (블랙/화이트 이름만 바뀌는 중복 해 제거).
+    # 팀 0 인원 후보를 단계마다 둘 다(9 와 7) 보므로 앵커가 큰 팀·작은 팀에 있는 경우를 모두 센다
     anchor = free[0] if free and not prep.pins else None
     sizes_free = sorted(size[i] for i in free)
-    for k in range(len(free) + 1):
-        # 가지치기: k개 노드로는 need0 를 못 채우는 k 는 조합을 아예 만들지 않는다
-        if sum(sizes_free[:k]) > need0 or sum(sizes_free[len(free) - k:]) < need0:
-            continue
-        for subset in itertools.combinations(free, k):
-            if anchor is not None and anchor not in subset:
+    for level in _size_levels(n):
+        found = False
+        for team0 in level:
+            need0 = team0 - pinned0
+            if need0 < 0:
                 continue
-            if sum(size[i] for i in subset) != need0:
-                continue
-            assign = dict(prep.pins)
-            for i in free:
-                assign[i] = 0 if i in subset else 1
-            if any(assign[a] == assign[b] for a, b in prep.separate_pairs):
-                continue
-            yield tuple(assign[i] for i in nodes)
+            for k in range(len(free) + 1):
+                # 가지치기: k개 노드로는 need0 를 못 채우는 k 는 조합을 아예 만들지 않는다
+                if sum(sizes_free[:k]) > need0 or sum(sizes_free[len(free) - k:]) < need0:
+                    continue
+                for subset in itertools.combinations(free, k):
+                    if anchor is not None and anchor not in subset:
+                        continue
+                    if sum(size[i] for i in subset) != need0:
+                        continue
+                    assign = dict(prep.pins)
+                    for i in free:
+                        assign[i] = 0 if i in subset else 1
+                    if any(assign[a] == assign[b] for a, b in prep.separate_pairs):
+                        continue
+                    if not found:
+                        found = True
+                        prep.sizes = [team0, n - team0]
+                    yield tuple(assign[i] for i in nodes)
+        if found:
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -637,17 +667,27 @@ def validate(db: Session, event: Event, body: AssignmentRunRequest) -> ValidateR
 def _validate_prepared(prep: Prepared) -> ValidateResult:
     if prep.violations:
         return ValidateResult(feasible=False, violations=prep.violations, warnings=prep.warnings)
-    # 분할 가능성: 해가 하나라도 있는지
+    # 분할 가능성: 해가 하나라도 있는지 (찾으면 prep.sizes 가 실제 인원으로 바뀐다)
+    ideal = list(prep.sizes)
     if next(enumerate_partitions(prep), None) is None:
         code = "SEPARATE_INFEASIBLE" if prep.separate_pairs else "LOCK_PARTITION_INFEASIBLE"
         msg = "갈라놓기 제약을 모두 만족하는 팀 구성이 없어요." if prep.separate_pairs else _partition_msg(prep)
         return ValidateResult(feasible=False, violations=[ConstraintViolation(code=code, message=msg)], warnings=prep.warnings)
+    _warn_uneven(prep, ideal)
     return ValidateResult(feasible=True, warnings=prep.warnings)
+
+
+def _warn_uneven(prep: Prepared, ideal: list[int]) -> None:
+    """묶음 때문에 고르게 못 나눴으면 알려 준다 (차단 아님)."""
+    if sorted(prep.sizes) != sorted(ideal):
+        note = f"묶음을 지키려고 두 팀 인원을 {max(prep.sizes)}:{min(prep.sizes)}로 나눴어요"
+        if note not in prep.warnings:
+            prep.warnings.append(note)
 
 
 def _partition_msg(prep: Prepared) -> str:
     sizes = sorted((len(ids) for ids in prep.supernodes if len(ids) > 1), reverse=True)
-    return f"{'명 그룹과 '.join(str(x) for x in sizes)}명 그룹으로는 {' · '.join(str(s) for s in prep.sizes)}명씩 두 팀을 만들 수 없어요."
+    return f"{'명 그룹과 '.join(str(x) for x in sizes)}명 그룹으로는 두 팀을 각각 {MIN_SQUAD}명 이상으로 나눌 수 없어요."
 
 
 def _raise_violations(vr: ValidateResult) -> None:

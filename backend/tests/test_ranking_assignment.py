@@ -167,19 +167,42 @@ def test_assignment_validation_errors(client, club):
     def violate(constraints):
         return client.post(f"{API}/events/{eid}/assignments:validate", json={"team_count": 2, "constraints": constraints}, headers=m).json()
 
-    assert violate({"lock_groups": [ids[:7]]})["violations"][0]["code"] == "LOCK_GROUP_TOO_LARGE"
+    # 12명: 한 팀 최대 7명 (상대 팀에 5명은 남아야 한다). 8명 묶음부터 막힌다
+    assert violate({"lock_groups": [ids[:8]]})["violations"][0]["code"] == "LOCK_GROUP_TOO_LARGE"
     assert violate({"lock_groups": [ids[:2]], "separate_groups": [ids[:2]]})["violations"][0]["code"] == "CONSTRAINT_CONFLICT"
-    assert violate({"pins": [{"player_id": p, "squad_no": 1} for p in ids[:7]]})["violations"][0]["code"] == "SQUAD_OVERFLOW"
+    assert violate({"pins": [{"player_id": p, "squad_no": 1} for p in ids[:8]]})["violations"][0]["code"] == "SQUAD_OVERFLOW"
     assert violate({"lock_groups": [[ids[0], 999999]]})["violations"][0]["code"] == "PLAYER_NOT_IN_TEAM"
-    # 분할 불가: 5명·4명·3명 그룹 → 어떤 조합도 6명을 만들 수 없음 (5, 4, 3, 7, 8, 9, 12 만 가능)
-    v = violate({"lock_groups": [ids[:5], ids[5:9], ids[9:12]]})
+    # 분할 불가: 4명 그룹 셋 → 한 팀이 될 수 있는 인원은 4·8명뿐, 5~7명(양 팀 5명 이상)을 만들 수 없음
+    v = violate({"lock_groups": [ids[:4], ids[4:8], ids[8:12]]})
     assert not v["feasible"] and v["violations"][0]["code"] == "LOCK_PARTITION_INFEASIBLE"
     # 갈라놓기 + PIN 같은 팀 → SEPARATE_INFEASIBLE
     v = violate({"separate_groups": [ids[:2]], "pins": [{"player_id": ids[0], "squad_no": 1}, {"player_id": ids[1], "squad_no": 1}]})
     assert v["violations"][0]["code"] == "SEPARATE_INFEASIBLE"
     # 실행도 같은 코드로 차단 + details
-    r = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2, "constraints": {"lock_groups": [ids[:7]]}}, headers=m)
+    r = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2, "constraints": {"lock_groups": [ids[:8]]}}, headers=m)
     assert r.status_code == 422 and r.json()["code"] == "LOCK_GROUP_TOO_LARGE" and r.json()["details"]
+
+
+# 검증: 묶음 때문에 고르게 못 나누면 인원을 벌려서라도 나눈다 (게스트 여럿을 한 팀으로 묶어 7:5 · 9:7 로 뛰는 경우)
+def test_lock_group_allows_uneven_split(client, club):
+    m, pid = club["manager"], club["pid"]
+    eid, _ = _event_with_attendance(client, club, guests=0)
+    ids = [pid[n] for n, *_ in ROSTER]
+    # 묶음이 없거나 고르게 나눌 수 있으면 6:6 그대로
+    v = client.post(f"{API}/events/{eid}/assignments:validate", json={"team_count": 2, "constraints": {"lock_groups": [ids[:6]]}}, headers=m).json()
+    assert v["feasible"] and not any("나눴어요" in w for w in v["warnings"])
+    # 7명 묶음 → 6:6 은 불가능하니 7:5, 경고로 알려 준다
+    v = client.post(f"{API}/events/{eid}/assignments:validate", json={"team_count": 2, "constraints": {"lock_groups": [ids[:7]]}}, headers=m).json()
+    assert v["feasible"] and any("7:5" in w for w in v["warnings"]), v
+    r = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2, "constraints": {"lock_groups": [ids[:7]]}}, headers=m)
+    assert r.status_code == 201, r.text
+    for cand in r.json()["candidates"]:
+        squads = [{mb["id"] for mb in sq["members"]} for sq in cand["squads"]]
+        assert sorted(len(s) for s in squads) == [5, 7]
+        assert any(set(ids[:7]) <= s for s in squads)  # 묶음은 한 팀에
+    # 5명씩 두 묶음 + 나머지 2명 → 6:6 이 가능하니 고르게
+    v = client.post(f"{API}/events/{eid}/assignments:validate", json={"team_count": 2, "constraints": {"lock_groups": [ids[:5], ids[5:10]]}}, headers=m).json()
+    assert v["feasible"] and not any("나눴어요" in w for w in v["warnings"])
 
 
 # 검증: 13.4절 속성 검사 — 무작위 LOCK/SEPARATE/PIN 조합에서 제약이 항상 지켜진다
