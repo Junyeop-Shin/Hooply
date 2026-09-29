@@ -250,7 +250,7 @@ def test_cache_key_is_order_independent():
 def test_model_factory_builds_langchain_model_from_settings(monkeypatch):
     """키만 있으면 LLM_MODEL 문자열로 LangChain 채팅 모델을 만든다 (네트워크 호출 없음). 공급자는 문자열 앞부분이 정한다."""
     monkeypatch.setattr(get_settings(), "llm_api_key", "test-key")
-    monkeypatch.setattr(get_settings(), "llm_model", "google_genai:gemini-2.5-flash")
+    monkeypatch.setattr(get_settings(), "llm_model", "google_genai:gemini-flash-latest")
     llm_model._build.cache_clear()
     m = llm_model.chat_model()
     assert type(m).__name__ == "ChatGoogleGenerativeAI"

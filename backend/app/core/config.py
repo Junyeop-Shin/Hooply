@@ -79,7 +79,8 @@ class Settings(BaseSettings):
     # --- AI 설명 (docs/07 D1·D2) --- LangChain 으로 부른다. 키가 없거나 꺼져 있으면 모든 AI 카드가 규칙 문장(폴백)을 보여 준다
     llm_enabled: bool = True
     # init_chat_model 형식 "<공급자>:<모델명>". 다른 모델로 바꿀 때는 이 값·LLM_API_KEY·공급자 패키지(langchain-openai 등)만 바꾼다
-    llm_model: str = "google_genai:gemini-2.5-flash"
+    # 기본값은 특정 버전이 아니라 Google 이 최신 Flash 로 유지하는 별칭 — 버전 모델(gemini-2.5-flash 등)은 은퇴하면 404 가 난다
+    llm_model: str = "google_genai:gemini-flash-latest"
     llm_api_key: str = ""  # 서버 전용. 비우면 공급자 기본 환경 변수(GOOGLE_API_KEY 등)를 본다
     llm_timeout_seconds: float = 8.0  # 넘으면 폴백 (FR-50)
     llm_rate_per_minute: int = 5  # 사용자당 실제 호출 횟수 (캐시 적중은 세지 않는다)
