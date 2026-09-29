@@ -7,7 +7,7 @@ import { rimDistance } from './court'
 const P = (x: number, y: number) => ({ x, y })
 // 하이 픽앤롤: 5번이 1번에게 스크린 → 1번 드리블 · 5번 롤 → 패스 → 슛
 const pnr: Play = {
-  key: 'pnr', name: '픽앤롤', summary: '', defense: 'man', situation: 'half_court', counter: '',
+  key: 'pnr', name: '픽앤롤', summary: '', defense: 'man', situation: 'half_court', counter: '', opp_defense: 'man', screen_call: 'stay',
   start: [P(0.5, 0.66), P(0.95, 0.05), P(0.05, 0.05), P(0.15, 0.48), P(0.66, 0.42)],
   ball: 1,
   roles: ['ball_handler', 'shooter', 'shooter', 'spacer', 'screener_roll'],
@@ -37,15 +37,14 @@ describe('수비 시뮬레이션', () => {
     expect(sim.guards[1]).toEqual([5, 2, 3, 4, 1]) // x1 → 5번, x5 → 1번
     expect(sim.guards[4]).toEqual([5, 2, 3, 4, 1])
     expect(sim.events[0]).toHaveLength(1)
-    expect(sim.notes[0]).toContain('x1·x5 스위치')
-    expect(sim.notes[0]).toContain('x5가 1번')
+    expect(sim.notes[0]).toContain('스위치 — 수비 5가 1번, 수비 1이 5번을 막아요')
   })
 
   it('스테이면 마크가 그대로이고, 걸린 수비는 한 박자 늦게 돌아간다', () => {
     const states = stepStates(pnr)
     const stay = simulateDefense(pnr, states, { kind: 'man', screen: 'stay' })
     expect(stay.guards[1]).toEqual([1, 2, 3, 4, 5])
-    expect(stay.notes[0]).toContain('x1은 스크린을 돌아 1번을')
+    expect(stay.notes[0]).toContain('수비 1은 스크린을 돌아 1번을')
     // 단계 중간(0.3)에 x1 은 아직 거의 출발하지 않았다
     const mid = defenseFrameAt(stay, 0.3)
     expect(d(mid[0], stay.pos[0][0])).toBeLessThan(0.05)
@@ -70,6 +69,14 @@ describe('수비 시뮬레이션', () => {
         expect(q.x).toBeGreaterThanOrEqual(0); expect(q.x).toBeLessThanOrEqual(1)
         expect(q.y).toBeGreaterThanOrEqual(0); expect(q.y).toBeLessThanOrEqual(1)
       }
+    }
+  })
+
+  it('슛하는 단계부터 수비는 멈춘다', () => {
+    for (const kind of ['man', 'zone'] as const) {
+      const sim = simulateDefense(pnr, stepStates(pnr), { kind, screen: 'switch' })
+      expect(sim.pos[4]).toEqual(sim.pos[3]) // 4단계 = 슛
+      expect(defenseFrameAt(sim, 3.5)).toEqual(sim.pos[3])
     }
   })
 

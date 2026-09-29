@@ -2,7 +2,8 @@
  * S-29 전술판 (docs/07 FR-47). 경로: /tactics/:key?event=일정&squad=팀번호&team=팀
  *
  * - `key` 는 프리셋 키("high_pnr") 또는 팀이 만든 전술("team_12", docs/07 FR-57). 팀 전술은 `team`(또는 일정의 팀)이 있어야 연다.
- * - 아래에 팀 안의 전술 댓글(FR-60). 팀 전술이면 매니저에게 "고치기".
+ * - 아래에 팀 안의 전술 댓글(FR-60). 팀 전술이면 만든 사람과 매니저에게 "고치기".
+ * - 수비는 전술이 가정한 방식(opp_defense · screen_call)으로 고정이다 — 고르는 칸이 없다 (v1.7).
  * - `event` 가 없으면 전술 설명만 (전술 탭 목록에서 들어왔고 그날 참석자가 아닌 경우).
  * - `event` 가 있으면 그날 그 팀(`squad`, 없으면 내 팀)의 자리 배치를 함께 보여 준다. 상대 팀으로 바꿔 보는 칸은 없다. 배치는 서버가 자동으로 추천한 것이고,
  *   매니저가 자리를 바꿔 저장했으면 그 배치다. 자리 목록에는 괄호로 예비(같은 전술판 5명 중 그 역할도 맞는 사람)를 단다.
@@ -38,7 +39,7 @@ export function TacticBoardPage() {
   const teamId = view.data?.team_id ?? (Number(sp.get('team')) || null)
   const own = useQuery({
     queryKey: ['tactics', 'team-play', teamId, teamPlayId], queryFn: () => teamPlaysApi.get(teamId!, teamPlayId!),
-    enabled: teamPlayId !== null && teamId !== null && !view.data, retry: false,
+    enabled: teamPlayId !== null && teamId !== null, retry: false,
   })
   const play: Play | undefined = view.data?.play ?? (teamPlayId ? own.data?.play : presets.data?.items.find((p) => p.key === key))
   const loading = presets.isLoading || view.isLoading || own.isLoading
@@ -52,7 +53,8 @@ export function TacticBoardPage() {
       </Screen>
     )
   }
-  const editPath = teamPlayId && teamId && (view.data?.can_edit ?? own.data?.can_edit) ? `/teams/${teamId}/plays/${teamPlayId}/edit` : null
+  // 팀 전술 고치기는 만든 사람과 매니저 (v1.7)
+  const editPath = teamPlayId && teamId && own.data?.can_edit ? `/teams/${teamId}/plays/${teamPlayId}/edit` : null
   const withEvent = view.data && view.data.squads.length > 0 ? view.data : null
   return withEvent
     ? <EventBoard play={play} view={withEvent} eventId={eventId!} editPath={editPath} />
@@ -192,7 +194,7 @@ function EventBoard({ play, view, eventId, editPath }: { play: Play; view: Event
             <TacticExplain summary={play.summary} ai={aiItem} counter={renderCounter(play.counter, row.map(nameOf))} />
             {notice && <Alert kind="info">{notice}</Alert>}
             {save.isError && <Alert>{errMsg(save.error, '저장하지 못했어요.')}</Alert>}
-            <TacticBoard key={play.key} play={play} tone={toneOf(sq.squad_no)} names={row.map(nameOf)} onSlotTap={view.can_edit ? setPicking : undefined} defense={zone ? 'zone' : undefined} />
+            <TacticBoard key={play.key} play={play} tone={toneOf(sq.squad_no)} names={row.map(nameOf)} onSlotTap={view.can_edit ? setPicking : undefined} />
             <RoleList play={play} slots={slots} onTap={view.can_edit ? setPicking : undefined} />
           </>
         )}

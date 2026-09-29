@@ -8,10 +8,11 @@
 저장한 전술은 프리셋과 똑같이 추천 후보가 되고(그 팀 일정만), 전술판 · 자리 배치 · AI 전술 설명이 그대로 동작한다.
 play_key 는 "team:<id>".
 
-권한
-  목록 · 보기 · 댓글 읽기/쓰기   그 팀 활성 팀원 (ADMIN 은 읽기만 — 팀원이 아니면 댓글을 쓸 수 없다)
-  만들기 · 고치기 · 지우기        매니저 · ADMIN
-  댓글 지우기                     쓴 사람 · 매니저 · ADMIN
+권한 (v1.7)
+  목록 · 보기 · 만들기 · 검사 · AI 역할 태깅 · 댓글 읽기/쓰기   그 팀 활성 팀원 (팀원이 아닌 ADMIN 은 댓글을 쓸 수 없다)
+  팀 전술 고치기 · 지우기          만든 사람 · 매니저 · ADMIN
+  댓글 지우기                      쓴 사람 · 매니저 · ADMIN
+  별표 달기 · 떼기 (FR-61)         매니저 · ADMIN
 """
 
 import json
@@ -24,13 +25,14 @@ from sqlalchemy.orm import Session, selectinload
 from app.core import errors, ratelimit
 from app.llm import llm_guard
 from app.llm.prompts import PROMPT_VERSION_D, SYSTEM_D, RolesD
-from app.models import EventPlayAssignment, Player, TacticComment, TeamPlay, User
+from app.models import EventPlayAssignment, Player, TacticComment, TacticStar, TeamPlay, User
 from app.models.enums import TeamRole
 from app.schemas.tactic import (
     PlayCheck,
     RoleSuggestion,
     TacticCommentList,
     TacticCommentView,
+    TacticStars,
     TeamPlayIn,
     TeamPlayList,
     TeamPlayView,
@@ -54,7 +56,8 @@ def _to_play(body: TeamPlayIn, key: str = "draft") -> Play:
     try:
         return Play.model_validate({
             "key": key, "name": body.name.strip() or "새 전술", "summary": body.summary.strip() or DEFAULT_SUMMARY,
-            "defense": body.defense, "situation": body.situation, "counter": body.counter.strip(),
+            "defense": body.defense or body.opp_defense, "opp_defense": body.opp_defense, "screen_call": body.screen_call,
+            "situation": body.situation, "counter": body.counter.strip(),
             "start": [p.model_dump() for p in body.start], "ball": body.ball,
             "roles": body.roles or ["spacer"] * 5,
             "steps": [s.model_dump() for s in body.steps],
@@ -87,11 +90,21 @@ def _validated(body: TeamPlayIn) -> tuple[Play, list[str], str]:
     return play, [r for r, _ in extract_roles(play)], "RULE"
 
 
+def _is_author(tp: TeamPlay, me: Player) -> bool:
+    return me.user_id is not None and tp.created_by == me.user_id
+
+
 def _view(tp: TeamPlay, me: Player, names: dict[int, str]) -> TeamPlayView:
     return TeamPlayView(
         id=tp.id, play_key=f"{TEAM_KEY_PREFIX}{tp.id}", play=team_play_to_play(tp), role_source=tp.role_source,  # type: ignore[arg-type]
-        updated_at=tp.updated_at, updated_by_name=names.get(tp.updated_by or 0), can_edit=_is_manager(me),
+        updated_at=tp.updated_at, updated_by_name=names.get(tp.updated_by or 0), created_by_name=names.get(tp.created_by or 0),
+        mine=_is_author(tp, me), can_edit=_is_author(tp, me) or _is_manager(me),
     )
+
+
+def _require_editor(tp: TeamPlay, me: Player) -> None:
+    if not (_is_author(tp, me) or _is_manager(me)):
+        raise errors.ForbiddenRole("만든 사람이나 매니저만 고치거나 지울 수 있어요.")
 
 
 def _user_names(db: Session, ids: set[int | None]) -> dict[int, str]:
@@ -103,7 +116,7 @@ def _user_names(db: Session, ids: set[int | None]) -> dict[int, str]:
 
 def list_plays(db: Session, team_id: int, me: Player) -> TeamPlayList:
     rows = team_plays(db, team_id)
-    names = _user_names(db, {r.updated_by for r in rows})
+    names = _user_names(db, {r.updated_by for r in rows} | {r.created_by for r in rows})
     return TeamPlayList(items=[_view(r, me, names) for r in rows])
 
 
@@ -116,7 +129,7 @@ def _get(db: Session, team_id: int, play_id: int) -> TeamPlay:
 
 def get(db: Session, team_id: int, play_id: int, me: Player) -> TeamPlayView:
     tp = _get(db, team_id, play_id)
-    return _view(tp, me, _user_names(db, {tp.updated_by}))
+    return _view(tp, me, _user_names(db, {tp.updated_by, tp.created_by}))
 
 
 def _fill(tp: TeamPlay, play: Play, roles: list[str], source: str, by: User) -> None:
@@ -124,6 +137,7 @@ def _fill(tp: TeamPlay, play: Play, roles: list[str], source: str, by: User) -> 
     tp.body = {
         "start": [p.model_dump() for p in play.start], "ball": play.ball,
         "steps": [s.model_dump(exclude_none=False) for s in play.steps],
+        "opp_defense": play.opp_defense, "screen_call": play.screen_call,  # 가정한 상대 수비 (테이블 열 없이 body 에)
     }
     tp.roles = roles
     tp.role_source = source
@@ -137,11 +151,12 @@ def create(db: Session, team_id: int, body: TeamPlayIn, by: User, me: Player) ->
     db.add(tp)
     db.commit()
     db.refresh(tp)
-    return _view(tp, me, _user_names(db, {tp.updated_by}))
+    return _view(tp, me, _user_names(db, {tp.updated_by, tp.created_by}))
 
 
 def update(db: Session, team_id: int, play_id: int, body: TeamPlayIn, by: User, me: Player) -> TeamPlayView:
     tp = _get(db, team_id, play_id)
+    _require_editor(tp, me)
     play, roles, source = _validated(body)
     old_roles = list(tp.roles)
     _fill(tp, play, roles, source, by)
@@ -150,14 +165,16 @@ def update(db: Session, team_id: int, play_id: int, body: TeamPlayIn, by: User, 
         db.execute(delete(EventPlayAssignment).where(EventPlayAssignment.play_key == f"{TEAM_KEY_PREFIX}{tp.id}"))
     db.commit()
     db.refresh(tp)
-    return _view(tp, me, _user_names(db, {tp.updated_by}))
+    return _view(tp, me, _user_names(db, {tp.updated_by, tp.created_by}))
 
 
-def remove(db: Session, team_id: int, play_id: int) -> None:
+def remove(db: Session, team_id: int, play_id: int, me: Player) -> None:
     tp = _get(db, team_id, play_id)
+    _require_editor(tp, me)
     key = f"{TEAM_KEY_PREFIX}{tp.id}"
     db.execute(delete(EventPlayAssignment).where(EventPlayAssignment.play_key == key))
     db.execute(delete(TacticComment).where(TacticComment.team_id == team_id, TacticComment.play_key == key))
+    db.execute(delete(TacticStar).where(TacticStar.team_id == team_id, TacticStar.play_key == key))
     db.delete(tp)
     db.commit()
 
@@ -293,3 +310,27 @@ def delete_comment(db: Session, team_id: int, comment_id: int, me: Player) -> No
         raise errors.ForbiddenRole("내가 쓴 댓글만 지울 수 있어요.")
     db.delete(c)
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# 별표 (FR-61)
+# ---------------------------------------------------------------------------
+
+
+def stars(db: Session, team_id: int, me: Player) -> TacticStars:
+    keys = db.scalars(
+        select(TacticStar.play_key).where(TacticStar.team_id == team_id).order_by(TacticStar.created_at, TacticStar.id)
+    ).all()
+    return TacticStars(play_keys=list(keys), can_edit=_is_manager(me))
+
+
+def set_star(db: Session, team_id: int, key: str, on: bool, by: User, me: Player) -> TacticStars:
+    """매니저가 별표를 달거나 뗀다. 같은 전술에 두 번 달아도 한 번만 남는다."""
+    k = _require_play(db, team_id, key)
+    row = db.scalar(select(TacticStar).where(TacticStar.team_id == team_id, TacticStar.play_key == k))
+    if on and row is None:
+        db.add(TacticStar(team_id=team_id, play_key=k, starred_by=by.id))
+    elif not on and row is not None:
+        db.delete(row)
+    db.commit()
+    return stars(db, team_id, me)

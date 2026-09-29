@@ -1,7 +1,8 @@
 /**
  * 수비 움직임 시뮬레이션 (docs/07 FR-55 · FR-56). 화면과 무관한 순수 함수만 둔다.
  *
- * 공격 전술(lib/tactics 의 stepStates)을 받아, 매니저가 고른 상대 수비 방식대로 수비 5명(x1~x5)의 위치를 단계마다 정한다.
+ * 공격 전술(lib/tactics 의 stepStates)을 받아, 전술이 가정한 상대 수비 방식(Play.opp_defense · screen_call)대로 수비 5명(점선 동그라미 1~5)의
+ * 위치를 단계마다 정한다. 기본 전술은 방식이 고정이고, 직접 만드는 전술은 편집기에서 고른다 (v1.7).
  * 규칙이 정하는 것이지 경기 기록에서 추정하는 것이 아니다 — "상대가 이렇게 막으면 이렇게 움직인다" 를 보여 주는 용도다.
  *
  * 맨투맨   수비 i 는 처음에 공격 i 번을 막는다. 자기 사람과 림 사이(골 쪽)에 서고, 공을 가진 사람에게는 붙고,
@@ -12,6 +13,8 @@
  *          스위치  두 수비가 마크를 맞바꾼다 (맨투맨은 그 뒤로 계속, 지역은 자기 자리 기준이라 그 단계만)
  *          스테이  스크린에 걸린 수비가 스크린을 돌아 자기 사람(자리)을 계속 따라간다 — 한 박자 늦게 움직인다.
  *                 맨투맨이면 스크리너의 수비가 잠깐 튀어나와 도운 뒤(헤지) 자기 사람에게 돌아간다
+ *
+ * 슛    슛하는 단계부터는 수비가 그 자리에 멈춘다 (v1.7)
  *
  * 좌표는 공격과 같은 0~1 (x 사이드라인, y 베이스라인 → 하프라인). 거리는 미터로 바꿔 잰다.
  */
@@ -48,10 +51,10 @@ const dist = (a: CourtPoint, b: CourtPoint) => { const [ax, ay] = M(a), [bx, by]
 const clampPt = (p: CourtPoint): CourtPoint => ({ x: Math.min(0.97, Math.max(0.03, p.x)), y: Math.min(0.96, Math.max(0.03, p.y)) })
 const RIM_PT: CourtPoint = N(RIM_X, RIM_Y)
 
-// "x1이 · x2가" — 숫자는 읽는 소리(일·이·삼·사·오)의 받침으로 조사를 고른다
+// "수비 1이 · 수비 2가" — 숫자는 읽는 소리(일·이·삼·사·오)의 받침으로 조사를 고른다
 const HAS_FINAL = [false, true, false, true, false, false] // 인덱스 = 수비 번호 (1 일 · 3 삼 만 받침)
-const xi = (i: number) => `x${i + 1}${HAS_FINAL[i + 1] ? '이' : '가'}`
-const xn = (i: number) => `x${i + 1}${HAS_FINAL[i + 1] ? '은' : '는'}`
+const xi = (i: number) => `수비 ${i + 1}${HAS_FINAL[i + 1] ? '이' : '가'}`
+const xn = (i: number) => `수비 ${i + 1}${HAS_FINAL[i + 1] ? '은' : '는'}`
 
 /** 공격수 P 를 막는 자리 — P 와 림 사이. 공을 가졌으면 1m, 아니면 공과 멀수록 더 처지고 공 쪽으로 조금 기운다 (헬프) */
 export function guardSpot(p: CourtPoint, ball: CourtPoint | null, hasBall: boolean): CourtPoint {
@@ -130,10 +133,19 @@ export function simulateDefense(play: Play, states: StepState[], scheme: Defense
     scheme.kind === 'man' ? [...assign] : spots.map((q) => nearest(st.pos, q) + 1)
 
   let assign = [1, 2, 3, 4, 5] // 맨투맨: 수비 i 가 막는 공격 슬롯
+  let frozen = false // 슛한 단계부터 수비는 제자리
   pos.push(spotsAt(states[0], assign))
   guards.push(guardsAt(states[0], assign, pos[0]))
   for (let k = 0; k < n; k++) {
     const from = states[k], to = states[k + 1]
+    if (frozen || play.steps[k].actions.some((a) => a.type === 'shot' && a.slot === from.holder)) {
+      frozen = true
+      pos.push(pos[k].map((p) => ({ ...p })))
+      guards.push([...guards[k]])
+      events.push([])
+      notes.push('')
+      continue
+    }
     const evs: ScreenEvent[] = []
     const lines: string[] = []
     const next = [...assign]
@@ -144,7 +156,7 @@ export function simulateDefense(play: Play, states: StepState[], scheme: Defense
         if (scheme.screen === 'switch') {
           next[chaser] = sc.screener
           next[helper] = sc.target
-          lines.push(`x${chaser + 1}·x${helper + 1} 스위치 — ${xi(helper)} ${sc.target}번, ${xi(chaser)} ${sc.screener}번을 막아요`)
+          lines.push(`스위치 — ${xi(helper)} ${sc.target}번, ${xi(chaser)} ${sc.screener}번을 막아요`)
         } else {
           lines.push(`${xn(chaser)} 스크린을 돌아 ${sc.target}번을 계속 따라가고, ${xn(helper)} 잠깐 도운 뒤 ${sc.screener}번에게 돌아가요`)
         }

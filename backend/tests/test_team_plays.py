@@ -87,9 +87,8 @@ def test_check_and_save_team_play(client, club):
     assert client.post(f"{API}/teams/{tid}/plays", json=pnr(name=" "), headers=m).status_code == 400
     assert client.post(f"{API}/teams/{tid}/plays", json=pnr(steps=[]), headers=m).status_code == 400
 
-    # 팀원은 만들 수 없다
-    assert client.post(f"{API}/teams/{tid}/plays", json=pnr(), headers=member).status_code == 403
-    assert client.post(f"{API}/teams/{tid}/plays:check", json=pnr(), headers=member).status_code == 403
+    # 팀원도 검사할 수 있다 (v1.7 — 만들기는 아래 권한 테스트)
+    assert client.post(f"{API}/teams/{tid}/plays:check", json=pnr(), headers=member).status_code == 200
 
     r = client.post(f"{API}/teams/{tid}/plays", json=pnr(), headers=m)
     assert r.status_code == 201, r.text
@@ -100,7 +99,8 @@ def test_check_and_save_team_play(client, club):
 
     # 팀원은 목록 · 보기만
     listed = client.get(f"{API}/teams/{tid}/plays", headers=member).json()["items"]
-    assert [p["id"] for p in listed] == [created["id"]] and listed[0]["can_edit"] is False
+    assert [p["id"] for p in listed] == [created["id"]] and listed[0]["can_edit"] is False and listed[0]["mine"] is False
+    assert created["mine"] is True and created["can_edit"] is True and created["created_by_name"]
     assert client.get(f"{API}/teams/{tid}/plays/{created['id']}", headers=member).status_code == 200
 
     # 매니저가 역할을 고쳐 저장 — 출처가 MANAGER
@@ -237,3 +237,59 @@ def test_tactic_comments(client, club, signup):
     assert client.post(turl, json={"body": "좋아요"}, headers=a).status_code == 201
     client.delete(f"{API}/teams/{tid}/plays/{tp['id']}", headers=m)
     assert client.get(turl, headers=a).status_code == 404
+
+
+def test_team_play_keeps_assumed_defense_and_may_end_with_move(client, club):
+    """편집기에서 고른 상대 수비(지역 · 스위치)가 저장되고, 마지막 단계가 이동이어도 된다 (v1.7)."""
+    m, tid = club["manager"], club["team_id"]
+    body = pnr(defense=None, opp_defense="zone", screen_call="switch")
+    body["steps"] = body["steps"][:2]  # 드리블 · 롤로 끝
+    r = client.post(f"{API}/teams/{tid}/plays", json=body, headers=m)
+    assert r.status_code == 201, r.text
+    play = r.json()["play"]
+    assert play["opp_defense"] == "zone" and play["screen_call"] == "switch" and play["defense"] == "zone"
+    again = client.get(f"{API}/teams/{tid}/plays/{r.json()['id']}", headers=m).json()["play"]
+    assert again["opp_defense"] == "zone" and again["screen_call"] == "switch"
+
+
+def test_presets_have_fixed_defense():
+    assert all(p.opp_defense in ("man", "zone") and p.screen_call in ("switch", "stay") for p in PRESET_LIST)
+    assert PRESETS["zone_131"].opp_defense == "zone" and PRESETS["spain_pnr"].screen_call == "switch"
+    assert PRESETS["high_pnr"].opp_defense == "man" and PRESETS["high_pnr"].screen_call == "stay"
+
+
+
+def test_members_create_and_authors_or_managers_edit(client, club):
+    """v1.7: 팀원도 전술을 만든다. 고치기 · 지우기는 만든 사람과 매니저만."""
+    m, author, other, tid = club["manager"], club["members"][3], club["members"][4], club["team_id"]
+    r = client.post(f"{API}/teams/{tid}/plays", json=pnr(name="팀원 전술"), headers=author)
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert r.json()["mine"] is True and r.json()["can_edit"] is True
+    assert client.get(f"{API}/teams/{tid}/plays/{pid}", headers=other).json()["can_edit"] is False
+    assert client.get(f"{API}/teams/{tid}/plays/{pid}", headers=m).json()["can_edit"] is True
+    # 다른 팀원은 고치거나 지울 수 없다
+    assert client.put(f"{API}/teams/{tid}/plays/{pid}", json=pnr(name="몰래"), headers=other).status_code == 403
+    assert client.delete(f"{API}/teams/{tid}/plays/{pid}", headers=other).status_code == 403
+    # 만든 사람은 고친다, 매니저는 지운다
+    assert client.put(f"{API}/teams/{tid}/plays/{pid}", json=pnr(name="고친 전술"), headers=author).json()["play"]["name"] == "고친 전술"
+    assert client.delete(f"{API}/teams/{tid}/plays/{pid}", headers=m).status_code == 204
+    # 팀원이 만든 것을 만든 사람이 지운다
+    pid2 = client.post(f"{API}/teams/{tid}/plays", json=pnr(), headers=author).json()["id"]
+    assert client.delete(f"{API}/teams/{tid}/plays/{pid2}", headers=author).status_code == 204
+
+
+def test_manager_stars_float_to_top(client, club):
+    """FR-61: 매니저가 기본 · 팀 전술에 별표. 팀원은 보기만. 팀 전술을 지우면 별표도 사라진다."""
+    m, member, tid = club["manager"], club["members"][3], club["team_id"]
+    assert client.get(f"{API}/teams/{tid}/tactics/stars", headers=member).json() == {"play_keys": [], "can_edit": False}
+    assert client.put(f"{API}/teams/{tid}/tactics/preset:horns/star", headers=member).status_code == 403
+    tp = client.post(f"{API}/teams/{tid}/plays", json=pnr(), headers=member).json()
+    assert client.put(f"{API}/teams/{tid}/tactics/{tp['play_key']}/star", headers=m).status_code == 200
+    r = client.put(f"{API}/teams/{tid}/tactics/preset:horns/star", headers=m)
+    assert r.json() == {"play_keys": [tp["play_key"], "preset:horns"], "can_edit": True}
+    assert client.put(f"{API}/teams/{tid}/tactics/preset:horns/star", headers=m).json()["play_keys"].count("preset:horns") == 1
+    assert client.put(f"{API}/teams/{tid}/tactics/preset:nope/star", headers=m).status_code == 404
+    assert client.delete(f"{API}/teams/{tid}/tactics/preset:horns/star", headers=m).json()["play_keys"] == [tp["play_key"]]
+    client.delete(f"{API}/teams/{tid}/plays/{tp['id']}", headers=m)
+    assert client.get(f"{API}/teams/{tid}/tactics/stars", headers=member).json()["play_keys"] == []

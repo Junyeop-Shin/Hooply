@@ -1,19 +1,22 @@
 /**
- * 전술 편집기 (docs/07 FR-57 ~ FR-59, S-30). 경로: /teams/:teamId/plays/new · /teams/:teamId/plays/:playId/edit (매니저)
+ * 전술 편집기 (docs/07 FR-57 ~ FR-59, S-30). 경로: /teams/:teamId/plays/new · /teams/:teamId/plays/:playId/edit
+ * 팀원 누구나 만든다. 고치기 · 지우기는 만든 사람과 매니저 (v1.7).
  *
  * 1. 시작 위치 — 동그라미를 끌어서 옮기고, 처음 공을 가질 사람을 고른다
  * 2. 단계 — 단계를 고른 뒤 "누가(동그라미) → 무엇을(칩) → 누구에게(동그라미) / 어디로(코트)" 순서로 누르면 동작이 들어간다.
  *    한 단계 안의 동작은 동시에 재생된다. 같은 사람이 한 단계에 두 동작을 하면 새 것으로 바뀐다
  * 3. 그리는 동안 서버가 재생 가능성을 검사하고(어느 단계가 왜 안 되는지) 동작에서 역할을 뽑는다(규칙)
  * 4. "AI로 역할 붙이기"(체인 D) — 전술의 의도까지 읽어 역할을 고친다. 매니저가 자리마다 직접 바꿀 수도 있다
- * 5. 미리 보기(상대 수비 시뮬레이션 포함) · 막히면 · 저장
+ * 5. 이 전술이 가정한 상대 수비(맨투맨 · 지역 2-3)와 스크린 대응(스위치 · 스테이) — 전술판의 수비가 이대로 움직인다.
+ *    기본 전술은 이 값이 고정이고, 여기서만 고른다 (v1.7)
+ * 6. 미리 보기(상대 수비 포함) · 막히면 · 저장
  */
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { teamPlaysApi } from '../api/tactics'
-import type { CourtPoint, Defense, Play, PlayAction, PlayActionType, PlayStep, RoleSource, Situation, TacticRole, TeamPlayIn } from '../api/types'
+import type { CourtPoint, OppDefense, Play, PlayAction, PlayActionType, PlayStep, RoleSource, ScreenCall, Situation, TacticRole, TeamPlayIn } from '../api/types'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { ActionMark, Court, H, OOB_H, R, TONE, TacticBoard, W, sx, sy } from '../components/tactic-board'
 import { CIRCLED } from '../components/tactics'
@@ -42,6 +45,14 @@ export function PlayEditorPage() {
   const teamId = Number(tid)
   const playId = pidParam ? Number(pidParam) : null
   const existing = useQuery({ queryKey: ['tactics', 'team-play', teamId, playId], queryFn: () => teamPlaysApi.get(teamId, playId!), enabled: playId !== null, retry: false })
+  if (existing.data && !existing.data.can_edit) {
+    return (
+      <Screen>
+        <TopBar title="전술 고치기" back={`/tactics/team_${playId}?team=${teamId}`} />
+        <Content><Alert>만든 사람이나 매니저만 고칠 수 있어요.</Alert></Content>
+      </Screen>
+    )
+  }
   if (playId !== null && !existing.data) {
     return (
       <Screen>
@@ -58,7 +69,8 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
   const qc = useQueryClient()
   const [name, setName] = useState(initial?.name ?? '')
   const [summary, setSummary] = useState(initial?.summary === '우리 팀이 만든 전술' ? '' : initial?.summary ?? '')
-  const [defense, setDefense] = useState<Defense>(initial?.defense ?? 'man')
+  const [oppDefense, setOppDefense] = useState<OppDefense>(initial?.opp_defense ?? (initial?.defense === 'zone' ? 'zone' : 'man'))
+  const [screenCall, setScreenCall] = useState<ScreenCall>(initial?.screen_call ?? 'stay')
   const [situation, setSituation] = useState<Situation>(initial?.situation ?? 'half_court')
   const [counter, setCounter] = useState(initial?.counter ?? '')
   const [start, setStart] = useState<CourtPoint[]>(initial?.start ?? DEFAULT_START)
@@ -74,10 +86,10 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
 
   // 서버에 보낼 값 — 빈 단계는 빼고, 비어 있는 설명은 자동 문장으로
   const body: TeamPlayIn = useMemo(() => ({
-    name, summary, defense, situation, counter, start, ball,
+    name, summary, defense: null, opp_defense: oppDefense, screen_call: screenCall, situation, counter, start, ball,
     steps: steps.filter((s) => s.actions.length).map((s) => ({ caption: s.caption.trim() || autoCaption(s.actions), actions: s.actions })),
     roles, role_source: roles ? roleSource : 'RULE',
-  }), [name, summary, defense, situation, counter, start, ball, steps, roles, roleSource])
+  }), [name, summary, oppDefense, screenCall, situation, counter, start, ball, steps, roles, roleSource])
   const shape = JSON.stringify({ start: body.start, ball: body.ball, steps: body.steps.map((s) => s.actions), situation })
   const settled = useDebounced(shape, 400)
   const check = useQuery({
@@ -91,7 +103,10 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
   const playable = body.steps.length > 0 && !!check.data?.playable && settled === shape
 
   // 편집 중 상태: 고른 단계를 시작할 때의 위치와 공
-  const draftPlay: Play = { key: 'draft', name: name || '새 전술', summary, defense, situation, counter, start, ball, roles: shownRoles, steps }
+  const draftPlay: Play = {
+    key: 'draft', name: name || '새 전술', summary, defense: oppDefense, opp_defense: oppDefense, screen_call: screenCall,
+    situation, counter, start, ball, roles: shownRoles, steps,
+  }
   const states = stepStates(draftPlay)
   const k = mode === 'start' ? null : mode
   const before = k === null ? states[0] : states[k]
@@ -181,7 +196,12 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
         <section className="space-y-3">
           <Field label="전술 이름" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} placeholder="예: 우리 팀 픽앤롤" />
           <Field label="한 줄 설명 (선택)" value={summary} maxLength={80} onChange={(e) => setSummary(e.target.value)} placeholder="예: 빅맨 스크린 뒤 골밑으로" />
-          <Choice label="대상 수비" value={defense} onChange={setDefense} options={[['man', '맨투맨'], ['zone', '지역'], ['any', '둘 다']]} />
+          <Choice label="상대 수비" value={oppDefense} onChange={setOppDefense} options={[['man', '맨투맨'], ['zone', '지역 (2-3)']]} />
+          <Choice label="스크린 대응" value={screenCall} onChange={setScreenCall} options={[['switch', '스위치'], ['stay', '스테이']]} />
+          <p className="-mt-1 px-1 text-[11px] text-muted">
+            이 전술이 가정한 상대 수비예요. 전술판의 수비가 이대로 움직이고, 추천도 이 수비 상대로만 해요.
+            {screenCall === 'switch' ? ' 스위치: 스크린을 만나면 두 수비가 막을 사람을 바꿔요.' : ' 스테이: 스크린에 걸린 수비가 돌아서 끝까지 따라와요.'}
+          </p>
           <Choice label="상황" value={situation} onChange={setSituation} options={[['half_court', '하프코트'], ['inbound', '인바운드']]} />
         </section>
 
@@ -247,7 +267,7 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
         {playable && (
           <section className="space-y-2">
             <SectionTitle>미리 보기</SectionTitle>
-            <TacticBoard key={shape} play={{ ...draftPlay, steps: body.steps }} defense={defense === 'zone' ? 'zone' : 'man'} />
+            <TacticBoard key={`${shape}${oppDefense}${screenCall}`} play={{ ...draftPlay, steps: body.steps }} />
           </section>
         )}
 

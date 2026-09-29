@@ -18,6 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.core.josa import substitute
 
 Defense = Literal["man", "zone", "any"]
+OppDefense = Literal["man", "zone"]  # 전술판에서 움직이는 상대 수비 모양 (맨투맨 · 2-3 지역)
+ScreenCall = Literal["switch", "stay"]  # 스크린을 만났을 때 상대 수비가 바꿔 막는가(스위치), 돌아서 따라가는가(스테이)
 Situation = Literal["half_court", "inbound"]  # 인바운드는 골밑에서 공을 넣을 때만 쓰는 전술 — 오늘 추천에는 넣지 않는다
 Role = Literal["ball_handler", "screener_roll", "screener_pop", "shooter", "cutter", "post", "spacer"]
 ActionType = Literal["move", "dribble", "pass", "screen", "cut", "handoff", "shot"]
@@ -79,10 +81,20 @@ class Play(BaseModel):
     situation: Situation = "half_court"
     # 막혔을 때의 대안 한두 문장. 자리는 {1}~{5} 로 적는다 — 그날 배치가 있으면 선수 이름, 없으면 "5번" 으로 바꿔 보여 준다
     counter: str = Field(default="", max_length=120)
+    # 이 전술이 가정한 상대 수비 — 전술판의 수비 움직임이 이대로 고정된다 (docs/07 D16 · D17).
+    # 비우면 대상 수비에서: 지역 전술이면 지역, 아니면 맨투맨 · 스테이
+    opp_defense: OppDefense | None = None
+    screen_call: ScreenCall = "stay"
     start: list[Point] = Field(min_length=5, max_length=5)  # start[i] = 슬롯 i+1 의 시작 위치
     ball: Slot = Field(ge=1, le=5)  # 처음 공을 가진 슬롯
     roles: list[Role] = Field(min_length=5, max_length=5)  # roles[i] = 슬롯 i+1 의 역할
     steps: list[Step] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _default_opp_defense(self) -> Self:
+        if self.opp_defense is None:
+            self.opp_defense = "zone" if self.defense == "zone" else "man"
+        return self
 
     def role_of(self, slot: Slot) -> Role:
         return self.roles[slot - 1]
@@ -105,11 +117,10 @@ def playability_errors(play: Play) -> list[str]:
       3. 공을 가진 슬롯은 드리블로만 움직인다 (move·cut 은 트래블링)
       4. 한 슬롯은 한 단계에 동작 하나만 한다 (동시에 재생되므로)
       5. 패스·핸드오프를 받은 슬롯이 다음 단계부터 공을 가진다
-      6. 슛 뒤에는 단계가 없고, 마지막 단계는 슛 또는 패스로 끝난다
+      6. 슛 뒤에는 단계가 없다 (마지막 단계는 슛 · 패스 · 이동 무엇으로 끝나도 된다 — v1.7)
     """
     errors: list[str] = []
     holder: Slot | None = play.ball
-    last = len(play.steps)
     for no, step in enumerate(play.steps, start=1):
         seen: set[Slot] = set()
         ball_actions = [a for a in step.actions if a.type in BALL_ACTIONS]
@@ -135,8 +146,6 @@ def playability_errors(play: Play) -> list[str]:
                 next_holder = a.target
             elif a.type == "shot":
                 next_holder = None
-        if no == last and not any(a.type in ("shot", "pass") for a in ball_actions):
-            errors.append(f"{no}단계: 마지막 단계는 슛이나 패스로 끝나야 해요")
         holder = next_holder
     return errors
 

@@ -5,6 +5,7 @@
                           한 일정 · 한 팀 · 한 전술 안에서 슬롯은 한 번만 (UNIQUE). 저장은 그 조합의 행을 통째로 바꿔 끼운다.
 - team_plays              팀이 직접 만든 전술 (FR-57)
 - tactic_comments         전술 댓글 (FR-60)
+- tactic_stars            매니저가 별표한 전술 (FR-61)
 """
 
 from datetime import datetime
@@ -59,7 +60,7 @@ class TeamPlay(Base):
     defense: Mapped[str] = mapped_column(String(4), nullable=False)  # man · zone · any
     situation: Mapped[str] = mapped_column(String(12), nullable=False, default="half_court")  # half_court · inbound
     counter: Mapped[str] = mapped_column(String(120), nullable=False, default="")
-    body: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)  # {start: [{x,y}×5], ball, steps: [...]}
+    body: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)  # {start: [{x,y}×5], ball, steps: [...], opp_defense, screen_call}
     roles: Mapped[list[str]] = mapped_column(JSONB, nullable=False)  # 자리 1~5 역할
     role_source: Mapped[str] = mapped_column(String(10), nullable=False, default="RULE")  # RULE · AI · MANAGER
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
@@ -82,3 +83,16 @@ class TacticComment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     author: Mapped["Player"] = relationship()  # noqa: F821 — app.models.team
+
+
+class TacticStar(Base):
+    """매니저가 별표한 전술 (docs/07 FR-61). 팀 단위 — 별표한 전술은 전술 탭 맨 위 "별표 전술"에 모인다."""
+
+    __tablename__ = "tactic_stars"
+    __table_args__ = (UniqueConstraint("team_id", "play_key", name="uq_tactic_stars_team_play"),)
+
+    id: Mapped[BigPK]
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    play_key: Mapped[str] = mapped_column(String(40), nullable=False)  # "preset:high_pnr" · "team:12"
+    starred_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

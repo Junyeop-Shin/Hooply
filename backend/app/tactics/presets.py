@@ -375,7 +375,17 @@ COUNTERS: dict[str, str] = {
     "box_inbound": "{4}가 막히면 코너로 빠진 {2}에게, 그것도 막히면 탑으로 빠진 {3}에게 안전하게 넣어요",
     "stack_slip": "{4}가 막히면 양쪽 코너 {2}·{3}에게, 다 막히면 탑으로 올라간 {5}에게 안전하게 넣어요",
 }
-PRESET_LIST = [p.model_copy(update={"counter": COUNTERS.get(p.key, "")}) for p in PRESET_LIST]
+# 이 전술이 가정한 상대 수비의 스크린 대응 (전술판 수비 움직임이 이대로 고정된다, docs/07 D17).
+# 기본은 스테이(스크린을 돌아 따라옴). 아래는 스위치를 깨려고 만든 전술이라 스위치를 가정한다
+SWITCH_PLAYS = {
+    "spain_pnr",  # 롤하는 빅맨의 수비에게 백스크린 — 스위치로 막으면 롤맨이 빈다
+    "post_split",  # 포스트 투입 뒤 두 사람이 엇갈려 컷 — 스위치 혼선을 노린다
+    "box_inbound",  # 스크린을 건 사람에게 다시 스크린(스크린 더 스크리너) — 스위치를 깬다
+}
+PRESET_LIST = [
+    p.model_copy(update={"counter": COUNTERS.get(p.key, ""), "screen_call": "switch" if p.key in SWITCH_PLAYS else "stay"})
+    for p in PRESET_LIST
+]
 
 PRESETS: dict[str, Play] = {p.key: p for p in PRESET_LIST}
 PLAY_KEY_PREFIX = "preset:"

@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.tactics.play import Defense, Play, Point, Role, Situation, Step
+from app.tactics.play import Defense, OppDefense, Play, Point, Role, ScreenCall, Situation, Step
 
 
 class PresetList(BaseModel):
@@ -105,7 +105,9 @@ class TeamPlayIn(BaseModel):
 
     name: str = Field(default="", max_length=30)
     summary: str = Field(default="", max_length=80, description="한 줄 설명. 비우면 '우리 팀이 만든 전술'")
-    defense: Defense = "any"
+    defense: Defense | None = Field(default=None, description="추천 때 거르는 대상 수비. 비우면 opp_defense 와 같다")
+    opp_defense: OppDefense = Field(default="man", description="이 전술이 가정한 상대 수비 — 전술판 수비가 이대로 움직인다")
+    screen_call: ScreenCall = Field(default="stay", description="상대가 스크린을 만났을 때 스위치 · 스테이")
     situation: Situation = "half_court"
     counter: str = Field(default="", max_length=120, description="막혔을 때의 대안. 자리는 {1}~{5}")
     start: list[Point] = Field(min_length=5, max_length=5)
@@ -142,11 +144,20 @@ class TeamPlayView(BaseModel):
     role_source: RoleSource
     updated_at: datetime
     updated_by_name: str | None
-    can_edit: bool
+    created_by_name: str | None = Field(default=None, description="만든 사람")
+    mine: bool = Field(default=False, description="내가 만든 전술")
+    can_edit: bool = Field(description="고치기 · 지우기 — 만든 사람이거나 매니저면 true")
 
 
 class TeamPlayList(BaseModel):
     items: list[TeamPlayView]
+
+
+class TacticStars(BaseModel):
+    """매니저가 별표한 전술 (FR-61) — 전술 탭 맨 위에 모인다. 별표한 순서."""
+
+    play_keys: list[str]
+    can_edit: bool = Field(description="별표를 달고 뗄 수 있는가 (매니저)")
 
 
 class TacticCommentIn(BaseModel):

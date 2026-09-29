@@ -118,10 +118,10 @@ def test_rule_violations_name_the_step(step_no, actions, message):
     assert message in playability_errors(Play.model_validate(raw))
 
 
-def test_must_end_with_shot_or_pass_and_nothing_after_shot():
+def test_may_end_with_movement_but_nothing_after_shot():
     raw = _pnr()
-    raw["steps"] = raw["steps"][:2]  # 드리블·롤에서 끝남
-    assert "2단계: 마지막 단계는 슛이나 패스로 끝나야 해요" in playability_errors(Play.model_validate(raw))
+    raw["steps"] = raw["steps"][:2]  # 드리블·롤(이동)로 끝나도 된다 (v1.7)
+    assert playability_errors(Play.model_validate(raw)) == []
 
     raw = _pnr()
     raw["steps"].append({"caption": "슛 뒤 이동", "actions": [{"type": "move", "slot": 2, "to": {"x": 0.9, "y": 0.3}}]})

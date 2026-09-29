@@ -598,6 +598,8 @@ export interface GuestClaimView {
 // --- 전술 (docs/07 F20 · F21) ---
 
 export type Defense = 'man' | 'zone' | 'any'
+export type OppDefense = 'man' | 'zone'
+export type ScreenCall = 'switch' | 'stay'
 /** 인바운드는 골밑에서 공을 넣을 때만 쓰는 전술 — 오늘 추천에 들어가지 않는다 */
 export type Situation = 'half_court' | 'inbound'
 export type TacticRole = 'ball_handler' | 'screener_roll' | 'screener_pop' | 'shooter' | 'cutter' | 'post' | 'spacer'
@@ -622,6 +624,8 @@ export interface Play {
   defense: Defense
   situation: Situation
   counter: string // 막혔을 때의 대안. 자리는 {1}~{5}
+  opp_defense: OppDefense // 이 전술이 가정한 상대 수비 — 전술판 수비가 이대로 움직인다
+  screen_call: ScreenCall // 스크린을 만났을 때 상대 수비: 스위치 · 스테이
   start: CourtPoint[]
   ball: number
   roles: TacticRole[]
@@ -688,7 +692,9 @@ export type RoleSource = 'RULE' | 'AI' | 'MANAGER'
 export interface TeamPlayIn {
   name: string
   summary: string
-  defense: Defense
+  defense: Defense | null // 비우면 opp_defense 와 같다
+  opp_defense: OppDefense
+  screen_call: ScreenCall
   situation: Situation
   counter: string
   start: CourtPoint[]
@@ -716,8 +722,13 @@ export interface TeamPlayView {
   role_source: RoleSource
   updated_at: string
   updated_by_name: string | null
-  can_edit: boolean
+  created_by_name: string | null
+  mine: boolean // 내가 만든 전술
+  can_edit: boolean // 고치기 · 지우기 — 만든 사람 · 매니저
 }
+
+/** 매니저가 별표한 전술 (docs/07 FR-61) */
+export interface TacticStars { play_keys: string[]; can_edit: boolean }
 
 export interface TacticComment {
   id: number

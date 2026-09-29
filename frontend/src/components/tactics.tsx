@@ -1,40 +1,31 @@
 /**
- * 팀 화면 "전술" 탭 (S-28, docs/07 FR-45 · FR-46) 과 배정 결과 화면의 추천 전술 카드.
+ * 팀 화면 "전술" 탭 (S-28) 과 확정된 일정 화면의 추천 전술 카드 (docs/07 FR-45 · FR-46).
  *
- * 위: 다가오는 **확정 배정**이 있으면 그날 추천 전술이 자동으로 뜬다 — 매니저가 고르지 않는다. 팀마다 적합도 기준
- *     (서버 `fit_min`)을 넘은 전술 중 상위 3개. 그날 참석자는 누구나 본다. 자리마다 가장 잘 맞는 사람과 괄호 안에
- *     예비(같은 전술판 5명 중 그 역할도 맞는 사람)를 보여 준다. 자리별 점수·속성은 설문에서 나온 개인 특성이라 매니저에게만.
- *     팀마다 "AI 코치" 한 줄과, 카드 안에 AI 가 쓴 이유 · 핵심 자리 · 주의할 점 (체인 C, docs/07 FR-52). 실패하면 규칙 정보만.
- * 아래: 우리 팀이 직접 만든 전술(매니저는 "새 전술 만들기", docs/07 FR-57) · 전체 전술 목록 · 인바운드. 누르면 전술판으로.
+ * 전술 탭 (v1.7): 일정 추천은 없고 전술 목록만 — 맨 위 "별표 전술"(매니저가 별표, FR-61) → 우리 팀 전술(팀원 누구나
+ *   "새 전술 만들기", FR-57) → 전술 목록 → 인바운드. 별표한 전술은 원래 묶음에서 빠지고 맨 위로 올라간다. 누르면 전술판으로.
+ * 일정 화면 추천(EventTactics): 확정 배정이 있으면 팀마다 적합도 기준(서버 `fit_min`)을 넘은 전술 중 상위 3개를 자동으로
+ *   보여 준다. 카드는 모두 접힌 채로 시작한다. 자리마다 가장 잘 맞는 사람과 예비, 자리별 점수·속성은 매니저에게만.
+ *   팀마다 "AI 코치" 한 줄과, 카드 안에 AI 가 쓴 이유 · 핵심 자리 · 주의할 점 (체인 C, FR-52). 실패하면 규칙 정보만.
  */
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
-import { eventsApi } from '../api/events'
-import { tacticsApi, teamPlaysApi } from '../api/tactics'
-import { localISODate, type AiTacticItem, type EventView, type Play, type PlayLineup, type SlotLineup, type SquadRecommendation } from '../api/types'
+import { tacticStarsApi, tacticsApi, teamPlaysApi } from '../api/tactics'
+import type { AiTacticItem, EventView, Play, PlayLineup, SlotLineup, SquadRecommendation } from '../api/types'
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
 import { Thinking, TypedSections } from './ai-cards'
 import { FirstTimeTip } from './tutorial'
-import { Badge, Card, EmptyState, SectionTitle, Spinner } from './ui'
+import { Badge, EmptyState, SectionTitle, Spinner } from './ui'
 
 export const CIRCLED = ['①', '②', '③', '④', '⑤']
 const mmdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`
 /** play_key → 전술판 주소의 키 ("preset:high_pnr" → "high_pnr", "team:12" → "team_12") */
 export const keyOf = (playKey: string) => playKey.replace(/^preset:/, '').replace(/^team:/, 'team_')
+/** 전술판 주소의 키 → play_key */
+const playKeyOf = (key: string) => (key.startsWith('team_') ? `team:${key.slice(5)}` : `preset:${key}`)
 export const boardPath = (playKey: string, eventId: number, squadNo: number, zone = false) =>
   `/tactics/${keyOf(playKey)}?event=${eventId}&squad=${squadNo}${zone ? '&zone=1' : ''}`
-
-/** 오늘 이후 가장 가까운, 배정이 확정된 일정 */
-function useUpcomingAdopted(teamId: number) {
-  const events = useQuery({ queryKey: ['events', 'team', teamId, 'all', 50], queryFn: () => eventsApi.list(teamId, { size: 50 }) })
-  const today = localISODate()
-  const ev = (events.data?.items ?? [])
-    .filter((e) => e.adopted_candidate_id && e.status !== 'CANCELED' && e.event_date >= today)
-    .sort((a, b) => a.event_date.localeCompare(b.event_date) || (a.start_time ?? '').localeCompare(b.start_time ?? ''))[0]
-  return { event: ev ?? null, loading: events.isLoading }
-}
 
 /** AI 전술 추천 설명 (체인 C) — 한 팀. 추천이 있을 때만 부른다 */
 export function useAiTactics(eventId: number, squadNo: number, zone: boolean, enabled: boolean) {
@@ -55,67 +46,96 @@ export function useRecommendation(eventId: number | null, zone: boolean) {
   })
 }
 
-export function TacticsTab({ teamId, manager = false }: { teamId: number; manager?: boolean }) {
+export function TacticsTab({ teamId }: { teamId: number }) {
   const nav = useNavigate()
-  const { event, loading } = useUpcomingAdopted(teamId)
+  const qc = useQueryClient()
   const presets = useQuery({ queryKey: ['tactics', 'presets'], queryFn: tacticsApi.presets, staleTime: Infinity })
   const own = useQuery({ queryKey: ['tactics', 'team-plays', teamId], queryFn: () => teamPlaysApi.list(teamId) })
-  const [zone, setZone] = useState(false)
-  const rec = useRecommendation(event?.id ?? null, zone)
-  // 그날 참석자면 목록에서 들어가도 전술판에 그날 자리 배치를 함께 보여 준다. team 은 댓글용
-  const eventParam = event && rec.isSuccess ? `?event=${event.id}&team=${teamId}` : `?team=${teamId}`
+  const stars = useQuery({ queryKey: ['tactics', 'stars', teamId], queryFn: () => tacticStarsApi.list(teamId) })
+  const star = useMutation({
+    mutationFn: ({ key, on }: { key: string; on: boolean }) => tacticStarsApi.set(teamId, playKeyOf(key), on),
+    onSuccess: (v) => qc.setQueryData(['tactics', 'stars', teamId], v),
+  })
+  const starred = stars.data?.play_keys.map(keyOf) ?? [] // 전술판 주소 키, 별표한 순서
+  const canStar = !!stars.data?.can_edit
+  const open = (k: string) => nav(`/tactics/${k}?team=${teamId}`) // team 은 댓글용
+  const all: Play[] = [...(own.data?.items.map((v) => v.play) ?? []), ...(presets.data?.items ?? [])]
+  const rest = (items: Play[]) => items.filter((p) => !starred.includes(p.key))
+  const top = starred.map((k) => all.find((p) => p.key === k)).filter((p): p is Play => !!p)
+  const row = { starred, canStar, onStar: (key: string, on: boolean) => star.mutate({ key, on }), onOpen: open }
 
   return (
     <div className="space-y-5">
       <FirstTimeTip id="tactics" />
-      {loading ? <Spinner /> : event && !(rec.error instanceof ApiError && rec.error.status === 403) && (
-        <EventRecommend event={event} zone={zone} setZone={setZone} rec={rec} />
+      {top.length > 0 && (
+        <section>
+          <SectionTitle>별표 전술</SectionTitle>
+          <PresetList items={top} {...row} />
+        </section>
       )}
 
       <section>
-        <SectionTitle action={manager ? <Link to={`/teams/${teamId}/plays/new`} className="text-sm font-semibold text-brand-ink">+ 새 전술 만들기</Link> : undefined}>우리 팀 전술</SectionTitle>
+        <SectionTitle action={<Link to={`/teams/${teamId}/plays/new`} className="text-sm font-semibold text-brand-ink">+ 새 전술 만들기</Link>}>우리 팀 전술</SectionTitle>
         {own.isLoading ? <Spinner /> : own.data?.items.length ? (
-          <PresetList items={own.data.items.map((v) => v.play)} onOpen={(k) => nav(`/tactics/${k}${eventParam}`)} />
+          rest(own.data.items.map((v) => v.play)).length ? <PresetList items={rest(own.data.items.map((v) => v.play))} {...row} /> : <p className="px-1 text-sm text-muted">모두 별표 전술에 있어요.</p>
         ) : (
-          <p className="px-1 text-sm text-muted">
-            {manager ? '코트 위에 다섯 명의 움직임을 그려 우리 팀만의 전술을 만들 수 있어요. 역할은 AI가 붙여 줘요.' : '매니저가 만든 우리 팀 전술이 여기에 보여요.'}
-          </p>
+          <p className="px-1 text-sm text-muted">코트 위에 다섯 명의 움직임을 그려 우리 팀만의 전술을 만들 수 있어요. 역할은 AI가 붙여 줘요.</p>
         )}
       </section>
 
-      <PresetGroup title="전술 목록" items={presets.data?.items.filter((p) => p.situation === 'half_court')} loading={presets.isLoading} onOpen={(k) => nav(`/tactics/${k}${eventParam}`)} />
+      <PresetGroup title="전술 목록" items={presets.data && rest(presets.data.items.filter((p) => p.situation === 'half_court'))} loading={presets.isLoading} row={row} />
       <PresetGroup
         title="인바운드" desc="골밑 베이스라인에서 공을 넣을 때 쓰는 전술이에요. 오늘 추천에는 들어가지 않아요."
-        items={presets.data?.items.filter((p) => p.situation === 'inbound')} loading={presets.isLoading} onOpen={(k) => nav(`/tactics/${k}${eventParam}`)}
+        items={presets.data && rest(presets.data.items.filter((p) => p.situation === 'inbound'))} loading={presets.isLoading} row={row}
       />
+      {star.isError && <p className="px-1 text-xs text-danger-ink">{star.error instanceof ApiError ? star.error.message : '별표를 바꾸지 못했어요.'}</p>}
     </div>
   )
 }
 
-function PresetGroup({ title, desc, items, loading, onOpen }: { title: string; desc?: string; items?: Play[]; loading: boolean; onOpen: (key: string) => void }) {
+type RowProps = { starred: string[]; canStar: boolean; onStar: (key: string, on: boolean) => void; onOpen: (key: string) => void }
+
+function PresetGroup({ title, desc, items, loading, row }: { title: string; desc?: string; items?: Play[]; loading: boolean; row: RowProps }) {
   if (!loading && !items?.length) return null
   return (
     <section>
       <SectionTitle>{title}</SectionTitle>
       {desc && <p className="-mt-1 mb-2 px-1 text-[11px] text-muted">{desc}</p>}
-      {loading ? <Spinner /> : <PresetList items={items ?? []} onOpen={onOpen} />}
+      {loading ? <Spinner /> : <PresetList items={items ?? []} {...row} />}
     </section>
   )
 }
 
-function PresetList({ items, onOpen }: { items: Play[]; onOpen: (key: string) => void }) {
+/** 전술 카드 목록. 매니저는 오른쪽 별을 눌러 별표를 달고 뗀다 (팀원에게는 별표한 것만 별이 보인다) */
+function PresetList({ items, starred, canStar, onStar, onOpen }: { items: Play[] } & RowProps) {
   return (
     <div className="space-y-2">
-      {items.map((p) => (
-        <Card key={p.key} onClick={() => onOpen(p.key)} className="space-y-1 py-3" label={`${p.name} 전술판 보기`}>
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-ink">{p.name}</span>
-            {p.situation === 'half_court' && <Badge tone={p.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[p.defense]}</Badge>}
-            <span className="ml-auto text-faint" aria-hidden="true">›</span>
+      {items.map((p) => {
+        const on = starred.includes(p.key)
+        return (
+          <div key={p.key} className="flex items-stretch rounded-2xl border border-line bg-surface shadow-[0_1px_2px_rgba(20,33,61,0.04)]">
+            <button type="button" onClick={() => onOpen(p.key)} aria-label={`${p.name} 전술판 보기`} className="min-w-0 flex-1 space-y-1 rounded-2xl px-4 py-3 text-left active:bg-surface-2">
+              <span className="flex items-center gap-2">
+                <span className="font-semibold text-ink">{p.name}</span>
+                {p.situation === 'half_court' && <Badge tone={p.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[p.defense]}</Badge>}
+              </span>
+              <span className="block text-xs text-muted">{p.summary}</span>
+            </button>
+            {canStar ? (
+              <button
+                type="button" onClick={() => onStar(p.key, !on)} aria-pressed={on} aria-label={`${p.name} 별표${on ? ' 떼기' : ' 달기'}`}
+                className={`flex w-12 shrink-0 items-center justify-center text-xl ${on ? 'text-court-500' : 'text-faint'}`}
+              >
+                {on ? '★' : '☆'}
+              </button>
+            ) : on ? (
+              <span className="flex w-10 shrink-0 items-center justify-center text-lg text-court-500" aria-label="별표 전술">★</span>
+            ) : (
+              <span className="flex w-8 shrink-0 items-center justify-center text-faint" aria-hidden="true">›</span>
+            )}
           </div>
-          <p className="text-xs text-muted">{p.summary}</p>
-        </Card>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -200,7 +220,7 @@ function SquadRecommend({ sq, eventId, zone, mine, showLabel, fitMin, manager }:
           )}
           {sq.items.map((it, i) => (
             <LineupCard
-              key={it.play_key} it={it} rank={i + 1} open={i === 0} manager={manager}
+              key={it.play_key} it={it} rank={i + 1} open={false} manager={manager}
               to={boardPath(it.play_key, eventId, sq.squad_no, zone)} ai={aiOk?.items.find((x) => x.play_key === it.play_key)}
             />
           ))}

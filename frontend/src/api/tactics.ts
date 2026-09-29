@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { AiTactics, EventPlayView, PlayCheck, PresetList, RoleSuggestion, TacticComment, TacticRecommendation, TeamPlayIn, TeamPlayView } from './types'
+import type { AiTactics, EventPlayView, PlayCheck, PresetList, RoleSuggestion, TacticComment, TacticRecommendation, TacticStars, TeamPlayIn, TeamPlayView } from './types'
 
 /** 전술 추천 · 전술판 (docs/07 8.3절). play_key 는 "preset:high_pnr" · "team:12"(팀이 만든 전술) 형태 */
 export const tacticsApi = {
@@ -25,6 +25,13 @@ export const teamPlaysApi = {
   check: (teamId: number, body: TeamPlayIn) => api<PlayCheck>(`/teams/${teamId}/plays:check`, { method: 'POST', body }),
   /** AI 역할 태깅 (LangChain 체인 D). AI 를 못 쓰면 규칙 결과 */
   aiRoles: (teamId: number, body: TeamPlayIn) => api<RoleSuggestion>(`/teams/${teamId}/plays:ai-roles`, { method: 'POST', body }),
+}
+
+/** 별표한 전술 (docs/07 FR-61) — 매니저가 달고 뗀다 */
+export const tacticStarsApi = {
+  list: (teamId: number) => api<TacticStars>(`/teams/${teamId}/tactics/stars`),
+  set: (teamId: number, playKey: string, on: boolean) =>
+    api<TacticStars>(`/teams/${teamId}/tactics/${encodeURIComponent(playKey)}/star`, { method: on ? 'PUT' : 'DELETE' }),
 }
 
 /** 전술 댓글 (docs/07 FR-60) — 팀 안에서 전술 하나에 */

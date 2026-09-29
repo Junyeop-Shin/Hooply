@@ -2260,7 +2260,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          description: NOT_A_MEMBER
           content:
             application/json:
               schema:
@@ -2302,7 +2302,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          description: NOT_A_MEMBER
           content:
             application/json:
               schema:
@@ -2338,7 +2338,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          description: NOT_A_MEMBER
           content:
             application/json:
               schema:
@@ -2578,6 +2578,99 @@ paths:
       responses:
         '204':
           description: 성공
+        '403':
+          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/tactics/stars:
+    get:
+      summary: 별표한 전술
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacticStars'
+        '403':
+          description: NOT_A_MEMBER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/tactics/{play_key}/star:
+    put:
+      summary: 별표 달기
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: play_key
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacticStars'
+        '403':
+          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: 별표 떼기
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: play_key
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacticStars'
         '403':
           description: NOT_A_MEMBER / FORBIDDEN_ROLE
           content:
@@ -4283,6 +4376,17 @@ components:
         counter:
           type: string
           maxLength: 120
+        opp_defense:
+          type: string
+          enum:
+          - man
+          - zone
+          nullable: true
+        screen_call:
+          type: string
+          enum:
+          - switch
+          - stay
         start:
           items:
             $ref: '#/components/schemas/Point'
@@ -5526,6 +5630,18 @@ components:
       - can_edit
       - my_squad_no
       - squads
+    TacticStars:
+      properties:
+        play_keys:
+          items:
+            type: string
+          type: array
+        can_edit:
+          type: boolean
+      type: object
+      required:
+      - play_keys
+      - can_edit
     TeamCodeView:
       properties:
         team_code:
@@ -5648,6 +5764,17 @@ components:
           - man
           - zone
           - any
+          nullable: true
+        opp_defense:
+          type: string
+          enum:
+          - man
+          - zone
+        screen_call:
+          type: string
+          enum:
+          - switch
+          - stay
         situation:
           type: string
           enum:
@@ -5725,6 +5852,11 @@ components:
         updated_by_name:
           type: string
           nullable: true
+        created_by_name:
+          type: string
+          nullable: true
+        mine:
+          type: boolean
         can_edit:
           type: boolean
       type: object
