@@ -96,7 +96,7 @@ def fit_play(play: Play, roster: Sequence[PlayerRoles]) -> PlayFit:
 
 
 def allowed_defenses(zone: bool) -> frozenset[Defense]:
-    """매니저 토글 "상대가 지역 수비를 써요" → 후보로 삼을 전술의 대상 수비."""
+    """상대 수비 토글 "맨투맨 수비 · 지역 수비" → 후보로 삼을 전술의 대상 수비."""
     return frozenset({"zone", "any"}) if zone else frozenset({"man", "any"})
 
 

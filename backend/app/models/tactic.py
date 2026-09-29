@@ -1,4 +1,4 @@
-"""전술 이름표: event_play_assignments — 그날 블랙/화이트에서 전술 슬롯마다 앉힌 선수 (docs/07 FR-47).
+"""전술 자리 배치: event_play_assignments — 그날 블랙/화이트에서 전술 슬롯마다 앉힌 선수 (docs/07 FR-47).
 
 전술 자체는 DB 에 없고 `app/tactics/presets.py` 가 정본이다. 여기에는 `play_key`("preset:high_pnr") 로만 잇는다.
 한 일정 · 한 팀 · 한 전술 안에서 슬롯은 한 번만 (UNIQUE). 저장은 그 조합의 행을 통째로 바꿔 끼운다.

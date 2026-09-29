@@ -1,4 +1,4 @@
-"""전술 추천 · 전술판 · 이름표 (docs/07 8.3절)."""
+"""전술 추천 · 전술판 · 자리 배치 (docs/07 8.3절)."""
 
 from pydantic import BaseModel, Field
 

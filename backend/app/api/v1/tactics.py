@@ -1,4 +1,4 @@
-"""전술 추천 · 전술판 · 이름표 (docs/07 F20·F21, 8.3절).
+"""전술 추천 · 전술판 · 자리 배치 (docs/07 F20·F21, 8.3절).
 
 - GET /tactics/presets                                   프리셋 전술 목록
 - GET /events/{event_id}/tactics/recommend               팀별 추천 전술 (적합도 기준 이상 상위 3개, 참석자)
@@ -60,7 +60,7 @@ def recommend(
 
 @router.get(
     "/events/{event_id}/tactics/{play_key}", response_model=EventPlayView,
-    responses=errors(_403=("NOT_A_MEMBER", "NOT_ATTENDEE"), _404="NOT_FOUND"), summary="전술과 그날 이름표",
+    responses=errors(_403=("NOT_A_MEMBER", "NOT_ATTENDEE"), _404="NOT_FOUND"), summary="전술과 그날 자리 배치",
 )
 def play_view(db: DB, me: EventMember, event: EventDep, play_key: str):
     """전술판(S-29)이 쓰는 값. 팀마다 자리 배치(추천 또는 매니저가 저장한 것)와 예비. 확정 배정이 없으면 `squads` 가 비어 있다.

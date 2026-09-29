@@ -2114,7 +2114,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /events/{event_id}/tactics/{play_key}:
     get:
-      summary: 전술과 그날 이름표
+      summary: 전술과 그날 자리 배치
       tags:
       - 전술
       parameters:

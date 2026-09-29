@@ -185,7 +185,7 @@ InvalidSwap = _error(422, "INVALID_SWAP", "이렇게는 바꿀 수 없어요.")
 CannotDemoteLastManager = _error(422, "CANNOT_DEMOTE_LAST_MANAGER", "매니저가 한 명뿐이라 권한을 뺄 수 없어요.")
 # 정렬·제약 등에 다른 팀의 player_id 가 섞임 — POST /teams/{id}/rankings 등
 PlayerNotInTeam = _error(422, "PLAYER_NOT_IN_TEAM", "이 팀에 없는 사람이 섞여 있어요.")
-# 전술 이름표에 그날 그 팀(블랙/화이트)이 아닌 선수를 앉힘 — PUT /events/{id}/tactics/{play_key}/slots
+# 전술 자리 배치에 그날 그 팀(블랙/화이트)이 아닌 선수를 앉힘 — PUT /events/{id}/tactics/{play_key}/slots
 PlayerNotInSquad = _error(422, "PLAYER_NOT_IN_SQUAD", "이 팀에 배정되지 않은 사람이 섞여 있어요.")
 # 병합 방향이 게스트 → 회원이 아님 (회원끼리, 게스트끼리 등) — POST /players/{id}:merge
 MergeKindMismatch = _error(422, "MERGE_KIND_MISMATCH", "게스트 기록만 팀원에게 이어 줄 수 있어요.")
