@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableLambda
 
 from app.core.config import get_settings
 from app.llm import model as llm_model
-from app.llm.prompts import ExplainA, PlayerMessage, TeamMessagesB
+from app.llm.prompts import ExplainA, PlayerMessage, TacticItemC, TacticsC, TeamMessagesB
 from tests.test_ranking_assignment import ROSTER, _event_with_attendance, club  # noqa: F401
 
 API = "/api/v1"
@@ -20,7 +20,7 @@ NAMES = [r[0] for r in ROSTER]
 @pytest.fixture
 def fake(monkeypatch):
     """체인에 따라 입력의 판단을 그대로 옮긴 고정 결과를 돌려준다. sent 에 보낸 human 메시지를 모은다."""
-    state = {"calls": {"A": 0, "B": 0}, "sent": [], "leak": False}
+    state = {"calls": {"A": 0, "B": 0, "C": 0}, "sent": [], "leak": False, "c_extra": None}
 
     def structured(schema, **_kw):
         def respond(messages):
@@ -37,6 +37,20 @@ def fake(monkeypatch):
                     gaps=[f"{t['team']} · {g}가 부족해요" for t in teams for g in t["gaps"]],
                     watch_point="",
                 )
+            if schema is TacticsC:
+                state["calls"]["C"] += 1
+                recs = data["recommendations"]
+                items = [
+                    TacticItemC(
+                        play_id=r["play_id"], reason=f"{r['slots'][0]['player']}의 {r['slots'][0]['role']} 역할이 살아나요.",
+                        key_roles=[f"{s['player']} — {s['role']}" for s in r["slots"][:3]], caution="",
+                    )
+                    for r in recs
+                ]
+                items = list(reversed(items[1:]))  # 첫 전술은 빠뜨리고 순서도 뒤집어 보낸다
+                if state["c_extra"]:
+                    items.append(TacticItemC(play_id=state["c_extra"], reason="없는 전술", key_roles=[], caution=""))
+                return TacticsC(one_liner=f"{data['team']}는 골밑과 외곽이 고르게 살아나는 구성이에요.", items=items)
             state["calls"]["B"] += 1
             return TeamMessagesB(messages=[
                 PlayerMessage(
@@ -182,3 +196,52 @@ def test_insight_pairs_gaps_and_position_reasons(client, club, fake, monkeypatch
     p = team["players"][0]
     assert p["position_why"] and p["role"] in ai_insight.ROLE_KO.values()
     assert all(q["with"].startswith("P") for q in p["partners"]) and len(p["partners"]) <= 2
+
+
+@pytest.fixture
+def low_fit(monkeypatch):
+    """club 픽스처는 모두 같은 설문이라 적합도가 낮다 — 추천이 나오게 기준을 내린다."""
+    from app.services import tactic_service
+
+    monkeypatch.setattr(tactic_service, "FIT_MIN", 0.0)
+
+
+def test_tactics_explanation_keeps_order_and_fills_missing(client, club, fake, low_fit):
+    eid, _, _ = _adopt(client, club)
+    rec = client.get(f"{API}/events/{eid}/tactics/recommend", headers=club["members"][3]).json()["squads"][0]
+    r = client.post(f"{API}/events/{eid}/tactics/ai-recommend", params={"squad_no": 1}, headers=club["members"][3])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["fallback"] is False and body["one_liner"].startswith("블랙은 ")  # 팀 가명 복원 + 받침에 맞는 조사
+    # 추천 순서 그대로, AI 가 빠뜨린 첫 전술은 규칙 문장으로
+    assert [it["play_key"] for it in body["items"]] == [it["play_key"] for it in rec["items"]]
+    assert body["items"][0]["reason"].startswith("적합도 ") and body["items"][0]["key_roles"] == []
+    assert body["items"][1]["key_roles"] and not any("P" in k.split(" — ")[0] for k in body["items"][1]["key_roles"])
+    sent = json.loads(fake["sent"][-1])
+    assert not any(name in fake["sent"][-1] for name in NAMES)
+    assert "score" not in fake["sent"][-1]  # 자리별 점수는 보내지 않는다
+    assert [x["play_id"] for x in sent["recommendations"]] == [it["play_key"].removeprefix("preset:") for it in rec["items"]]
+    # 같은 팀 · 같은 수비 보기는 다시 부르지 않는다
+    again = client.post(f"{API}/events/{eid}/tactics/ai-recommend", params={"squad_no": 1}, headers=club["manager"]).json()
+    assert again["cached"] is True and fake["calls"]["C"] == 1
+
+
+def test_tactics_explanation_unknown_play_falls_back(client, club, fake, low_fit):
+    fake["c_extra"] = "iso_everyone"
+    eid, _, _ = _adopt(client, club)
+    body = client.post(f"{API}/events/{eid}/tactics/ai-recommend", params={"squad_no": 2}, headers=club["manager"]).json()
+    assert body["fallback"] is True and all(it["reason"].startswith("적합도 ") for it in body["items"])
+
+
+def test_tactics_explanation_permissions(client, club, signup, low_fit, monkeypatch):
+    monkeypatch.setattr(get_settings(), "llm_api_key", "")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    eid, _, _ = _adopt(client, club)
+    r = client.post(f"{API}/events/{eid}/tactics/ai-recommend", params={"squad_no": 1}, headers=club["members"][4])
+    assert r.status_code == 200 and r.json()["fallback"] is True  # 키 없음 → 규칙 문장
+    team = client.get(f"{API}/teams/{club['team_id']}", headers=club["manager"]).json()
+    outsider = signup("late2@club.com", name="늦게온사람")
+    client.post(f"{API}/teams/join", json={"team_code": team["team_code"]}, headers=outsider)
+    r = client.post(f"{API}/events/{eid}/tactics/ai-recommend", params={"squad_no": 1}, headers=outsider)
+    assert r.status_code == 403 and r.json()["code"] == "NOT_ATTENDEE"
+    assert client.post(f"{API}/events/{eid}/tactics/ai-recommend", params={"squad_no": 9}, headers=club["manager"]).status_code == 404

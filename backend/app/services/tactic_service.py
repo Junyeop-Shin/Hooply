@@ -174,28 +174,33 @@ def _lineup(ctx: _Ctx, squad_no: int, play: Play, *, manager: bool) -> tuple[Pla
     return lineup, auto.fit
 
 
+def ranked_lineups(ctx: _Ctx, squad_no: int, *, zone: bool, manager: bool) -> list[PlayLineup]:
+    """한 팀의 추천: 대상 수비가 맞고 적합도가 기준 이상인 전술 중 상위 TOP_N (적합도 높은 순, 같으면 목록 순서)."""
+    ok = allowed_defenses(zone)
+    ranked = []
+    for i, play in enumerate(PRESET_LIST):
+        if play.defense not in ok:
+            continue
+        got = _lineup(ctx, squad_no, play, manager=manager)
+        if got is not None and got[1] >= FIT_MIN:
+            ranked.append((-got[1], i, got[0]))
+    ranked.sort(key=lambda t: (t[0], t[1]))
+    return [lu for _, _, lu in ranked[:TOP_N]]
+
+
 def recommend(db: Session, event: Event, me: Player, *, squad_no: int | None, zone: bool) -> TacticRecommendation:
     ctx = _context(db, event)
     _require_attendee(db, event, me, ctx)
     if ctx is None:
         raise errors.NotAdoptedYet()
     manager = _is_manager(me)
-    ok = allowed_defenses(zone)
     out = []
     for no in sorted(ctx.by_squad):
         if squad_no is not None and no != squad_no:
             continue
-        ranked = []
-        for i, play in enumerate(PRESET_LIST):
-            if play.defense not in ok:
-                continue
-            got = _lineup(ctx, no, play, manager=manager)
-            if got is not None and got[1] >= FIT_MIN:
-                ranked.append((-got[1], i, got[0]))
-        ranked.sort(key=lambda t: (t[0], t[1]))  # 적합도 높은 순, 같으면 목록 순서
         out.append(SquadRecommendation(
             squad_no=no, squad_name=ctx.names[no], member_count=len(ctx.by_squad[no]),
-            items=[lu for _, _, lu in ranked[:TOP_N]],
+            items=ranked_lineups(ctx, no, zone=zone, manager=manager),
         ))
     return TacticRecommendation(
         event_id=event.id, zone=zone, fit_min=FIT_MIN, presets_version=PRESETS_VERSION,

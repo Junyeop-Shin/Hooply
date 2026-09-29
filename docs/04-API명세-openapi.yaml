@@ -2272,6 +2272,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /events/{event_id}/tactics/ai-recommend:
+    post:
+      summary: AI 전술 추천 설명
+      tags:
+      - AI 설명
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: squad_no
+        in: query
+        required: true
+        schema:
+          type: integer
+      - name: zone
+        in: query
+        required: false
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiTactics'
+        '403':
+          description: NOT_A_MEMBER / NOT_ATTENDEE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_ADOPTED_YET / NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /admin/users:
     get:
       summary: 전체 사용자 검색
@@ -2605,6 +2651,44 @@ components:
           nullable: true
       type: object
       required:
+      - fallback
+    AiTacticItem:
+      properties:
+        play_key:
+          type: string
+        reason:
+          type: string
+        key_roles:
+          items:
+            type: string
+          type: array
+        caution:
+          type: string
+      type: object
+      required:
+      - play_key
+      - reason
+      - key_roles
+      - caution
+    AiTactics:
+      properties:
+        squad_no:
+          type: integer
+        one_liner:
+          type: string
+        items:
+          items:
+            $ref: '#/components/schemas/AiTacticItem'
+          type: array
+        fallback:
+          type: boolean
+        cached:
+          type: boolean
+      type: object
+      required:
+      - squad_no
+      - one_liner
+      - items
       - fallback
     AnswerType:
       type: string

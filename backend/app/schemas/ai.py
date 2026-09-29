@@ -25,3 +25,20 @@ class AiMessage(BaseModel):
     partner: str = ""  # 호흡을 맞추면 좋을 동료
     fallback: bool
     text: str | None = Field(default=None, description="폴백일 때 보여 줄 규칙 설명")
+
+
+class AiTacticItem(BaseModel):
+    play_key: str
+    reason: str  # 폴백이면 규칙 문장 ("적합도 81 · 허재 볼 핸들러(볼 운반) …")
+    key_roles: list[str]
+    caution: str
+
+
+class AiTactics(BaseModel):
+    """체인 C — 한 팀의 추천 전술 설명. 추천 순서·전술은 규칙 추천과 같다."""
+
+    squad_no: int
+    one_liner: str
+    items: list[AiTacticItem]
+    fallback: bool
+    cached: bool = False

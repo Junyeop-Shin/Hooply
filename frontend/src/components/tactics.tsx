@@ -4,6 +4,7 @@
  * 위: 다가오는 **확정 배정**이 있으면 그날 추천 전술이 자동으로 뜬다 — 매니저가 고르지 않는다. 팀마다 적합도 기준
  *     (서버 `fit_min`)을 넘은 전술 중 상위 3개. 그날 참석자는 누구나 본다. 자리마다 가장 잘 맞는 사람과 괄호 안에
  *     예비(같은 전술판 5명 중 그 역할도 맞는 사람)를 보여 준다. 자리별 점수·속성은 설문에서 나온 개인 특성이라 매니저에게만.
+ *     팀마다 "AI 코치" 한 줄과, 카드 안에 AI 가 쓴 이유 · 핵심 자리 · 주의할 점 (체인 C, docs/07 FR-52). 실패하면 규칙 정보만.
  * 아래: 전체 전술 목록. 누르면 전술판으로.
  */
 import { useState } from 'react'
@@ -12,8 +13,9 @@ import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { eventsApi } from '../api/events'
 import { tacticsApi } from '../api/tactics'
-import { localISODate, type EventView, type PlayLineup, type SlotLineup, type SquadRecommendation } from '../api/types'
+import { localISODate, type AiTacticItem, type EventView, type PlayLineup, type SlotLineup, type SquadRecommendation } from '../api/types'
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
+import { Thinking, TypedSections } from './ai-cards'
 import { Badge, Card, EmptyState, SectionTitle, Spinner } from './ui'
 
 export const CIRCLED = ['①', '②', '③', '④', '⑤']
@@ -29,6 +31,15 @@ function useUpcomingAdopted(teamId: number) {
     .filter((e) => e.adopted_candidate_id && e.status !== 'CANCELED' && e.event_date >= today)
     .sort((a, b) => a.event_date.localeCompare(b.event_date) || (a.start_time ?? '').localeCompare(b.start_time ?? ''))[0]
   return { event: ev ?? null, loading: events.isLoading }
+}
+
+/** AI 전술 추천 설명 (체인 C) — 한 팀. 추천이 있을 때만 부른다 */
+export function useAiTactics(eventId: number, squadNo: number, zone: boolean, enabled: boolean) {
+  return useQuery({
+    queryKey: ['ai', 'tactics', eventId, squadNo, zone],
+    queryFn: () => tacticsApi.aiRecommend(eventId, squadNo, zone),
+    enabled, staleTime: Infinity, retry: false,
+  })
 }
 
 /** 그날 추천. 참석하지 않은 팀원은 403 — 조용히 숨긴다 */
@@ -104,14 +115,17 @@ function EventRecommend({ event, zone, setZone, rec }: {
             확정된 팀 구성으로 자리마다 가장 잘 맞는 사람을 골랐어요. 적합도 {data.fit_min} 이상인 전술만 추천해요.
             괄호 안은 같은 전술판에서 그 역할도 할 수 있는 예비예요.
           </p>
-          {squads.map((sq) => <SquadRecommend key={sq.squad_no} sq={sq} eventId={event.id} mine={sq.squad_no === data.my_squad_no} fitMin={data.fit_min} manager={data.can_edit} />)}
+          {squads.map((sq) => <SquadRecommend key={sq.squad_no} sq={sq} eventId={event.id} zone={zone} mine={sq.squad_no === data.my_squad_no} fitMin={data.fit_min} manager={data.can_edit} />)}
         </>
       )}
     </section>
   )
 }
 
-function SquadRecommend({ sq, eventId, mine, fitMin, manager }: { sq: SquadRecommendation; eventId: number; mine: boolean; fitMin: number; manager: boolean }) {
+function SquadRecommend({ sq, eventId, zone, mine, fitMin, manager }: { sq: SquadRecommendation; eventId: number; zone: boolean; mine: boolean; fitMin: number; manager: boolean }) {
+  const ai = useAiTactics(eventId, sq.squad_no, zone, sq.items.length > 0)
+  const aiOk = ai.data && !ai.data.fallback ? ai.data : null
+  const aiOf = (key: string) => aiOk?.items.find((x) => x.play_key === key)
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -123,9 +137,21 @@ function SquadRecommend({ sq, eventId, mine, fitMin, manager }: { sq: SquadRecom
         <p className="text-xs text-muted">5명 이상이어야 추천할 수 있어요.</p>
       ) : sq.items.length === 0 ? (
         <p className="rounded-xl bg-surface-2 px-3 py-2.5 text-xs text-muted">오늘 팀 구성으로는 적합도 {fitMin}를 넘는 전술이 없어요. 아래 목록에서 직접 골라 볼 수 있어요.</p>
-      ) : sq.items.map((it, i) => (
-        <LineupCard key={it.play_key} it={it} rank={i + 1} open={i === 0} to={boardPath(it.play_key, eventId, sq.squad_no)} manager={manager} />
-      ))}
+      ) : (
+        <>
+          {ai.isLoading ? (
+            <div className="rounded-xl bg-brand-soft px-3 py-2"><Thinking label="AI 코치가 전술을 읽고 있어요…" /></div>
+          ) : aiOk?.one_liner && (
+            <div className="rounded-xl bg-brand-soft px-3 py-2">
+              <p className="mb-0.5 text-[10px] font-black text-brand-ink">AI 코치</p>
+              <TypedSections note={false} sections={[{ items: [aiOk.one_liner], tone: 'lead' }]} />
+            </div>
+          )}
+          {sq.items.map((it, i) => (
+            <LineupCard key={it.play_key} it={it} rank={i + 1} open={i === 0} to={boardPath(it.play_key, eventId, sq.squad_no)} manager={manager} ai={aiOf(it.play_key)} />
+          ))}
+        </>
+      )}
     </div>
   )
 }
@@ -140,7 +166,7 @@ export function SlotPeople({ s }: { s: SlotLineup }) {
   )
 }
 
-function LineupCard({ it, rank, open: initial, to, manager }: { it: PlayLineup; rank: number; open: boolean; to: string; manager: boolean }) {
+function LineupCard({ it, rank, open: initial, to, manager, ai }: { it: PlayLineup; rank: number; open: boolean; to: string; manager: boolean; ai?: AiTacticItem }) {
   const nav = useNavigate()
   const [open, setOpen] = useState(initial)
   return (
@@ -154,6 +180,15 @@ function LineupCard({ it, rank, open: initial, to, manager }: { it: PlayLineup; 
       </button>
       {open && (
         <>
+          {ai && (
+            <div className="rounded-xl border border-brand-line px-3 py-2">
+              <TypedSections sections={[
+                { items: [ai.reason], tone: 'lead' },
+                { title: '핵심 자리', items: ai.key_roles },
+                { title: '주의할 점', items: ai.caution ? [ai.caution] : [], tone: 'warn' },
+              ]} />
+            </div>
+          )}
           <ul className="space-y-1.5">
             {it.slots.map((s) => (
               <li key={s.slot} className="text-sm">
@@ -196,6 +231,7 @@ export function AdoptedTactics({ eventId }: { eventId: number }) {
   return (
     <section>
       <SectionTitle>오늘 추천 전술</SectionTitle>
+      {d.my_squad_no !== null && <AiOneLiner eventId={eventId} squadNo={d.my_squad_no} />}
       <Card className="divide-y divide-line p-0">
         {squads.flatMap((sq) => sq.items.map((it) => (
           <button key={`${sq.squad_no}-${it.play_key}`} type="button" onClick={() => nav(boardPath(it.play_key, eventId, sq.squad_no))} className="flex min-h-12 w-full items-center gap-2 px-4 text-left active:bg-sunken">
@@ -208,5 +244,16 @@ export function AdoptedTactics({ eventId }: { eventId: number }) {
       </Card>
       <p className="mt-1.5 text-[11px] text-faint">팀 화면 전술 탭에서 자리와 예비까지 볼 수 있어요.</p>
     </section>
+  )
+}
+
+function AiOneLiner({ eventId, squadNo }: { eventId: number; squadNo: number }) {
+  const ai = useAiTactics(eventId, squadNo, false, true)
+  if (!ai.data || ai.data.fallback || !ai.data.one_liner) return null
+  return (
+    <div className="mb-2 rounded-xl bg-brand-soft px-3 py-2">
+      <p className="mb-0.5 text-[10px] font-black text-brand-ink">AI 코치</p>
+      <TypedSections note={false} sections={[{ items: [ai.data.one_liner], tone: 'lead' }]} />
+    </div>
   )
 }

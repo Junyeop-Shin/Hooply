@@ -697,3 +697,7 @@ export interface AiMessage {
   fallback: boolean
   text: string | null
 }
+
+/** 체인 C — 한 팀의 추천 전술 설명. fallback 이면 reason 이 규칙 문장 */
+export interface AiTacticItem { play_key: string; reason: string; key_roles: string[]; caution: string }
+export interface AiTactics { squad_no: number; one_liner: string; items: AiTacticItem[]; fallback: boolean; cached: boolean }

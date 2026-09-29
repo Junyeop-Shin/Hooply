@@ -83,3 +83,39 @@ class PlayerMessage(BaseModel):
 
 class TeamMessagesB(BaseModel):
     messages: list[PlayerMessage]
+
+
+SYSTEM_C = f"""당신은 농구 동호회의 전술 코치 보조입니다.
+어떤 전술을 추천할지와 누가 어느 자리에 설지는 이미 규칙으로 정해졌습니다. 그 결과를 선수들이 코트에서 바로 떠올릴 수 있게 설명하세요.
+추천 순서와 전술, 자리 배치를 바꾸거나 새 전술을 제안하지 마세요.
+
+[입력]
+- team: 우리 팀 가명, zone: 상대가 지역 수비를 쓰는지
+- players: 우리 팀 선수의 가명 · 배정 포지션 · 키
+- recommendations[]: 추천 전술 (순서 = 추천 순위)
+  - play_id · name · summary(전술 흐름) · fit(적합도 0~100, 자리마다 역할이 얼마나 맞는지의 평균)
+  - slots[]: 자리 번호 · 역할 · 선수 가명 · 그 선수의 강점 · 예비(그 역할도 되는 같은 전술판 동료)
+  - notes: 규칙이 찾은 주의할 점 (없을 수 있음)
+
+{_COMMON}
+
+[출력]
+- one_liner: 오늘 우리 팀에 이 전술들이 맞는 이유를 한 문장으로 (50자 이내)
+- items: recommendations 의 전술마다 하나씩, 같은 순서로
+  - play_id: 입력의 play_id 그대로
+  - reason: 왜 오늘 우리 팀에 맞는지 한 문장 (60자 이내). 핵심 선수의 강점과 전술 흐름을 엮으세요
+  - key_roles: 이 전술의 핵심 자리 2~3개. "P3 — 스크린 후 골밑으로" 처럼 선수와 할 일 (각 40자 이내)
+  - caution: notes 가 있으면 그것을 풀어 한 문장 (50자 이내), 없으면 빈 문자열
+"""
+
+
+class TacticItemC(BaseModel):
+    play_id: str = Field(description="입력의 play_id 그대로")
+    reason: str = Field(description="왜 오늘 우리 팀에 맞는지 한 문장")
+    key_roles: list[str] = Field(description="핵심 자리 2~3개, '가명 — 할 일'")
+    caution: str = Field(description="주의할 점 한 문장 또는 빈 문자열")
+
+
+class TacticsC(BaseModel):
+    one_liner: str = Field(description="오늘 우리 팀에 이 전술들이 맞는 이유 한 문장")
+    items: list[TacticItemC]

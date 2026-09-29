@@ -2,17 +2,18 @@
 
 - POST /assignments/candidates/{candidate_id}/ai-explanation   체인 A · 매니저용
 - GET  /events/{event_id}/assignment/adopted/ai-message        체인 B · 팀원용 (내 것만)
+- POST /events/{event_id}/tactics/ai-recommend                 체인 C · 전술 추천 설명 (참석자)
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import DB, CurrentUser, EventMember, get_event_or_404
 from app.api.v1._docs import errors
 from app.core import errors as E
 from app.models import Event, Player
-from app.schemas.ai import AiExplanation, AiMessage
+from app.schemas.ai import AiExplanation, AiMessage, AiTactics
 from app.services import ai_service, assignment_service, guest_service
 
 router = APIRouter(tags=["AI 설명"])
@@ -52,3 +53,25 @@ def ai_message(db: DB, user: CurrentUser, me: EventMember, event: Annotated[Even
     """
     player = db.get(Player, me.id) if me.id else me
     return ai_service.member_message(db, event, player, user)
+
+
+@router.post(
+    "/events/{event_id}/tactics/ai-recommend", response_model=AiTactics,
+    responses=errors(_403=("NOT_A_MEMBER", "NOT_ATTENDEE"), _404=("NOT_ADOPTED_YET", "NOT_FOUND"), _429="RATE_LIMITED"),
+    summary="AI 전술 추천 설명",
+)
+def ai_tactics(
+    db: DB, user: CurrentUser, me: EventMember, event: Annotated[Event, Depends(get_event_or_404)],
+    squad_no: Annotated[int, Query(description="팀 번호 (1 블랙 · 2 화이트)")],
+    zone: Annotated[bool, Query(description="상대가 지역 수비를 쓰면 true")] = False,
+):
+    """한 팀의 추천 전술(규칙 기반 상위 3개)을 전술마다 이유 · 핵심 자리 · 주의점과 한 줄 요약으로 설명한다 (LangChain · 체인 C).
+
+    - **권한:** 그 일정 참석자 · 매니저 · ADMIN.
+    - **처리:** 추천 순서·전술·자리는 바꾸지 않는다. 입력에 없는 전술이 나오면 전부 버리고, 빠진 전술은 규칙 문장으로 채운다.
+      같은 팀 · 같은 수비 보기면 저장해 둔 결과를 쓴다. 실패하면 `fallback=true` 와 규칙 문장("적합도 81 · 허재 볼 핸들러(볼 운반) …").
+    - **오류:** `403 NOT_ATTENDEE`, `404 NOT_ADOPTED_YET`, `429 RATE_LIMITED`.
+    - **상태:** `구현됨`. **설계서:** docs/07 FR-52.
+    """
+    player = db.get(Player, me.id) if me.id else me
+    return ai_service.explain_tactics(db, event, player, user, squad_no=squad_no, zone=zone)

@@ -15,10 +15,19 @@ from sqlalchemy.orm import Session
 
 from app.core import errors
 from app.llm import llm_guard
-from app.llm.prompts import PROMPT_VERSION, SYSTEM_A, SYSTEM_B, ExplainA, TeamMessagesB
+from app.llm.prompts import (
+    PROMPT_VERSION,
+    SYSTEM_A,
+    SYSTEM_B,
+    SYSTEM_C,
+    ExplainA,
+    TacticsC,
+    TeamMessagesB,
+)
 from app.models import AssignmentCandidate, Event, Player, User
 from app.models.enums import Position
-from app.schemas.ai import AiExplanation, AiMessage
+from app.schemas.ai import AiExplanation, AiMessage, AiTacticItem, AiTactics
+from app.services import tactic_service
 from app.services.ai_insight import ROLE_KO, Insight, analyze
 from app.services.assignment_service import (
     STRATEGY_LABEL,
@@ -163,3 +172,89 @@ def member_message(db: Session, event: Event, me: Player, user: User) -> AiMessa
     if not mine_msg:
         return AiMessage(fallback=True, text=fallback_text)
     return AiMessage(fallback=out.fallback, **mine_msg)
+
+
+# ---------------------------------------------------------------------------
+# 체인 C — 전술 추천 설명 (팀마다, 수비 보기마다 한 번)
+# ---------------------------------------------------------------------------
+
+
+def _rule_sentence(lu, names: dict[int, str]) -> str:
+    """폴백: "적합도 81 · 허재 볼 핸들러(볼 운반·픽앤롤 핸들러) · …" — 강점이 있는 자리만."""
+    parts = [f"적합도 {round(lu.fit)}"]
+    for s in lu.slots:
+        if s.matched_attrs:
+            parts.append(f"{names[s.player_id]} {ROLE_KO[s.role]}({'·'.join(s.matched_attrs[:2])})")
+    return " · ".join(parts)
+
+
+def explain_tactics(db: Session, event: Event, me: Player, user: User, *, squad_no: int, zone: bool) -> AiTactics:
+    ctx = tactic_service._context(db, event)
+    tactic_service._require_attendee(db, event, me, ctx)
+    if ctx is None:
+        raise errors.NotAdoptedYet()
+    if squad_no not in ctx.by_squad:
+        raise errors.NotFound("그날 배정에 없는 팀이에요.")
+    lineups = tactic_service.ranked_lineups(ctx, squad_no, zone=zone, manager=True)  # 강점은 모두에게 (점수는 넣지 않는다)
+    if not lineups:
+        return AiTactics(squad_no=squad_no, one_liner="", items=[], fallback=True)
+    ids = ctx.by_squad[squad_no]
+    names = {pid: ctx.players[pid].display_name for pid in ids}
+    al = llm_guard.Aliases()
+    team = al.squad(squad_no, ctx.names[squad_no])
+    for pid in ids:
+        al.player(pid, names[pid])
+    height = {pid: (p.height_cm if p.user is None else p.user.height_cm) for pid, p in ctx.players.items()}
+    position = {s.player_id: _pos(s.assigned_position) for sq in ctx.cand.squads for s in sq.slots}
+
+    def notes(lu) -> list[str]:
+        out = []
+        for s in lu.slots:
+            if any(m.startswith("설문 없음") for m in s.missing_attrs):
+                out.append(f"{al.of(s.player_id)}는 설문 정보가 없어 역할을 추정했어요")
+            elif s.score is not None and s.score < 50:
+                out.append(f"{s.slot}번 자리({ROLE_KO[s.role]})는 딱 맞는 사람이 적어요")
+        return out[:2]
+
+    recs = [
+        {
+            "play_id": lu.play_key.removeprefix("preset:"), "name": lu.name, "summary": lu.summary, "fit": lu.fit,
+            "slots": [
+                {"slot": s.slot, "role": ROLE_KO[s.role], "player": al.of(s.player_id), "strengths": s.matched_attrs[:2],
+                 "backups": [al.of(b.player_id) for b in s.backups]}
+                for s in lu.slots
+            ],
+            "notes": notes(lu),
+        }
+        for lu in lineups
+    ]
+    payload = {
+        "team": team, "zone": zone,
+        "players": [{"id": al.of(pid), "position": position.get(pid), "height_cm": height.get(pid)} for pid in ids],
+        "recommendations": recs,
+    }
+    play_ids = [r["play_id"] for r in recs]
+    rule = {lu.play_key.removeprefix("preset:"): _rule_sentence(lu, names) for lu in lineups}
+    fallback = {"one_liner": "", "items": [{"play_id": k, "reason": v, "key_roles": [], "caution": ""} for k, v in rule.items()]}
+
+    def in_order(o: dict[str, Any]) -> dict[str, Any]:
+        """추천 순서대로, 빠진 전술은 규칙 문장으로 채운다."""
+        got = {it["play_id"]: it for it in o.get("items", [])}
+        items = [got.get(k) or {"play_id": k, "reason": rule[k], "key_roles": [], "caution": ""} for k in play_ids]
+        return {"one_liner": o.get("one_liner", ""), "items": [{**it, "key_roles": it["key_roles"][:3]} for it in items]}
+
+    call = llm_guard.ChainCall(
+        chain="C", schema=TacticsC,
+        messages=[("system", SYSTEM_C), ("human", _json(payload))],
+        payload=payload, aliases=al, fallback=fallback,
+        key_parts={"v": PROMPT_VERSION, "presets": tactic_service.PRESETS_VERSION, "candidate": ctx.cand.id, "squad": squad_no, "input": payload},
+        extra_check=lambda o: all(it.get("play_id") in play_ids for it in o.get("items", [])),
+        usable=lambda o: any(it.get("reason") for it in o.get("items", [])),
+        max_chars=90, post=in_order,
+    )
+    out = llm_guard.run(db, call, user_id=user.id)
+    o = out.output
+    return AiTactics(
+        squad_no=squad_no, one_liner=o.get("one_liner", ""), fallback=out.fallback, cached=out.cached,
+        items=[AiTacticItem(play_key=f"preset:{it['play_id']}", reason=it["reason"], key_roles=it["key_roles"], caution=it["caution"]) for it in o["items"]],
+    )

@@ -25,7 +25,7 @@ function Frame({ ai, title, children }: { ai: boolean; title: string; children: 
   )
 }
 
-function Thinking({ label }: { label: string }) {
+export function Thinking({ label }: { label: string }) {
   return (
     <p className="flex items-center gap-2 text-sm text-muted" role="status">
       <span className="flex gap-0.5" aria-hidden="true">
@@ -49,7 +49,7 @@ function Fallback({ title, text }: { title: string; text: string | null | undefi
 }
 
 /** 항목 목록을 섹션별로 타이핑. 섹션 제목은 그 섹션 첫 글자가 나올 때 함께 뜬다 */
-function TypedSections({ sections }: { sections: { title?: string; items: string[]; tone?: 'lead' | 'warn' }[] }) {
+export function TypedSections({ sections, note = true }: { sections: { title?: string; items: string[]; tone?: 'lead' | 'warn' }[]; note?: boolean }) {
   const flat = sections.flatMap((s) => s.items)
   const [typed, done] = useTypewriter(flat)
   const lastIdx = typed.reduce((acc, t, k) => (t ? k : acc), 0)
@@ -78,7 +78,7 @@ function TypedSections({ sections }: { sections: { title?: string; items: string
           </div>
         )
       })}
-      {done && <p className="text-[11px] text-faint">{AI_NOTE}</p>}
+      {done && note && <p className="text-[11px] text-faint">{AI_NOTE}</p>}
     </div>
   )
 }
