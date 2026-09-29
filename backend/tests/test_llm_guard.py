@@ -267,3 +267,6 @@ def test_provider_error_reason_keeps_type_and_status(db, fake_model):
     fake_model["reply"] = ClientError("models/x is not found")
     out = g.run(db, _call(), user_id=1)
     assert out.fallback is True and out.fail_reason == "error:ClientError:404"
+    assert "_error" not in out.output  # 응답에는 싣지 않고
+    assert db.scalar(select(LlmResult)).output["_error"] == "models/x is not found"  # DB 에만 남긴다
+    assert "_error" not in g.run(db, _call(), user_id=1).output  # 캐시에서 꺼낼 때도 뺀다

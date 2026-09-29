@@ -298,7 +298,8 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
     key = cache_key(call.chain, call.key_parts)
     row = db.scalar(select(LlmResult).where(LlmResult.cache_key == key))
     if row is not None and (not row.fallback or datetime.now(UTC) - row.created_at < RETRY_AFTER):
-        return GuardOutcome(output=row.output, fallback=row.fallback, cached=True, fail_reason=row.fail_reason)
+        output = {k: v for k, v in row.output.items() if k != "_error"}
+        return GuardOutcome(output=output, fallback=row.fallback, cached=True, fail_reason=row.fail_reason)
 
     runner = llm_model.structured(call.schema)
     if runner is None:  # 키 없음 · 꺼짐 — 기록하지 않는다 (키를 넣으면 바로 부르도록)
@@ -307,6 +308,7 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
     ratelimit.check(f"llm:user:{user_id}", get_settings().llm_rate_per_minute, 60)  # 넘으면 429 RATE_LIMITED
     t0 = time.monotonic()
     reason: str | None = None
+    detail: str | None = None
     data: dict[str, Any] | None = None
     try:
         raw = _pool.submit(runner.invoke, call.messages).result(timeout=get_settings().llm_timeout_seconds)
@@ -315,6 +317,7 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
         reason = "timeout"
     except Exception as e:  # noqa: BLE001 — 공급자 오류는 모두 폴백
         reason = "schema" if type(e).__name__ == "OutputParserException" else _error_reason(e)
+        detail = str(e)[:300]
         # 보낸 입력은 가명뿐이라 공급자 오류 문구에 실명이 섞이지 않는다. 원인(모델 이름·키·한도)을 알 수 있게 앞부분을 남긴다
         log.warning("llm chain=%s error=%s %s", call.chain, type(e).__name__, str(e)[:300])
     latency = int((time.monotonic() - t0) * 1000)
@@ -323,6 +326,9 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
         if data is not None
         else GuardOutcome(output=call.fallback, fallback=True, fail_reason=reason, latency_ms=latency)
     )
+    stored = out if detail is None else GuardOutcome(
+        output={**out.output, "_error": detail}, fallback=True, fail_reason=reason, latency_ms=latency,
+    )  # 공급자 오류 문구는 DB 에만 (원인 확인용). 응답에는 싣지 않는다
     log.info("llm chain=%s fallback=%s reason=%s latency_ms=%d", call.chain, out.fallback, out.fail_reason, latency)
-    _store(db, call, key, out)
+    _store(db, call, key, stored)
     return out
