@@ -21,7 +21,7 @@
 | 403 | FORBIDDEN_ROLE, NOT_A_MEMBER, NOT_ATTENDEE, SURVEY_NOT_OPEN, FORBIDDEN_NOT_OWNER | 권한 부족·아직 열리지 않음 |
 | 404 | NOT_FOUND, TEAM_CODE_NOT_FOUND, NOT_ADOPTED_YET, NO_RANKING | 리소스 없음 |
 | 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED | 상태 충돌 |
-| 422 | TEAM_NOT_ACTIVE, NOT_ENOUGH_PLAYERS, RSVP_CLOSED, INVALID_SWAP, CANNOT_DEMOTE_LAST_MANAGER, PLAYER_NOT_IN_TEAM, PLAYER_NOT_IN_SQUAD, MERGE_KIND_MISMATCH, LOCK_GROUP_TOO_LARGE, CONSTRAINT_CONFLICT, SEPARATE_INFEASIBLE, LOCK_PARTITION_INFEASIBLE, SQUAD_OVERFLOW | 도메인 규칙 위반 (배정 제약 오류는 details 에 문제 인원 포함) |
+| 422 | TEAM_NOT_ACTIVE, NOT_ENOUGH_PLAYERS, RSVP_CLOSED, INVALID_SWAP, CANNOT_DEMOTE_LAST_MANAGER, PLAYER_NOT_IN_TEAM, PLAYER_NOT_IN_SQUAD, PLAY_NOT_PLAYABLE, MERGE_KIND_MISMATCH, LOCK_GROUP_TOO_LARGE, CONSTRAINT_CONFLICT, SEPARATE_INFEASIBLE, LOCK_PARTITION_INFEASIBLE, SQUAD_OVERFLOW | 도메인 규칙 위반 (배정 제약 오류는 details 에 문제 인원 포함) |
 | 501 | NOT_IMPLEMENTED | 비밀번호 재설정 메일 (미구현) |
 | 500 | INTERNAL_ERROR | 서버 오류 |
 
@@ -45,7 +45,7 @@
 | VoteTargets, VoteCandidate, VoteIn, PostGameSurveyIn, ShareMessage, PlayerStats, MarginPoint, QuarterRecord, RatingChange, LeaderboardEntry | 투표·통계 |
 | AdminUserRow, PlayerRawData, RatingAdjust, AuditLogView | 관리자 |
 
-## 4. 엔드포인트 요약 (88개)
+## 4. 엔드포인트 요약 (98개)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -186,6 +186,16 @@
 | GET | `/events/{event_id}/tactics/{play_key}` | 전술 + 그날 팀별 자리 배치 · 예비 (참석자) | 200 · 403 · 404 |
 | POST | `/events/{event_id}/tactics/ai-recommend` | AI 전술 추천 설명 — LangChain 체인 C (`?squad_no=&zone=`, 참석자, 팀·수비 보기마다 한 번) | 200 · 403 · 404 · 429 |
 | PUT | `/events/{event_id}/tactics/{play_key}/slots` | 자리 바꿔 저장 · 빈 목록이면 추천 배치로 (매니저) | 200 · 400 · 403 · 404 · 422 |
+| GET | `/teams/{team_id}/plays` | 팀이 직접 만든 전술 목록 (팀원) | 200 · 403 |
+| POST | `/teams/{team_id}/plays` | 팀 전술 만들기 — `roles` 를 비우면 규칙 추출 (매니저) | 201 · 400 · 403 · 422 |
+| POST | `/teams/{team_id}/plays:check` | 재생 가능성 검사 + 역할 자동 추출, 저장 안 함 (매니저) | 200 · 400 · 403 |
+| POST | `/teams/{team_id}/plays:ai-roles` | AI 역할 태깅 — LangChain 체인 D, 실패하면 규칙 결과 (매니저) | 200 · 400 · 403 · 422 · 429 |
+| GET | `/teams/{team_id}/plays/{play_id}` | 팀 전술 보기 (팀원) | 200 · 403 · 404 |
+| PUT | `/teams/{team_id}/plays/{play_id}` | 팀 전술 고치기 — 역할이 바뀌면 저장한 자리 배치 삭제 (매니저) | 200 · 400 · 403 · 404 · 422 |
+| DELETE | `/teams/{team_id}/plays/{play_id}` | 팀 전술 지우기 — 자리 배치 · 댓글 함께 (매니저) | 204 · 403 · 404 |
+| GET | `/teams/{team_id}/tactics/{play_key}/comments` | 전술 댓글 (팀원) | 200 · 403 · 404 |
+| POST | `/teams/{team_id}/tactics/{play_key}/comments` | 댓글 쓰기 (팀원, 500자, 분당 10개) | 201 · 400 · 403 · 404 · 429 |
+| DELETE | `/teams/{team_id}/tactic-comments/{comment_id}` | 댓글 지우기 (쓴 사람 · 매니저) | 204 · 403 · 404 |
 
 ### 관리자
 
@@ -213,7 +223,8 @@
 | S-03 설문 · S-23 내 위치 | GET /surveys/onboarding, POST /surveys/onboarding/responses, PUT /teams/{id}/self-rank |
 | S-04 홈 · S-17 프로필 | GET /me, PATCH /me, GET /me/teams, GET /me/profile, PUT /me/positions, GET /players/{id}/stats |
 | S-27 시작 안내 | GET /me, GET/PUT /me/tutorial |
-| S-28 전술 탭 · S-29 전술판 · S-14 오늘 추천 전술 | GET /tactics/presets, GET /events/{id}/tactics/recommend, POST /events/{id}/tactics/ai-recommend, GET/PUT /events/{id}/tactics/{play_key}[/slots] |
+| S-28 전술 탭 · S-29 전술판 · S-14 이 팀에 맞는 전술 | GET /tactics/presets, GET /teams/{id}/plays, GET /events/{id}/tactics/recommend, POST /events/{id}/tactics/ai-recommend, GET/PUT /events/{id}/tactics/{play_key}[/slots], GET /teams/{id}/plays/{play_id}, GET/POST /teams/{id}/tactics/{play_key}/comments, DELETE /teams/{id}/tactic-comments/{id} |
+| S-30 전술 편집기 | POST /teams/{id}/plays:check, POST /teams/{id}/plays:ai-roles, POST /teams/{id}/plays, GET/PUT/DELETE /teams/{id}/plays/{play_id} |
 | S-25 기록 탭 | GET /players/{id}/stats, GET /teams/{id}/stats/periods, GET /teams/{id}/stats/monthly-margin, GET /me/badges |
 | S-17 프로필 사진 | POST /me/avatar, DELETE /me/avatar, GET /users/{id}/avatar |
 | S-04/S-07 게스트 기록 확인 | GET /me/guest-claims, POST /players/{id}:claim |

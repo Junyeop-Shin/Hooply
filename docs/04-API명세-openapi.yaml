@@ -2200,6 +2200,396 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/plays:
+    get:
+      summary: 팀 전술 목록
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamPlayList'
+        '403':
+          description: NOT_A_MEMBER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: 팀 전술 만들기
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamPlayIn'
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamPlayView'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: PLAY_NOT_PLAYABLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/plays:check:
+    post:
+      summary: 전술 검사 · 역할 자동 추출
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamPlayIn'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayCheck'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/plays:ai-roles:
+    post:
+      summary: AI 역할 태깅
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamPlayIn'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleSuggestion'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: PLAY_NOT_PLAYABLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/plays/{play_id}:
+    get:
+      summary: 팀 전술 보기
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: play_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamPlayView'
+        '403':
+          description: NOT_A_MEMBER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: 팀 전술 고치기
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: play_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamPlayIn'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamPlayView'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: PLAY_NOT_PLAYABLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: 팀 전술 지우기
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: play_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: 성공
+        '403':
+          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/tactics/{play_key}/comments:
+    get:
+      summary: 전술 댓글
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: play_key
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacticCommentList'
+        '403':
+          description: NOT_A_MEMBER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: 전술 댓글 쓰기
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: play_key
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TacticCommentIn'
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacticCommentView'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: NOT_A_MEMBER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/tactic-comments/{comment_id}:
+    delete:
+      summary: 전술 댓글 지우기
+      tags:
+      - 전술
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: comment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: 성공
+        '403':
+          description: NOT_A_MEMBER / FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /assignments/candidates/{candidate_id}/ai-explanation:
     post:
       summary: AI 배정 설명 (매니저용)
@@ -3175,6 +3565,8 @@ components:
           $ref: '#/components/schemas/Play'
         can_edit:
           type: boolean
+        team_id:
+          type: integer
         my_squad_no:
           type: integer
           nullable: true
@@ -3187,6 +3579,7 @@ components:
       - play_key
       - play
       - can_edit
+      - team_id
       - my_squad_no
       - squads
     EventStatus:
@@ -3929,6 +4322,36 @@ components:
       - ball
       - roles
       - steps
+    PlayCheck:
+      properties:
+        playable:
+          type: boolean
+        errors:
+          items:
+            type: string
+          type: array
+        roles:
+          items:
+            type: string
+            enum:
+            - ball_handler
+            - screener_roll
+            - screener_pop
+            - shooter
+            - cutter
+            - post
+            - spacer
+          type: array
+        reasons:
+          items:
+            type: string
+          type: array
+      type: object
+      required:
+      - playable
+      - errors
+      - roles
+      - reasons
     PlayLineup:
       properties:
         play_key:
@@ -4603,6 +5026,42 @@ components:
       required:
       - token
       - new_password
+    RoleSuggestion:
+      properties:
+        roles:
+          items:
+            type: string
+            enum:
+            - ball_handler
+            - screener_roll
+            - screener_pop
+            - shooter
+            - cutter
+            - post
+            - spacer
+          type: array
+        reasons:
+          items:
+            type: string
+          type: array
+        source:
+          type: string
+          enum:
+          - AI
+          - RULE
+        fallback:
+          type: boolean
+        cached:
+          type: boolean
+        fail_reason:
+          type: string
+          nullable: true
+      type: object
+      required:
+      - roles
+      - reasons
+      - source
+      - fallback
     RoleUpdate:
       properties:
         role:
@@ -4995,6 +5454,50 @@ components:
             $ref: '#/components/schemas/Exchange'
           type: array
       type: object
+    TacticCommentIn:
+      properties:
+        body:
+          type: string
+          maxLength: 500
+          minLength: 1
+      type: object
+      required:
+      - body
+    TacticCommentList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TacticCommentView'
+          type: array
+      type: object
+      required:
+      - items
+    TacticCommentView:
+      properties:
+        id:
+          type: integer
+        body:
+          type: string
+        author_player_id:
+          type: integer
+        author_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        mine:
+          type: boolean
+        can_delete:
+          type: boolean
+      type: object
+      required:
+      - id
+      - body
+      - author_player_id
+      - author_name
+      - created_at
+      - mine
+      - can_delete
     TacticRecommendation:
       properties:
         event_id:
@@ -5131,6 +5634,108 @@ components:
       - player_id
       - role
       - member_count
+    TeamPlayIn:
+      properties:
+        name:
+          type: string
+          maxLength: 30
+        summary:
+          type: string
+          maxLength: 80
+        defense:
+          type: string
+          enum:
+          - man
+          - zone
+          - any
+        situation:
+          type: string
+          enum:
+          - half_court
+          - inbound
+        counter:
+          type: string
+          maxLength: 120
+        start:
+          items:
+            $ref: '#/components/schemas/Point'
+          type: array
+          maxItems: 5
+          minItems: 5
+        ball:
+          type: integer
+          maximum: 5.0
+          minimum: 1.0
+        steps:
+          items:
+            $ref: '#/components/schemas/Step'
+          type: array
+          maxItems: 12
+        roles:
+          items:
+            type: string
+            enum:
+            - ball_handler
+            - screener_roll
+            - screener_pop
+            - shooter
+            - cutter
+            - post
+            - spacer
+          type: array
+          maxItems: 5
+          minItems: 5
+          nullable: true
+        role_source:
+          type: string
+          enum:
+          - RULE
+          - AI
+          - MANAGER
+      type: object
+      required:
+      - start
+      - ball
+    TeamPlayList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TeamPlayView'
+          type: array
+      type: object
+      required:
+      - items
+    TeamPlayView:
+      properties:
+        id:
+          type: integer
+        play_key:
+          type: string
+        play:
+          $ref: '#/components/schemas/Play'
+        role_source:
+          type: string
+          enum:
+          - RULE
+          - AI
+          - MANAGER
+        updated_at:
+          type: string
+          format: date-time
+        updated_by_name:
+          type: string
+          nullable: true
+        can_edit:
+          type: boolean
+      type: object
+      required:
+      - id
+      - play_key
+      - play
+      - role_source
+      - updated_at
+      - updated_by_name
+      - can_edit
     TeamProfileSummary:
       properties:
         team_id:
