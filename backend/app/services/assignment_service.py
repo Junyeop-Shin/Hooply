@@ -677,10 +677,16 @@ def _validate_prepared(prep: Prepared) -> ValidateResult:
     return ValidateResult(feasible=True, warnings=prep.warnings)
 
 
+def _ro(n: int) -> str:
+    """숫자 뒤 조사 '로/으로' — 끝자리를 읽는 소리 기준 (0 영·3 삼·6 육 은 받침이 있어 '으로')."""
+    return "으로" if n % 10 in (0, 3, 6) else "로"
+
+
 def _warn_uneven(prep: Prepared, ideal: list[int]) -> None:
-    """묶음 때문에 고르게 못 나눴으면 알려 준다 (차단 아님)."""
+    """묶음 때문에 고르게 못 나눴으면 알려 준다 (차단 아님). 양 팀 5명 이상이면 비율은 제한하지 않는다."""
     if sorted(prep.sizes) != sorted(ideal):
-        note = f"묶음을 지키려고 두 팀 인원을 {max(prep.sizes)}:{min(prep.sizes)}로 나눴어요"
+        small = min(prep.sizes)
+        note = f"묶음을 지키려고 두 팀 인원을 {max(prep.sizes)}:{small}{_ro(small)} 나눴어요"
         if note not in prep.warnings:
             prep.warnings.append(note)
 

@@ -200,6 +200,13 @@ def test_lock_group_allows_uneven_split(client, club):
         squads = [{mb["id"] for mb in sq["members"]} for sq in cand["squads"]]
         assert sorted(len(s) for s in squads) == [5, 7]
         assert any(set(ids[:7]) <= s for s in squads)  # 묶음은 한 팀에
+    # 비율 제한은 없다 — 게스트 2명을 더해 14명이면 9:5 까지 (조사도 '9:5로')
+    eid2, _ = _event_with_attendance(client, club, guests=2)
+    big = ids[:9]
+    v = client.post(f"{API}/events/{eid2}/assignments:validate", json={"team_count": 2, "constraints": {"lock_groups": [big]}}, headers=m).json()
+    assert v["feasible"] and any("9:5로" in w for w in v["warnings"]), v
+    v = client.post(f"{API}/events/{eid2}/assignments:validate", json={"team_count": 2, "constraints": {"lock_groups": [ids[:10]]}}, headers=m).json()
+    assert not v["feasible"] and v["violations"][0]["code"] == "LOCK_GROUP_TOO_LARGE"
     # 5명씩 두 묶음 + 나머지 2명 → 6:6 이 가능하니 고르게
     v = client.post(f"{API}/events/{eid}/assignments:validate", json={"team_count": 2, "constraints": {"lock_groups": [ids[:5], ids[5:10]]}}, headers=m).json()
     assert v["feasible"] and not any("나눴어요" in w for w in v["warnings"])
