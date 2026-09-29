@@ -1,8 +1,11 @@
-"""전술 추천 · 전술판 · 자리 배치 (docs/07 8.3절)."""
+"""전술 추천 · 전술판 · 자리 배치 · 팀 전술 · 전술 댓글 (docs/07 8.3절)."""
+
+from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.tactics.play import Defense, Play, Role
+from app.tactics.play import Defense, Play, Point, Role, Situation, Step
 
 
 class PresetList(BaseModel):
@@ -74,6 +77,7 @@ class EventPlayView(BaseModel):
     play_key: str
     play: Play
     can_edit: bool  # 매니저·ADMIN
+    team_id: int  # 전술 댓글을 부를 때 쓴다
     my_squad_no: int | None
     squads: list[SquadBoard]
 
@@ -86,3 +90,78 @@ class SlotIn(BaseModel):
 class SlotsIn(BaseModel):
     squad_no: int = Field(ge=1)
     slots: list[SlotIn] = Field(max_length=5, description="다섯 자리를 모두 보낸다. 빈 목록이면 추천 배치로 되돌린다")
+
+
+# ---------------------------------------------------------------------------
+# 팀이 직접 만든 전술 (FR-57 ~ FR-59) · 전술 댓글 (FR-60)
+# ---------------------------------------------------------------------------
+
+RoleSource = Literal["RULE", "AI", "MANAGER"]
+
+
+class TeamPlayIn(BaseModel):
+    """편집기가 보내는 전술. 저장할 때는 이름과 한 단계 이상이 있어야 하고 재생 가능성 검사(FR-41)를 통과해야 한다.
+    `roles` 를 비우면 규칙으로 뽑은 역할(FR-58)을 쓴다."""
+
+    name: str = Field(default="", max_length=30)
+    summary: str = Field(default="", max_length=80, description="한 줄 설명. 비우면 '우리 팀이 만든 전술'")
+    defense: Defense = "any"
+    situation: Situation = "half_court"
+    counter: str = Field(default="", max_length=120, description="막혔을 때의 대안. 자리는 {1}~{5}")
+    start: list[Point] = Field(min_length=5, max_length=5)
+    ball: int = Field(ge=1, le=5)
+    steps: list[Step] = Field(default_factory=list, max_length=12)
+    roles: list[Role] | None = Field(default=None, min_length=5, max_length=5)
+    role_source: RoleSource = "RULE"
+
+
+class PlayCheck(BaseModel):
+    """편집 중인 전술의 검사 결과와 규칙으로 뽑은 역할 (저장하지 않는다)."""
+
+    playable: bool
+    errors: list[str] = Field(description="재생할 수 없는 곳 ('N단계: …'). 빈 목록이면 통과")
+    roles: list[Role] = Field(description="자리 1~5 의 규칙 추출 역할")
+    reasons: list[str] = Field(description="자리마다 그 역할로 본 이유 한 줄")
+
+
+class RoleSuggestion(BaseModel):
+    """AI 역할 태깅 (체인 D). AI 를 쓸 수 없으면 규칙 추출 결과(`fallback=true`)."""
+
+    roles: list[Role]
+    reasons: list[str]
+    source: Literal["AI", "RULE"]
+    fallback: bool
+    cached: bool = False
+    fail_reason: str | None = None
+
+
+class TeamPlayView(BaseModel):
+    id: int
+    play_key: str = Field(description='"team:<id>"')
+    play: Play
+    role_source: RoleSource
+    updated_at: datetime
+    updated_by_name: str | None
+    can_edit: bool
+
+
+class TeamPlayList(BaseModel):
+    items: list[TeamPlayView]
+
+
+class TacticCommentIn(BaseModel):
+    body: str = Field(min_length=1, max_length=500)
+
+
+class TacticCommentView(BaseModel):
+    id: int
+    body: str
+    author_player_id: int
+    author_name: str
+    created_at: datetime
+    mine: bool
+    can_delete: bool = Field(description="내가 쓴 댓글이거나 매니저면 true")
+
+
+class TacticCommentList(BaseModel):
+    items: list[TacticCommentView]

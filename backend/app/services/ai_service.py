@@ -179,6 +179,11 @@ def member_message(db: Session, event: Event, me: Player, user: User) -> AiMessa
 # ---------------------------------------------------------------------------
 
 
+def _play_id(key: str) -> str:
+    """play_key → LLM 에 보내는 전술 id ("preset:high_pnr" → "high_pnr", "team:12" → "team_12")."""
+    return key.removeprefix("preset:").replace("team:", "team_")
+
+
 def _rule_sentence(lu, names: dict[int, str]) -> str:
     """폴백: "적합도 81 · 허재 볼 핸들러(볼 운반·픽앤롤 핸들러) · …" — 강점이 있는 자리만."""
     parts = [f"적합도 {round(lu.fit)}"]
@@ -218,7 +223,7 @@ def explain_tactics(db: Session, event: Event, me: Player, user: User, *, squad_
 
     recs = [
         {
-            "play_id": lu.play_key.removeprefix("preset:"), "name": lu.name, "summary": lu.summary, "fit": lu.fit,
+            "play_id": _play_id(lu.play_key), "name": lu.name, "summary": lu.summary, "fit": lu.fit,
             "slots": [
                 {"slot": s.slot, "role": ROLE_KO[s.role], "player": al.of(s.player_id), "strengths": s.matched_attrs[:2],
                  "backups": [al.of(b.player_id) for b in s.backups]}
@@ -234,7 +239,8 @@ def explain_tactics(db: Session, event: Event, me: Player, user: User, *, squad_
         "recommendations": recs,
     }
     play_ids = [r["play_id"] for r in recs]
-    rule = {lu.play_key.removeprefix("preset:"): _rule_sentence(lu, names) for lu in lineups}
+    rule = {_play_id(lu.play_key): _rule_sentence(lu, names) for lu in lineups}
+    key_of = {_play_id(lu.play_key): lu.play_key for lu in lineups}
     fallback = {"one_liner": "", "items": [{"play_id": k, "reason": v, "key_roles": [], "caution": ""} for k, v in rule.items()]}
 
     def in_order(o: dict[str, Any]) -> dict[str, Any]:
@@ -247,7 +253,10 @@ def explain_tactics(db: Session, event: Event, me: Player, user: User, *, squad_
         chain="C", schema=TacticsC,
         messages=[("system", SYSTEM_C), ("human", _json(payload))],
         payload=payload, aliases=al, fallback=fallback,
-        key_parts={"v": PROMPT_VERSION, "presets": tactic_service.PRESETS_VERSION, "candidate": ctx.cand.id, "squad": squad_no, "input": payload},
+        key_parts={
+            "v": PROMPT_VERSION, "presets": tactic_service.PRESETS_VERSION, "team_plays": ctx.plays_rev,
+            "candidate": ctx.cand.id, "squad": squad_no, "input": payload,
+        },
         extra_check=lambda o: all(it.get("play_id") in play_ids for it in o.get("items", [])),
         usable=lambda o: any(it.get("reason") for it in o.get("items", [])),
         max_chars=90, post=in_order,
@@ -256,5 +265,5 @@ def explain_tactics(db: Session, event: Event, me: Player, user: User, *, squad_
     o = out.output
     return AiTactics(
         squad_no=squad_no, one_liner=o.get("one_liner", ""), fallback=out.fallback, cached=out.cached, fail_reason=out.fail_reason,
-        items=[AiTacticItem(play_key=f"preset:{it['play_id']}", reason=it["reason"], key_roles=it["key_roles"], caution=it["caution"]) for it in o["items"]],
+        items=[AiTacticItem(play_key=key_of[it["play_id"]], reason=it["reason"], key_roles=it["key_roles"], caution=it["caution"]) for it in o["items"]],
     )

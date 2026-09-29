@@ -379,9 +379,12 @@ PRESET_LIST = [p.model_copy(update={"counter": COUNTERS.get(p.key, "")}) for p i
 
 PRESETS: dict[str, Play] = {p.key: p for p in PRESET_LIST}
 PLAY_KEY_PREFIX = "preset:"
+TEAM_KEY_PREFIX = "team:"  # 팀이 직접 만든 전술 — Play.key 는 "team_<id>", play_key 는 "team:<id>" (team_plays)
 
 
 def play_key(play: Play) -> str:
+    if play.key.startswith("team_"):
+        return f"{TEAM_KEY_PREFIX}{play.key.removeprefix('team_')}"
     return f"{PLAY_KEY_PREFIX}{play.key}"
 
 

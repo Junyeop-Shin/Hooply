@@ -45,7 +45,7 @@ def recommend(
     squad_no: Annotated[int | None, Query(description="없으면 두 팀 모두")] = None,
     zone: Annotated[bool, Query(description="상대가 지역 수비를 쓰면 true")] = False,
 ):
-    """확정 배정이 있으면 팀마다 자동으로 추천한다 — 적합도가 `fit_min`(65) 이상인 전술 중 상위 3개와 자리 배치 (규칙 기반, LLM 없음).
+    """확정 배정이 있으면 팀마다 자동으로 추천한다 — 적합도가 `fit_min`(75) 이상인 전술 중 상위 3개와 자리 배치 (규칙 기반, LLM 없음).
 
     - **권한:** 그 일정 참석자 · 매니저 · ADMIN. 자리별 점수·충족/미충족 속성·벤치 교체 후보는 설문에서 나온 개인 특성이라
       매니저·ADMIN 에게만 채운다. 자리마다 `backups`(같은 전술판 5명 중 그 역할도 맞는 사람, 최대 2명)는 모두에게.

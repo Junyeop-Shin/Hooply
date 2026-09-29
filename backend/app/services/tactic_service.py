@@ -1,6 +1,6 @@
 """전술 추천 · 전술판 (docs/07 FR-43~FR-47).
 
-추천은 그날 **확정 배정**이 있으면 자동으로 만든다. 팀마다 하프코트 전술 20개의 적합도를 계산해 기준(`FIT_MIN`) 이상인 것 중
+추천은 그날 **확정 배정**이 있으면 자동으로 만든다. 팀마다 하프코트 전술(프리셋 20개 + 그 팀이 직접 만든 전술)의 적합도를 계산해 기준(`FIT_MIN`) 이상인 것 중
 상위 3개를 보여 준다. 매니저가 고르지 않아도 된다. 자리 배치도 자동이고, 매니저가 전술판에서 자리를 바꿔 저장하면
 그 전술은 저장한 배치로 보인다(최종 결정은 사람이 — 설계서 1.4절). 빈 목록을 저장하면 추천 배치로 돌아간다.
 
@@ -26,6 +26,7 @@ from app.models import (
     EventAttendance,
     EventPlayAssignment,
     Player,
+    TeamPlay,
     User,
 )
 from app.models.enums import AttendanceStatus, PlayerKind, TeamRole
@@ -45,7 +46,7 @@ from app.services import survey_service
 from app.services.assignment_service import _players_of, adopted_candidate
 from app.tactics.matching import SLOTS, allowed_defenses, fit_play
 from app.tactics.play import Play, render_counter
-from app.tactics.presets import PRESET_LIST, PRESETS_VERSION, get_play, play_key
+from app.tactics.presets import PRESET_LIST, PRESETS_VERSION, TEAM_KEY_PREFIX, get_play, play_key
 from app.tactics.roles import PlayerRoles, compute_role_scores, role_input_from_features
 
 TOP_N = 3
@@ -59,6 +60,27 @@ BACKUP_MAX = 2
 
 def presets() -> PresetList:
     return PresetList(presets_version=PRESETS_VERSION, items=PRESET_LIST)
+
+
+def team_play_to_play(tp: TeamPlay) -> Play:
+    """team_plays 행 → Play (key "team_<id>"). 저장할 때 검증을 통과한 값이라 다시 검사하지 않는다."""
+    return Play.model_validate({
+        "key": f"team_{tp.id}", "name": tp.name, "summary": tp.summary, "defense": tp.defense, "situation": tp.situation,
+        "counter": tp.counter, "roles": tp.roles, **tp.body,
+    })
+
+
+def team_plays(db: Session, team_id: int) -> list[TeamPlay]:
+    return list(db.scalars(select(TeamPlay).where(TeamPlay.team_id == team_id).order_by(TeamPlay.created_at, TeamPlay.id)).all())
+
+
+def find_play(db: Session, team_id: int, key: str) -> Play | None:
+    """"preset:high_pnr" · "high_pnr" → 프리셋, "team:12" · "team_12" → 그 팀이 만든 전술 (다른 팀 것이면 None)."""
+    if key.startswith((TEAM_KEY_PREFIX, "team_")):
+        raw = key.removeprefix(TEAM_KEY_PREFIX).removeprefix("team_")
+        tp = db.get(TeamPlay, int(raw)) if raw.isdigit() else None
+        return team_play_to_play(tp) if tp is not None and tp.team_id == team_id else None
+    return get_play(key)
 
 
 def _is_manager(me: Player) -> bool:
@@ -75,6 +97,8 @@ class _Ctx:
     players: dict[int, Player]
     scores: dict[int, PlayerRoles]
     saved: dict[tuple[int, str], list[int | None]]  # (squad_no, play_key) → 슬롯 1~5 player_id
+    plays: list[Play]  # 추천 후보: 프리셋 + 그 팀이 직접 만든 전술
+    plays_rev: list[tuple[int, str]]  # 팀 전술 (id, 고친 시각) — AI 설명 캐시 키에 넣는다
 
     def squad_of(self, pid: int | None) -> int | None:
         return next((no for no, ids in self.by_squad.items() if pid in ids), None)
@@ -109,7 +133,10 @@ def _context(db: Session, event: Event) -> _Ctx | None:
     saved: dict[tuple[int, str], list[int | None]] = {}
     for r in db.scalars(select(EventPlayAssignment).where(EventPlayAssignment.event_id == event.id)).all():
         saved.setdefault((r.squad_no, r.play_key), [None] * SLOTS)[r.slot - 1] = r.player_id
+    own = team_plays(db, event.team_id)
     return _Ctx(
+        plays=[*PRESET_LIST, *(team_play_to_play(tp) for tp in own)],
+        plays_rev=[(tp.id, tp.updated_at.isoformat()) for tp in own],
         cand=cand,
         by_squad={no: _order(players, ids) for no, ids in raw.items()},
         names={sq.squad_no: sq.squad_name for sq in cand.squads},
@@ -178,7 +205,7 @@ def ranked_lineups(ctx: _Ctx, squad_no: int, *, zone: bool, manager: bool) -> li
     """한 팀의 추천: 대상 수비가 맞고 적합도가 기준 이상인 전술 중 상위 TOP_N (적합도 높은 순, 같으면 목록 순서)."""
     ok = allowed_defenses(zone)
     ranked = []
-    for i, play in enumerate(PRESET_LIST):
+    for i, play in enumerate(ctx.plays):
         if play.defense not in ok or play.situation != "half_court":  # 인바운드는 상황 전용이라 오늘 추천에 넣지 않는다
             continue
         got = _lineup(ctx, squad_no, play, manager=manager)
@@ -209,7 +236,7 @@ def recommend(db: Session, event: Event, me: Player, *, squad_no: int | None, zo
 
 
 def play_view(db: Session, event: Event, key: str, me: Player) -> EventPlayView:
-    play = get_play(key)
+    play = find_play(db, event.team_id, key)
     if play is None:
         raise errors.NotFound("없는 전술이에요.")
     ctx = _context(db, event)
@@ -228,14 +255,14 @@ def play_view(db: Session, event: Event, key: str, me: Player) -> EventPlayView:
                 lineup=got[0] if got else None,
             ))
     return EventPlayView(
-        play_key=play_key(play), play=play, can_edit=manager,
+        play_key=play_key(play), play=play, can_edit=manager, team_id=event.team_id,
         my_squad_no=ctx.squad_of(me.id) if ctx else None, squads=squads,
     )
 
 
 def save_slots(db: Session, event: Event, key: str, body: SlotsIn, by: User, me: Player) -> EventPlayView:
     """매니저가 자리를 바꿔 저장. 다섯 자리를 모두 보내야 하고, 빈 목록이면 저장한 배치를 지워 추천 배치로 돌아간다."""
-    play = get_play(key)
+    play = find_play(db, event.team_id, key)
     if play is None:
         raise errors.NotFound("없는 전술이에요.")
     cand = adopted_candidate(db, event)

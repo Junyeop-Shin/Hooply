@@ -187,6 +187,8 @@ CannotDemoteLastManager = _error(422, "CANNOT_DEMOTE_LAST_MANAGER", "매니저�
 PlayerNotInTeam = _error(422, "PLAYER_NOT_IN_TEAM", "이 팀에 없는 사람이 섞여 있어요.")
 # 전술 자리 배치에 그날 그 팀(블랙/화이트)이 아닌 선수를 앉힘 — PUT /events/{id}/tactics/{play_key}/slots
 PlayerNotInSquad = _error(422, "PLAYER_NOT_IN_SQUAD", "이 팀에 배정되지 않은 사람이 섞여 있어요.")
+# 직접 만든 전술이 재생 가능성 검사(docs/07 FR-41)를 통과하지 못함 — details[] 에 "N단계: …" 문장
+PlayNotPlayable = _error(422, "PLAY_NOT_PLAYABLE", "이대로는 전술판에서 재생할 수 없어요.")
 # 병합 방향이 게스트 → 회원이 아님 (회원끼리, 게스트끼리 등) — POST /players/{id}:merge
 MergeKindMismatch = _error(422, "MERGE_KIND_MISMATCH", "게스트 기록만 팀원에게 이어 줄 수 있어요.")
 

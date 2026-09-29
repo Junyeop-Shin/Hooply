@@ -6,6 +6,8 @@
 프롬프트나 입력 형식을 고치면 `PROMPT_VERSION` 을 올린다 — 캐시 키에 들어가 예전 결과를 다시 쓰지 않게 된다.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 PROMPT_VERSION = 4  # 3: 역할 · 포지션 이유 · 호흡 맞출 동료 (팀원) / 활약 · 조합 · 부족한 역할 (매니저). 4: 겹조사 복원 수정 — 저장된 결과를 새로 만들게
@@ -119,3 +121,42 @@ class TacticItemC(BaseModel):
 class TacticsC(BaseModel):
     one_liner: str = Field(description="오늘 우리 팀에 이 전술들이 맞는 이유 한 문장")
     items: list[TacticItemC]
+
+
+# ---------------------------------------------------------------------------
+# 체인 D — 직접 만든 전술의 역할 태깅 (docs/07 FR-59). 선수 정보는 없다 (전술 모양만)
+# ---------------------------------------------------------------------------
+PROMPT_VERSION_D = 1
+
+SYSTEM_D = f"""당신은 농구 코치입니다. 동호회 매니저가 직접 그린 공격 전술을 보고, 다섯 자리가 각각 어떤 역할인지 붙여 주세요.
+역할은 그 자리에 어떤 선수를 세워야 하는지 고르는 데 씁니다.
+
+[역할 — 반드시 이 중 하나]
+- ball_handler: 공을 몰고 드리블·패스로 공격을 푸는 자리
+- screener_roll: 공 가진 동료에게 스크린을 건 뒤 골밑으로 들어가는 빅맨
+- screener_pop: 스크린을 건 뒤 밖으로 빠져 슛을 노리는 빅맨
+- shooter: 3점 밖에서 공을 받아 슛하는 자리 (킥아웃을 기다리는 코너 포함)
+- cutter: 공 없이 빈 곳으로 컷해 들어가는 자리
+- post: 골밑·하이포스트에서 등을 지고 공을 받는 자리
+- spacer: 외곽에서 자리를 지켜 공간을 넓히는 자리
+
+[입력]
+- slots[]: 자리 번호 · 시작 위치 · 처음에 공을 가졌는지
+- steps[]: 단계별 동작 ("5번 스크린 → 1번에게 (탑)" 처럼). 한 단계 안의 동작은 동시에 일어납니다
+- rule_roles[]: 규칙이 동작만 보고 붙인 역할과 이유 — 힌트입니다. 전술의 의도(킥아웃을 받을 코너, 수비를 끌어내는 자리)가 보이면 고치세요
+
+{_COMMON}
+
+[출력]
+- slots: 1~5번 자리 모두 하나씩. slot 은 자리 번호, role 은 위 역할 중 하나, reason 은 왜 그 역할인지 한 문장 (40자 이내, "N번은" 으로 시작하지 마세요)
+"""
+
+
+class SlotRoleD(BaseModel):
+    slot: int = Field(ge=1, le=5, description="자리 번호 1~5")
+    role: Literal["ball_handler", "screener_roll", "screener_pop", "shooter", "cutter", "post", "spacer"]
+    reason: str = Field(description="왜 그 역할인지 한 문장, 40자 이내")
+
+
+class RolesD(BaseModel):
+    slots: list[SlotRoleD]
