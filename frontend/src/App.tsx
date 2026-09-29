@@ -35,6 +35,7 @@ const SurveyPage = page(() => import('./pages/survey'), 'SurveyPage')
 const EventCreatePage = page(() => import('./pages/events'), 'EventCreatePage')
 const EventDetailPage = page(() => import('./pages/events'), 'EventDetailPage')
 const HelpPage = page(() => import('./pages/help'), 'HelpPage')
+const TacticBoardPage = page(() => import('./pages/tactics'), 'TacticBoardPage')
 
 function RequireAuth() {
   // 시작 안내 중이면 체크리스트에서 들어온 화면의 해야 할 칸을 밝혀 준다
@@ -77,6 +78,7 @@ export default function App() {
         <Route path="/events/:eventId/assignment" element={<AdoptedPage />} /> {/* S-14 */}
         <Route path="/events/:eventId/quarters" element={<QuartersPage />} /> {/* S-15 */}
         <Route path="/events/:eventId/vote" element={<VotePage />} />         {/* S-16 */}
+        <Route path="/tactics/:key" element={<TacticBoardPage />} />         {/* S-29 전술판 */}
         <Route path="/me" element={<ProfilePage />} />                   {/* S-17 */}
       </Route>
 

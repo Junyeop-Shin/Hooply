@@ -594,3 +594,74 @@ export interface GuestClaimView {
   quarters_played: number
   last_event_date: string | null
 }
+
+// --- 전술 (docs/07 F20 · F21) ---
+
+export type Defense = 'man' | 'zone' | 'any'
+export type TacticRole = 'ball_handler' | 'screener_roll' | 'screener_pop' | 'shooter' | 'cutter' | 'post' | 'spacer'
+export type PlayActionType = 'move' | 'dribble' | 'pass' | 'screen' | 'cut' | 'handoff' | 'shot'
+
+/** 코트 좌표 0~1. x 왼쪽→오른쪽, y 베이스라인→하프라인 */
+export interface CourtPoint { x: number; y: number }
+
+export interface PlayAction {
+  type: PlayActionType
+  slot: number
+  to: CourtPoint | null
+  target: number | null
+}
+
+export interface PlayStep { caption: string; actions: PlayAction[] }
+
+export interface Play {
+  key: string
+  name: string
+  summary: string
+  defense: Defense
+  start: CourtPoint[]
+  ball: number
+  roles: TacticRole[]
+  steps: PlayStep[]
+}
+
+export interface PresetList { presets_version: number; items: Play[] }
+
+export interface SlotRecommendation {
+  slot: number
+  role: TacticRole
+  player_id: number
+  display_name: string
+  score: number
+  matched_attrs: string[]
+  missing_attrs: string[]
+  alt_player_id: number | null
+  alt_display_name: string | null
+  alt_score: number | null
+}
+
+export interface PlayRecommendation {
+  play_key: string
+  name: string
+  summary: string
+  defense: Defense
+  fit: number
+  slots: SlotRecommendation[]
+}
+
+export interface SquadRecommendation { squad_no: number; squad_name: string; member_count: number; items: PlayRecommendation[] }
+export interface TacticRecommendation { event_id: number; zone: boolean; presets_version: number; squads: SquadRecommendation[] }
+
+export interface SlotTag { slot: number; player_id: number; display_name: string }
+export interface SquadMember { player_id: number; display_name: string; is_guest: boolean }
+export interface SquadTags { squad_no: number; squad_name: string; members: SquadMember[]; slots: SlotTag[] }
+
+export interface EventPlayView {
+  play_key: string
+  play: Play
+  can_edit: boolean
+  my_squad_no: number | null
+  squads: SquadTags[]
+}
+
+export interface SavedPlay { play_key: string; name: string; squad_no: number; squad_name: string; filled: number }
+export interface SavedPlays { event_id: number; can_edit: boolean; my_squad_no: number | null; items: SavedPlay[] }

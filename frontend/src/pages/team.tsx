@@ -13,10 +13,11 @@ import { localISODate, type PlayerCard, type PlayerCardDetailed } from '../api/t
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { RecordsTab } from '../components/records'
+import { TacticsTab } from '../components/tactics'
 
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 const EVENTS_PAGE = 5
-type TeamTab = 'events' | 'records' | 'members'
+type TeamTab = 'events' | 'records' | 'tactics' | 'members'
 const seenMonthKey = (teamId: number) => `hooply:records-seen-month:${teamId}`
 
 /**
@@ -193,10 +194,10 @@ export function TeamDetailPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-3 border-b border-line bg-surface">
-        {(['events', 'records', 'members'] as const).map((k) => (
+      <div className="grid grid-cols-4 border-b border-line bg-surface">
+        {(['events', 'records', 'tactics', 'members'] as const).map((k) => (
           <button key={k} onClick={() => setTab(k)} className={`min-h-11 text-sm font-semibold ${tab === k ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
-            {k === 'events' ? '일정' : k === 'records' ? '기록' : `팀원 ${t.member_count}`}
+            {k === 'events' ? '일정' : k === 'records' ? '기록' : k === 'tactics' ? '전술' : `팀원 ${t.member_count}`}
           </button>
         ))}
       </div>
@@ -246,6 +247,8 @@ export function TeamDetailPage() {
           </>
         ) : tab === 'records' ? (
           <RecordsTab teamId={id} myPlayerId={t.my_player_id} newMonth={newMonth} />
+        ) : tab === 'tactics' ? (
+          <TacticsTab teamId={id} isManager={isManager} />
         ) : players.isLoading ? <Spinner /> : (
           <div className="space-y-2">
             {players.data?.items.map((p) => <PlayerRow key={p.id} p={p} isMe={p.id === t.my_player_id} />)}

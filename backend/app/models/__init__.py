@@ -16,6 +16,7 @@ import 하는 것만으로 설계서 6장 ERD 의 28개 테이블이 전부 등�
   game.py       경기        quarters / quarter_lineups
   peer.py       피어 평가   post_game_surveys / post_game_votes / chemistry_scores
   audit.py      운영        audit_logs
+  tactic.py     전술        event_play_assignments (전술 이름표)
   enums.py      위 테이블들이 쓰는 VARCHAR 열거값 정의
 
 주의: import 순서는 relationship 문자열 참조("PlayerProfile" 등)가 해석될 때 모든 클래스가
@@ -46,6 +47,7 @@ from app.models.survey import (
     SurveyResponse,
     SurveyTemplate,
 )
+from app.models.tactic import EventPlayAssignment
 from app.models.team import GuestClaim, GuestInvitePreset, Player, Team
 
 # 외부에 공개하는 이름 목록. `from app.models import *` 와 정적 분석 도구가 참조한다.
@@ -61,6 +63,7 @@ __all__ = [
     "ChemistryScore",
     "Event",
     "EventAttendance",
+    "EventPlayAssignment",
     "GuestClaim",
     "GuestInvitePreset",
     "ManagerRanking",

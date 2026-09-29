@@ -2059,6 +2059,171 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /tactics/presets:
+    get:
+      summary: 프리셋 전술 목록
+      tags:
+      - 전술
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresetList'
+  /events/{event_id}/tactics:
+    get:
+      summary: 그날 이름표가 있는 전술
+      tags:
+      - 전술
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedPlays'
+        '403':
+          description: NOT_A_MEMBER / NOT_ATTENDEE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /events/{event_id}/tactics/recommend:
+    get:
+      summary: 팀별 추천 전술
+      tags:
+      - 전술
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: squad_no
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+      - name: zone
+        in: query
+        required: false
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacticRecommendation'
+        '403':
+          description: FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_ADOPTED_YET
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /events/{event_id}/tactics/{play_key}:
+    get:
+      summary: 전술과 그날 이름표
+      tags:
+      - 전술
+      parameters:
+      - name: play_key
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventPlayView'
+        '403':
+          description: NOT_A_MEMBER / NOT_ATTENDEE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /events/{event_id}/tactics/{play_key}/slots:
+    put:
+      summary: 전술 이름표 저장
+      tags:
+      - 전술
+      parameters:
+      - name: play_key
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlotsIn'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventPlayView'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND / NOT_ADOPTED_YET
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: PLAYER_NOT_IN_SQUAD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /admin/users:
     get:
       summary: 전체 사용자 검색
@@ -2241,6 +2406,34 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    Action:
+      properties:
+        type:
+          type: string
+          enum:
+          - move
+          - dribble
+          - pass
+          - screen
+          - cut
+          - handoff
+          - shot
+        slot:
+          type: integer
+          maximum: 5.0
+          minimum: 1.0
+        to:
+          $ref: '#/components/schemas/Point'
+          nullable: true
+        target:
+          type: integer
+          maximum: 5.0
+          minimum: 1.0
+          nullable: true
+      type: object
+      required:
+      - type
+      - slot
     AdminUserRow:
       properties:
         id:
@@ -2780,6 +2973,28 @@ components:
           $ref: '#/components/schemas/AttendanceStatus'
           nullable: true
       type: object
+    EventPlayView:
+      properties:
+        play_key:
+          type: string
+        play:
+          $ref: '#/components/schemas/Play'
+        can_edit:
+          type: boolean
+        my_squad_no:
+          type: integer
+          nullable: true
+        squads:
+          items:
+            $ref: '#/components/schemas/SquadTags'
+          type: array
+      type: object
+      required:
+      - play_key
+      - play
+      - can_edit
+      - my_squad_no
+      - squads
     EventStatus:
       type: string
       enum:
@@ -3454,6 +3669,92 @@ components:
       required:
       - player_id
       - squad_no
+    Play:
+      properties:
+        key:
+          type: string
+          pattern: ^[a-z0-9_]{1,30}$
+        name:
+          type: string
+          maxLength: 30
+          minLength: 1
+        summary:
+          type: string
+          maxLength: 80
+          minLength: 1
+        defense:
+          type: string
+          enum:
+          - man
+          - zone
+          - any
+        start:
+          items:
+            $ref: '#/components/schemas/Point'
+          type: array
+          maxItems: 5
+          minItems: 5
+        ball:
+          type: integer
+          maximum: 5.0
+          minimum: 1.0
+        roles:
+          items:
+            type: string
+            enum:
+            - ball_handler
+            - screener_roll
+            - screener_pop
+            - shooter
+            - cutter
+            - post
+            - spacer
+          type: array
+          maxItems: 5
+          minItems: 5
+        steps:
+          items:
+            $ref: '#/components/schemas/Step'
+          type: array
+          minItems: 1
+      type: object
+      required:
+      - key
+      - name
+      - summary
+      - defense
+      - start
+      - ball
+      - roles
+      - steps
+    PlayRecommendation:
+      properties:
+        play_key:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        defense:
+          type: string
+          enum:
+          - man
+          - zone
+          - any
+        fit:
+          type: number
+        slots:
+          items:
+            $ref: '#/components/schemas/SlotRecommendation'
+          type: array
+      type: object
+      required:
+      - play_key
+      - name
+      - summary
+      - defense
+      - fit
+      - slots
     PlayerCard:
       properties:
         id:
@@ -3722,6 +4023,20 @@ components:
           type: array
           nullable: true
       type: object
+    Point:
+      properties:
+        x:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+        y:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+      type: object
+      required:
+      - x
+      - y
     Position:
       type: string
       enum:
@@ -3767,6 +4082,18 @@ components:
           type: array
           maxItems: 4
       type: object
+    PresetList:
+      properties:
+        presets_version:
+          type: integer
+        items:
+          items:
+            $ref: '#/components/schemas/Play'
+          type: array
+      type: object
+      required:
+      - presets_version
+      - items
     QuarterBulkResult:
       properties:
         created:
@@ -4076,6 +4403,44 @@ components:
       type: object
       required:
       - role
+    SavedPlay:
+      properties:
+        play_key:
+          type: string
+        name:
+          type: string
+        squad_no:
+          type: integer
+        squad_name:
+          type: string
+        filled:
+          type: integer
+      type: object
+      required:
+      - play_key
+      - name
+      - squad_no
+      - squad_name
+      - filled
+    SavedPlays:
+      properties:
+        event_id:
+          type: integer
+        can_edit:
+          type: boolean
+        my_squad_no:
+          type: integer
+          nullable: true
+        items:
+          items:
+            $ref: '#/components/schemas/SavedPlay'
+          type: array
+      type: object
+      required:
+      - event_id
+      - can_edit
+      - my_squad_no
+      - items
     SelfRankIn:
       properties:
         level:
@@ -4156,6 +4521,145 @@ components:
       - C
       - D
       - E
+    SlotIn:
+      properties:
+        slot:
+          type: integer
+          maximum: 5.0
+          minimum: 1.0
+        player_id:
+          type: integer
+      type: object
+      required:
+      - slot
+      - player_id
+    SlotRecommendation:
+      properties:
+        slot:
+          type: integer
+        role:
+          type: string
+          enum:
+          - ball_handler
+          - screener_roll
+          - screener_pop
+          - shooter
+          - cutter
+          - post
+          - spacer
+        player_id:
+          type: integer
+        display_name:
+          type: string
+        score:
+          type: integer
+        matched_attrs:
+          items:
+            type: string
+          type: array
+        missing_attrs:
+          items:
+            type: string
+          type: array
+        alt_player_id:
+          type: integer
+          nullable: true
+        alt_display_name:
+          type: string
+          nullable: true
+        alt_score:
+          type: integer
+          nullable: true
+      type: object
+      required:
+      - slot
+      - role
+      - player_id
+      - display_name
+      - score
+      - matched_attrs
+      - missing_attrs
+      - alt_player_id
+      - alt_display_name
+      - alt_score
+    SlotTag:
+      properties:
+        slot:
+          type: integer
+        player_id:
+          type: integer
+        display_name:
+          type: string
+      type: object
+      required:
+      - slot
+      - player_id
+      - display_name
+    SlotsIn:
+      properties:
+        squad_no:
+          type: integer
+          minimum: 1.0
+        slots:
+          items:
+            $ref: '#/components/schemas/SlotIn'
+          type: array
+          maxItems: 5
+      type: object
+      required:
+      - squad_no
+      - slots
+    SquadMember:
+      properties:
+        player_id:
+          type: integer
+        display_name:
+          type: string
+        is_guest:
+          type: boolean
+      type: object
+      required:
+      - player_id
+      - display_name
+      - is_guest
+    SquadRecommendation:
+      properties:
+        squad_no:
+          type: integer
+        squad_name:
+          type: string
+        member_count:
+          type: integer
+        items:
+          items:
+            $ref: '#/components/schemas/PlayRecommendation'
+          type: array
+      type: object
+      required:
+      - squad_no
+      - squad_name
+      - member_count
+      - items
+    SquadTags:
+      properties:
+        squad_no:
+          type: integer
+        squad_name:
+          type: string
+        members:
+          items:
+            $ref: '#/components/schemas/SquadMember'
+          type: array
+        slots:
+          items:
+            $ref: '#/components/schemas/SlotTag'
+          type: array
+      type: object
+      required:
+      - squad_no
+      - squad_name
+      - members
+      - slots
     SquadView:
       properties:
         squad_no:
@@ -4187,6 +4691,21 @@ components:
       - squad_no
       - squad_name
       - members
+    Step:
+      properties:
+        caption:
+          type: string
+          maxLength: 80
+          minLength: 1
+        actions:
+          items:
+            $ref: '#/components/schemas/Action'
+          type: array
+          minItems: 1
+      type: object
+      required:
+      - caption
+      - actions
     Strategy:
       type: string
       enum:
@@ -4314,6 +4833,24 @@ components:
             $ref: '#/components/schemas/Exchange'
           type: array
       type: object
+    TacticRecommendation:
+      properties:
+        event_id:
+          type: integer
+        zone:
+          type: boolean
+        presets_version:
+          type: integer
+        squads:
+          items:
+            $ref: '#/components/schemas/SquadRecommendation'
+          type: array
+      type: object
+      required:
+      - event_id
+      - zone
+      - presets_version
+      - squads
     TeamCodeView:
       properties:
         team_code:
