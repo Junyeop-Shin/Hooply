@@ -57,6 +57,8 @@ NUM_RE = re.compile(r"\d+(?:\.\d+)?%?")
 LEAK_RE = re.compile(r"등급|점수|순위|실력이\s*(?:높|낮)")
 SENTENCE_RE = re.compile(r"(?<=[.!?。])\s+|\n+")
 RETRY_AFTER = timedelta(minutes=10)  # 폴백으로 끝난 결과는 이만큼 지나면 다시 시도한다
+TRANSIENT_RETRY_AFTER = timedelta(minutes=1)  # 공급자 과부하·타임아웃처럼 곧 풀리는 실패는 더 빨리
+RETRY_WAIT = 1.5  # 일시적 오류면 한 번 더 부르기 전에 쉬는 시간 (초)
 MAX_CHARS = 300  # 문자열 하나의 기본 상한 (체인이 바꿀 수 있다)
 
 _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="llm")
@@ -276,6 +278,11 @@ def _validate(call: ChainCall, raw: Any) -> tuple[dict[str, Any] | None, str | N
     return data, None
 
 
+def is_transient(reason: str | None) -> bool:
+    """곧 풀릴 수 있는 실패 — 타임아웃, 공급자 과부하(503)·한도(429)·서버 오류(500)."""
+    return bool(reason) and (reason == "timeout" or any(reason.endswith(f":{c}") for c in (429, 500, 503)))
+
+
 def _error_reason(e: Exception) -> str:
     """공급자 오류 → "error:<예외 이름>:<HTTP 상태>" (llm_results.fail_reason 40자). 모델 이름 오류(404) · 키 오류(400/403) · 한도(429)를 가른다."""
     code = next((getattr(e, a) for a in ("status_code", "code", "status") if isinstance(getattr(e, a, None), int)), None)
@@ -297,7 +304,8 @@ def _store(db: Session, call: ChainCall, key: str, out: GuardOutcome) -> None:
 def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
     key = cache_key(call.chain, call.key_parts)
     row = db.scalar(select(LlmResult).where(LlmResult.cache_key == key))
-    if row is not None and (not row.fallback or datetime.now(UTC) - row.created_at < RETRY_AFTER):
+    window = TRANSIENT_RETRY_AFTER if row is not None and is_transient(row.fail_reason) else RETRY_AFTER
+    if row is not None and (not row.fallback or datetime.now(UTC) - row.created_at < window):
         output = {k: v for k, v in row.output.items() if k != "_error"}
         return GuardOutcome(output=output, fallback=row.fallback, cached=True, fail_reason=row.fail_reason)
 
@@ -307,19 +315,28 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
 
     ratelimit.check(f"llm:user:{user_id}", get_settings().llm_rate_per_minute, 60)  # 넘으면 429 RATE_LIMITED
     t0 = time.monotonic()
+    deadline = t0 + get_settings().llm_timeout_seconds
     reason: str | None = None
     detail: str | None = None
     data: dict[str, Any] | None = None
-    try:
-        raw = _pool.submit(runner.invoke, call.messages).result(timeout=get_settings().llm_timeout_seconds)
-        data, reason = _validate(call, raw)
-    except FutureTimeout:
-        reason = "timeout"
-    except Exception as e:  # noqa: BLE001 — 공급자 오류는 모두 폴백
-        reason = "schema" if type(e).__name__ == "OutputParserException" else _error_reason(e)
-        detail = str(e)[:300]
-        # 보낸 입력은 가명뿐이라 공급자 오류 문구에 실명이 섞이지 않는다. 원인(모델 이름·키·한도)을 알 수 있게 앞부분을 남긴다
-        log.warning("llm chain=%s error=%s %s", call.chain, type(e).__name__, str(e)[:300])
+    for attempt in range(2):  # 일시적 오류면 남은 시간 안에서 한 번 더
+        try:
+            raw = _pool.submit(runner.invoke, call.messages).result(timeout=max(deadline - time.monotonic(), 0.01))
+            data, reason = _validate(call, raw)
+            detail = None
+            break
+        except FutureTimeout:
+            reason = "timeout"
+            break
+        except Exception as e:  # noqa: BLE001 — 공급자 오류는 모두 폴백
+            reason = "schema" if type(e).__name__ == "OutputParserException" else _error_reason(e)
+            detail = str(e)[:300]
+            # 보낸 입력은 가명뿐이라 공급자 오류 문구에 실명이 섞이지 않는다. 원인(모델 이름·키·한도)을 알 수 있게 앞부분을 남긴다
+            log.warning("llm chain=%s attempt=%d error=%s %s", call.chain, attempt + 1, type(e).__name__, detail)
+            if attempt == 0 and is_transient(reason) and deadline - time.monotonic() > RETRY_WAIT + 2:
+                time.sleep(RETRY_WAIT)
+                continue
+            break
     latency = int((time.monotonic() - t0) * 1000)
     out = (
         GuardOutcome(output=data, fallback=False, latency_ms=latency)

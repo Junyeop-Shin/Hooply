@@ -270,3 +270,46 @@ def test_provider_error_reason_keeps_type_and_status(db, fake_model):
     assert "_error" not in out.output  # 응답에는 싣지 않고
     assert db.scalar(select(LlmResult)).output["_error"] == "models/x is not found"  # DB 에만 남긴다
     assert "_error" not in g.run(db, _call(), user_id=1).output  # 캐시에서 꺼낼 때도 뺀다
+
+
+def test_transient_error_is_retried_once(db, fake_model, monkeypatch):
+    """공급자 과부하(503)면 한 번 더 부른다. 두 번째가 되면 AI 결과."""
+
+    class ServerError(Exception):
+        code = 503
+
+    monkeypatch.setattr(g, "RETRY_WAIT", 0.01)
+    replies = [ServerError("high demand"), Explain(summary="P1 좋아요.", reasons=["x"])]
+
+    def respond(_messages):
+        r = replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    monkeypatch.setattr(llm_model, "structured", lambda schema: RunnableLambda(respond))
+    out = g.run(db, _call(), user_id=1)
+    assert out.fallback is False and out.output["summary"] == "허재 좋아요."
+
+
+def test_transient_fallback_retried_sooner(db, fake_model):
+    class ServerError(Exception):
+        code = 503
+
+    fake_model["reply"] = ServerError("high demand")
+    g.RETRY_WAIT, saved = 0.01, g.RETRY_WAIT
+    try:
+        assert g.run(db, _call(), user_id=1).fail_reason == "error:ServerError:503"
+    finally:
+        g.RETRY_WAIT = saved
+    assert fake_model["calls"] == 2  # 한 번 더 시도했다
+    row = db.scalar(select(LlmResult))
+    row.created_at = row.created_at - g.TRANSIENT_RETRY_AFTER  # 1분 지난 것으로
+    db.commit()
+    fake_model["reply"] = Explain(summary="P1 좋아요.", reasons=["x"])
+    assert g.run(db, _call(), user_id=1).fallback is False  # 10분을 기다리지 않는다
+
+
+def test_is_transient():
+    assert g.is_transient("timeout") and g.is_transient("error:GoogleAPIError:503") and g.is_transient("error:X:429")
+    assert not g.is_transient("error:GoogleInvalidRequestError") and not g.is_transient("leak") and not g.is_transient(None)
