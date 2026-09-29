@@ -23,10 +23,11 @@
         이번 주 배정 화면의 "지난 조건 불러오기" 로 세 가지를 한 번에 볼 수 있다
   - 매니저 실력 정렬 2개 버전 (F14) — 최신 버전이 활성, 이전 버전은 이력으로 남는다
   - 프로필 사진 4명 (업로드·서빙 경로 확인용 자리 이미지, 매니저는 제외)
-  - 앞으로의 일정 3건
-      · 이번 주 일요일 — 참석 응답 완료, **배정은 일부러 실행하지 않음** (심사자가 직접 돌려 보는 화면)
-      · 다음 주 일요일 — 참석 응답 완료, 역시 배정 전 (심사자가 두 번 해 볼 수 있게)
-      · 2주 뒤 일요일 — 응답 수집 중 (미응답 다수 → RSVP 확인용)
+  - 앞으로의 일정 5건 — 시드한 날부터 **약 한 달 동안** 포트폴리오 안내("이번 주 일정 › 팀 배정하러 가기")가 그대로 되도록
+      · 이번 주 ~ 3주 뒤 일요일(4건) — 참석 응답 완료, **배정은 일부러 실행하지 않음** (심사자가 직접 돌려 보는 화면).
+        주가 지나도 다음 일요일이 '이번 주 일정' 이 되어 같은 흐름을 해 볼 수 있다
+      · 4주 뒤 일요일 — 응답 수집 중 (11명 참석 + 미응답 다수 → RSVP 확인용). 참석이 10명을 넘어 그 주에도 배정할 수 있다
+    지난 일정의 경기 후 투표는 닫히지 않으므로, 주가 지나 이번 주 일정이 지난 일정이 되어도 참석자는 투표해 볼 수 있다
   - 두 번째 팀 "수요 픽업" (기본 팀 설정 확인용) · 승인 대기 팀 "목요 픽업"
   이미 팀이 있으면 아무것도 만들지 않고 계정 정보만 출력한다 (멱등).
 
@@ -53,6 +54,7 @@ from app.models.enums import (
     Position,
     SelfRankLevel,
     Side,
+    TeamRole,
     TutorialState,
 )
 from app.schemas.assignment import AssignmentRunRequest, ConstraintSet, PinConstraint
@@ -115,6 +117,7 @@ CORE = list(range(10))          # 매회 나오는 고정 멤버
 ROTATING = list(range(10, 19))  # 번갈아 나오는 멤버 (매회 4명)
 NO_SURVEY_IDX = 19              # 설문 전 상태로 남겨 둘 사람 (m19 주희정) — 홈 온보딩 카드 확인용
 PAST_WEEKS = 10                 # 지난 회차 수 (주 1회)
+UPCOMING_WEEKS = 5              # 앞으로의 일정 수 — 시드한 날부터 약 한 달 동안 매주 배정 전 일정이 남는다
 VOTE_WEEKS = 4                  # 최근 몇 회차에 경기 후 투표를 넣을지
 AVATAR_IDX = [1, 2, 4, 7]       # 프로필 사진을 넣어 둘 사람. 매니저(0)는 비워 둔다 — e2e/avatar.spec 이 사진 없는 상태에서 시작한다
 
@@ -419,7 +422,7 @@ def main() -> None:
         ranking_service.create(db, team, manager, order_v1)
         ranking_service.create(db, team, manager, [players[i].id for i in swapped])
 
-        # 5) 앞으로의 일정 — 이번 주·다음 주는 응답 완료(배정 전), 2주 뒤는 응답 수집 중
+        # 5) 앞으로의 일정 — 이번 주 ~ 3주 뒤는 응답 완료(배정 전), 4주 뒤는 응답 수집 중 (한 달 동안 매주 '이번 주 일정' 이 있다)
         def upcoming(weeks_ahead: int, *, responded: bool, guests: list[str]) -> None:
             day = sunday + timedelta(days=7 * weeks_ahead)
             deadline = datetime.combine(day - timedelta(days=1), time(22, 0)).astimezone()
@@ -437,13 +440,16 @@ def main() -> None:
                 for i in [j for j in range(len(ROSTER)) if j not in attend_idx][:3]:
                     event_service.respond(db, ev, players[i], AttendanceStatus.ABSENT, "출장")
             else:
-                for i in attend_idx[:5]:  # 아직 다섯 명만 응답 — 나머지는 미응답
+                # 11명만 참석 응답 — 나머지는 미응답(RSVP 확인용). 10명을 넘으므로 그 주가 '이번 주' 가 되어도 배정할 수 있다
+                for i in attend_idx[:11]:
                     event_service.respond(db, ev, players[i], AttendanceStatus.ATTEND, None)
             invite_guests(ev, guests)
 
         upcoming(0, responded=True, guests=["허웅", "이승현"])
         upcoming(1, responded=True, guests=["허훈"])
-        upcoming(2, responded=False, guests=[])
+        upcoming(2, responded=True, guests=["송교창"])
+        upcoming(3, responded=True, guests=["허웅"])
+        upcoming(UPCOMING_WEEKS - 1, responded=False, guests=[])
 
         # 6) 게스트였던 사람이 가입한 상황 — m20 "허웅" 은 "허웅" 과 이름이 같아
         #    본인 홈에 "본인이 맞나요?" 카드가, 매니저의 팀원 관리에 "기록 이어받기 제안" 이 뜬다
@@ -461,10 +467,15 @@ def main() -> None:
             team_service.join_team(db, u, team2.team_code)
         for u, row in zip(users[:7], ROSTER[:7], strict=True):
             survey_service.set_self_rank(db, caller_player(db, u, team2.id), SelfRankLevel(row[2]))
-        wed = sunday + timedelta(days=3)
-        ev2 = event_service.create_event(db, team2, users[2], EventCreate(title="수요 픽업", event_date=wed, start_time=time(20, 0), end_time=time(22, 0), venue="잠실 학생체육관"))
-        for u in users[:5]:
-            event_service.respond(db, ev2, caller_player(db, u, team2.id), AttendanceStatus.ATTEND, None)
+        # manager@demo.com(허재)도 이 팀 매니저 — "인원이 모자라면 배정을 막음"을 매니저 계정 하나로 확인할 수 있게
+        p0 = caller_player(db, users[0], team2.id)
+        p0.role, p0.role_granted_by = TeamRole.MANAGER, users[2].id
+        # 참석 5명뿐인 수요 일정 2건(이번 주 · 4주 뒤) — 배정 버튼이 "참석 10명 이상 필요 · 현재 5명" 으로 잠긴다. 한 달 내내 하나는 남는다
+        for weeks_ahead in (0, UPCOMING_WEEKS - 1):
+            wed = sunday + timedelta(days=3 + 7 * weeks_ahead)
+            ev2 = event_service.create_event(db, team2, users[2], EventCreate(title="수요 픽업", event_date=wed, start_time=time(20, 0), end_time=time(22, 0), venue="잠실 학생체육관"))
+            for u in users[:5]:
+                event_service.respond(db, ev2, caller_player(db, u, team2.id), AttendanceStatus.ATTEND, None)
         db.commit()
 
         # 8) 시작 안내 — 위 데모 계정은 이미 앱을 쓰는 사람이라 팝업·체크리스트 없이 기능별 첫 안내만 본다 (DONE).
@@ -481,8 +492,11 @@ def main() -> None:
         print(f"최근 {VOTE_WEEKS}회차에는 경기 후 투표가 들어가 있어요 (회차마다 3명은 미응답 — 직접 투표해 볼 수 있어요)")
         print("지난주 회차 제약: 묶기(게스트 허웅+초대자 문경은) · 갈라놓기(서장훈/이상민) · 사전 배치(허재→블랙) → 이번 주 배정 화면의 '지난 조건 불러오기'")
         print("매니저 실력 정렬: 2개 버전 저장됨 (최신이 활성)")
-        print(f"앞으로의 일정: {sunday} / {sunday + timedelta(days=7)} 는 응답 완료 · **배정 전** (직접 실행해 보세요) · {sunday + timedelta(days=14)} 는 응답 수집 중")
-        print(f"두 번째 팀: {TEAM2_NAME} (코드 {team2.team_code}) · 매니저 m02 이상민 · 허재·m01·m03~m06 이 두 팀 소속 → 홈에서 '기본 팀으로 설정하기'")
+        last = sunday + timedelta(days=7 * (UPCOMING_WEEKS - 1))
+        print(f"앞으로의 일정: {sunday} ~ {last - timedelta(days=7)} 매주 응답 완료 · **배정 전** (직접 실행해 보세요) · {last} 는 응답 수집 중 (11명 참석)")
+        print(f"→ {last - timedelta(days=1)} 까지 매주 '이번 주 일정 › 팀 배정하러 가기' 흐름을 해 볼 수 있어요")
+        print(f"두 번째 팀: {TEAM2_NAME} (코드 {team2.team_code}) · 매니저 m02 이상민 · 허재(매니저)·m01·m03~m06 이 두 팀 소속 → 홈에서 '기본 팀으로 설정하기'")
+        print(f"인원 부족 확인: manager@demo.com → {TEAM2_NAME} 의 수요 일정({sunday + timedelta(days=3)} · {sunday + timedelta(days=3 + 7 * (UPCOMING_WEEKS - 1))}) — 참석 5명이라 배정 버튼이 잠겨 있어요")
         print(f"승인 대기 팀: {TEAM3_NAME} (m08 오세근 생성) — 승인 전이라 일정 기능이 잠겨 있어요")
         print(f"매니저 로그인: {MANAGER_EMAIL} / {PASSWORD}")
         print(f"팀원 로그인: m01@demo.com ~ m19@demo.com / {PASSWORD}  (m19 주희정은 설문 전 상태)")
