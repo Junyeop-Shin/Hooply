@@ -27,7 +27,7 @@ def _me(db: DB, me: Player) -> Player:
 
 @router.get("/tactics/presets", response_model=PresetList, summary="프리셋 전술 목록")
 def list_presets(user: CurrentUser):
-    """앱에 들어 있는 전술 14개 (시작 위치 · 단계별 동작 · 슬롯 역할 · 대상 수비).
+    """앱에 들어 있는 전술 18개 (시작 위치 · 단계별 동작 · 슬롯 역할 · 대상 수비).
 
     - **권한:** 로그인 사용자.
     - **처리:** 정본은 `app/tactics/presets.py`. 전술을 고치면 `presets_version` 이 오른다.

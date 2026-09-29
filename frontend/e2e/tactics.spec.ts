@@ -1,14 +1,14 @@
-/** 전술 탭 · 전술판 (docs/07 S-28 · S-29) — 목록 14개, 전술판 단계 이동, 없는 전술 안내. */
+/** 전술 탭 · 전술판 (docs/07 S-28 · S-29) — 목록 18개, 전술판 단계 이동, 없는 전술 안내. */
 import { test, expect } from '@playwright/test'
 import { login, PLAYER } from './helpers'
 
-test('전술 탭: 전술 14개 목록 → 전술판에서 단계를 넘기며 본다', async ({ page }) => {
+test('전술 탭: 전술 18개 목록 → 전술판에서 단계를 넘기며 본다', async ({ page }) => {
   await login(page, PLAYER)
   await page.getByRole('button', { name: '일요 코트메이트 팀 열기' }).click()
   await page.getByRole('button', { name: '전술', exact: true }).click()
 
   await expect(page.getByRole('heading', { name: '전술 목록' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /전술판 보기$/ })).toHaveCount(14)
+  await expect(page.getByRole('button', { name: /전술판 보기$/ })).toHaveCount(18)
   // 그날 배정이 확정돼 있으면 위에 추천 전술이 늦게 붙어 목록이 밀린다 — 다 불러온 뒤에 누른다
   await page.waitForLoadState('networkidle')
   await page.getByRole('button', { name: '혼즈 전술판 보기' }).click()

@@ -12,16 +12,18 @@ API = "/api/v1"
 
 
 # ---------------------------------------------------------------------------
-# T2 프리셋 14개 (1단계 8개 + O5 6개)
+# T2 프리셋 18개 (1단계 8개 + O5 6개 + 지역 수비 4개)
 # ---------------------------------------------------------------------------
 
 
 def test_presets_are_playable():
-    assert len(PRESET_LIST) == 14
+    assert len(PRESET_LIST) == 18
     assert set(PRESETS) == {
         "high_pnr", "horns", "weave", "pistol", "floppy", "ucla", "post_split", "zone_131",
         "spain_pnr", "horns_flare", "stagger", "hammer", "iverson_cut", "overload",
+        "baseline_runner", "skip_reversal", "gap_attack", "high_low",
     }
+    assert sum(p.defense == "zone" for p in PRESET_LIST) == 6
     for p in PRESET_LIST:
         assert playability_errors(p) == [], p.key
         assert 3 <= len(p.steps) <= 6, p.key
@@ -32,6 +34,7 @@ def test_three_point_finishes_end_outside_the_arc():
     expect = {
         "horns": "three", "weave": "three", "floppy": "three", "high_pnr": "paint", "ucla": "paint", "zone_131": "paint",
         "spain_pnr": "paint", "horns_flare": "three", "stagger": "three", "hammer": "three", "iverson_cut": "paint", "overload": "mid",
+        "baseline_runner": "three", "skip_reversal": "three", "gap_attack": "three", "high_low": "paint",
     }
     for key, zone in expect.items():
         p = PRESETS[key]
@@ -56,7 +59,7 @@ def test_presets_endpoint(client, signup):
     r = client.get(f"{API}/tactics/presets", headers=h)
     assert r.status_code == 200
     body = r.json()
-    assert body["presets_version"] >= 2 and len(body["items"]) == 14
+    assert body["presets_version"] >= 3 and len(body["items"]) == 18
     assert body["items"][0]["steps"][0]["actions"][0]["type"] == "screen"
     assert client.get(f"{API}/tactics/presets").status_code == 401
 
@@ -128,7 +131,8 @@ def test_auto_recommendation_for_attendees(client, club, monkeypatch):
     r = client.get(f"{API}/events/{eid}/tactics/recommend", params={"zone": "true", "squad_no": 2}, headers=m)
     body = r.json()
     assert [s["squad_no"] for s in body["squads"]] == [2]
-    assert {it["play_key"] for it in body["squads"][0]["items"]} <= {"preset:zone_131", "preset:post_split", "preset:overload"}
+    zone_or_any = {f"preset:{p.key}" for p in PRESET_LIST if p.defense in ("zone", "any")}
+    assert {it["play_key"] for it in body["squads"][0]["items"]} <= zone_or_any
 
 
 def test_recommendation_respects_fit_threshold(client, club, monkeypatch):

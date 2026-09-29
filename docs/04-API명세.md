@@ -181,7 +181,7 @@
 
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
-| GET | `/tactics/presets` | 프리셋 전술 14개 + `presets_version` | 200 |
+| GET | `/tactics/presets` | 프리셋 전술 18개 + `presets_version` | 200 |
 | GET | `/events/{event_id}/tactics/recommend` | 팀별 자동 추천 — 적합도 75 이상 상위 3개 · 자리 · 예비 (`?squad_no=&zone=`, 참석자 · 점수는 매니저만) | 200 · 403 · 404 |
 | GET | `/events/{event_id}/tactics/{play_key}` | 전술 + 그날 팀별 자리 배치 · 예비 (참석자) | 200 · 403 · 404 |
 | POST | `/events/{event_id}/tactics/ai-recommend` | AI 전술 추천 설명 — LangChain 체인 C (`?squad_no=&zone=`, 참석자, 팀·수비 보기마다 한 번) | 200 · 403 · 404 · 429 |
