@@ -5,13 +5,18 @@
  * 멈춰 있을 때는 "다음에 할 단계" 의 화살표를, 재생 중에는 지금 단계의 화살표를 그린다.
  * 전술이 바뀌면 부모가 key 를 바꿔 처음부터 다시 그린다.
  * 애니메이션은 라이브러리 없이 requestAnimationFrame 으로 보간한다. 움직임 줄이기 설정이면 단계만 바뀐다.
+ *
+ * 상대 수비(docs/07 FR-55 · FR-56): 아래 줄에서 맨투맨 / 지역 수비와 스크린 대응(스위치 · 스테이)을 고르면
+ * 수비 5명(x1~x5, 점선 동그라미)이 그 방식대로 따라 움직인다. 계산은 lib/defense.ts.
  */
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { CourtPoint, Play, PlayAction } from '../api/types'
 import { RIM, frameAt, shownStep, stepStates, zigzag } from '../lib/tactics'
+import { SCREEN_CALL_LABEL, defenseFrameAt, simulateDefense, type DefenseKind, type ScreenCall } from '../lib/defense'
 
 const W = 150, H = 140
 const R = 5.6 // 선수 동그라미 반지름
+const DR = 4.3 // 수비 동그라미 반지름
 const STEP_MS = 1300 // 1× 에서 한 단계 재생 시간
 const HOLD_MS = 450 // 연속 재생 때 단계 사이 멈춤
 const SPEEDS = [1, 2, 0.5] as const
@@ -41,15 +46,20 @@ function useReducedMotion() {
 }
 
 export function TacticBoard({
-  play, tone = 'neutral', names, onSlotTap,
+  play, tone = 'neutral', names, onSlotTap, defense: initialDefense,
 }: {
   play: Play
   tone?: BoardTone
   names?: (string | null)[] // names[i] = 슬롯 i+1 에 앉힌 선수 이름
   onSlotTap?: (slot: number) => void
+  /** 처음 보여 줄 상대 수비. 없으면 전술의 대상 수비(지역 전술이면 지역, 아니면 맨투맨). null 이면 수비를 숨긴 채 시작 */
+  defense?: DefenseKind | null
 }) {
   const n = play.steps.length
   const states = useMemo(() => stepStates(play), [play])
+  const [defKind, setDefKind] = useState<DefenseKind | null>(() => (initialDefense === undefined ? (play.defense === 'zone' ? 'zone' : 'man') : initialDefense))
+  const [screenCall, setScreenCall] = useState<ScreenCall>('switch')
+  const sim = useMemo(() => (defKind ? simulateDefense(play, states, { kind: defKind, screen: screenCall }) : null), [play, states, defKind, screenCall])
   // 인바운드처럼 베이스라인 뒤(y<0)에 서는 사람이 있으면 위쪽에 코트 밖 띠를 붙인다
   const oob = useMemo(() => [...play.start, ...play.steps.flatMap((s) => s.actions.flatMap((a) => (a.to ? [a.to] : [])))].some((p) => p.y < 0), [play])
   const top = oob ? OOB_H : 0
@@ -95,6 +105,8 @@ export function TacticBoard({
   const atEnd = cursor >= n
   const frame = frameAt(play, states, cursor)
   const k = shownStep(play, cursor)
+  const defPos = sim ? defenseFrameAt(sim, cursor) : null
+  const defNote = sim && k !== null ? sim.notes[k] : ''
   const colors = TONE[tone]
 
   const toStart = () => { setTarget(null); setCursor(0) }
@@ -131,6 +143,22 @@ export function TacticBoard({
             ))}
           </g>
         )}
+        {defPos && (
+          <g aria-label="수비">
+            {defPos.map((p, i) => (
+              <g key={i}>
+                <circle cx={sx(p)} cy={sy(p)} r={DR} style={{ fill: 'var(--color-surface)', stroke: 'var(--color-info-ink)' }} strokeWidth={0.8} strokeDasharray="1.6 1" />
+                <text x={sx(p)} y={sy(p) + 1.3} textAnchor="middle" fontSize={3.6} fontWeight={800} style={{ fill: 'var(--color-info-ink)' }}>x{i + 1}</text>
+              </g>
+            ))}
+          </g>
+        )}
+        {sim && k !== null && sim.events[k]?.map((ev, i) => (
+          <g key={`ev${i}`} opacity={playing ? 1 : 0.9}>
+            <rect x={sx(ev.at) - 9} y={sy(ev.at) - 13.5} width={18} height={6} rx={3} style={{ fill: 'var(--color-warn-soft)', stroke: 'var(--color-warn-ink)' }} strokeWidth={0.4} />
+            <text x={sx(ev.at)} y={sy(ev.at) - 9.3} textAnchor="middle" fontSize={3.6} fontWeight={800} style={{ fill: 'var(--color-warn-ink)' }}>{SCREEN_CALL_LABEL[ev.kind]}</text>
+          </g>
+        ))}
         {frame.pos.map((p, i) => {
           const name = names?.[i]
           const below = sy(p) + R + 5.2 < H - 1
@@ -168,6 +196,7 @@ export function TacticBoard({
         ) : (
           <><span className="mr-1.5 font-bold text-brand-ink">{k + 1}/{n}</span>{play.steps[k].caption}</>
         )}
+        {defNote && <span className="mt-0.5 block text-xs text-info-ink">수비: {defNote}</span>}
       </p>
 
       <div className="flex items-center justify-between gap-1">
@@ -184,7 +213,54 @@ export function TacticBoard({
           {speed}×
         </button>
       </div>
-      <Legend />
+      <Legend defense={!!sim} />
+      <DefensePicker kind={defKind} setKind={setDefKind} call={screenCall} setCall={setScreenCall} />
+    </div>
+  )
+}
+
+/** 두세 칸짜리 선택 줄 — 지금 고른 칸이 채워진다 */
+function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-14 shrink-0 text-xs font-semibold text-muted">{label}</span>
+      <div role="radiogroup" aria-label={label} className="grid flex-1 rounded-xl bg-sunken p-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+        {options.map(([v, text]) => (
+          <button
+            key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)}
+            className={`min-h-9 rounded-lg px-2 text-xs font-bold transition ${value === v ? 'bg-surface text-ink shadow' : 'text-muted'}`}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** 상대 수비 방식 — 고르면 수비 5명이 그 방식대로 따라 움직인다 */
+function DefensePicker({ kind, setKind, call, setCall }: {
+  kind: DefenseKind | null; setKind: (k: DefenseKind | null) => void; call: ScreenCall; setCall: (c: ScreenCall) => void
+}) {
+  return (
+    <div className="space-y-1.5 rounded-2xl border border-line bg-surface p-2.5">
+      <Segmented<'off' | DefenseKind>
+        label="상대 수비" value={kind ?? 'off'} onChange={(v) => setKind(v === 'off' ? null : v)}
+        options={[['off', '숨기기'], ['man', '맨투맨'], ['zone', '지역 (2-3)']]}
+      />
+      {kind && (
+        <Segmented<ScreenCall>
+          label="스크린" value={call} onChange={setCall}
+          options={[['switch', '스위치'], ['stay', '스테이']]}
+        />
+      )}
+      {kind && (
+        <p className="px-1 text-[11px] text-muted">
+          {call === 'switch'
+            ? '스크린(핸드오프)을 만나면 두 수비가 막을 사람을 바꿔요.'
+            : kind === 'man' ? '스크린에 걸린 수비가 돌아서 자기 사람을 끝까지 따라가요. 스크리너 수비는 잠깐 도운 뒤 돌아가요.' : '스크린에 걸린 수비가 돌아서 자기 자리로 돌아가요.'}
+        </p>
+      )}
     </div>
   )
 }
@@ -278,7 +354,7 @@ function ActionMark({ a, from, to, arrow, brandArrow }: { a: PlayAction; from: C
 }
 
 /** 범례 한 줄 — 전술판과 같은 선 모양 */
-function Legend() {
+function Legend({ defense = false }: { defense?: boolean }) {
   const ink = { stroke: 'var(--color-ink)', fill: 'none' }
   const items: [string, ReactNode][] = [
     ['이동', <line key="m" x1={1} y1={4} x2={19} y2={4} style={ink} strokeWidth={1} />],
@@ -287,6 +363,7 @@ function Legend() {
     ['패스', <line key="p" x1={1} y1={4} x2={19} y2={4} style={ink} strokeWidth={1} strokeDasharray="3 2" />],
     ['스크린', <g key="s" style={ink}><line x1={1} y1={4} x2={17} y2={4} strokeWidth={1} /><line x1={17} y1={0.5} x2={17} y2={7.5} strokeWidth={2.2} /></g>],
   ]
+  if (defense) items.push(['수비', <circle key="x" cx={10} cy={4} r={3.2} style={{ fill: 'none', stroke: 'var(--color-info-ink)' }} strokeWidth={1} strokeDasharray="1.6 1" />])
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted" aria-label="범례">
       {items.map(([label, icon]) => (

@@ -174,7 +174,7 @@ function EventBoard({ play, view, eventId }: { play: Play; view: EventPlayView; 
             <TacticExplain summary={play.summary} ai={aiItem} counter={renderCounter(play.counter, row.map(nameOf))} />
             {notice && <Alert kind="info">{notice}</Alert>}
             {save.isError && <Alert>{errMsg(save.error, '저장하지 못했어요.')}</Alert>}
-            <TacticBoard key={play.key} play={play} tone={toneOf(sq.squad_no)} names={row.map(nameOf)} onSlotTap={view.can_edit ? setPicking : undefined} />
+            <TacticBoard key={play.key} play={play} tone={toneOf(sq.squad_no)} names={row.map(nameOf)} onSlotTap={view.can_edit ? setPicking : undefined} defense={zone ? 'zone' : undefined} />
             <RoleList play={play} slots={slots} onTap={view.can_edit ? setPicking : undefined} />
           </>
         )}
