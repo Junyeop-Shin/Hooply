@@ -15,6 +15,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Defense = Literal["man", "zone", "any"]
+Situation = Literal["half_court", "inbound"]  # 인바운드는 골밑에서 공을 넣을 때만 쓰는 전술 — 오늘 추천에는 넣지 않는다
 Role = Literal["ball_handler", "screener_roll", "screener_pop", "shooter", "cutter", "post", "spacer"]
 ActionType = Literal["move", "dribble", "pass", "screen", "cut", "handoff", "shot"]
 
@@ -31,11 +32,14 @@ ACTION_LABEL: dict[str, str] = {
 Slot = int  # 1~5
 
 
+OOB_Y = -0.08  # 베이스라인 뒤(코트 밖). 인바운드에서 공을 넣는 사람이 선다
+
+
 class Point(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
+    y: float = Field(ge=OOB_Y, le=1)  # 0 = 베이스라인, 음수는 베이스라인 뒤 (인바운드)
 
 
 class Action(BaseModel):
@@ -69,6 +73,7 @@ class Play(BaseModel):
     name: str = Field(min_length=1, max_length=30)
     summary: str = Field(min_length=1, max_length=80)  # 목록 카드의 한 줄 설명
     defense: Defense  # 이 전술이 노리는 상대 수비
+    situation: Situation = "half_court"
     start: list[Point] = Field(min_length=5, max_length=5)  # start[i] = 슬롯 i+1 의 시작 위치
     ball: Slot = Field(ge=1, le=5)  # 처음 공을 가진 슬롯
     roles: list[Role] = Field(min_length=5, max_length=5)  # roles[i] = 슬롯 i+1 의 역할

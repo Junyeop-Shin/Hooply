@@ -5,7 +5,7 @@
  * 단계마다 끝난 뒤의 위치·공 가진 슬롯을 미리 계산해 두고(stepStates), 프레임은 그 사이를 보간한다(frameAt).
  */
 import { RIM_X, RIM_Y, COURT_H, COURT_W } from './court'
-import type { CourtPoint, Defense, Play, PlayAction, TacticRole } from '../api/types'
+import type { CourtPoint, Defense, Play, PlayAction, Situation, TacticRole } from '../api/types'
 
 export const ROLE_LABEL: Record<TacticRole, string> = {
   ball_handler: '볼 핸들러',
@@ -15,6 +15,11 @@ export const ROLE_LABEL: Record<TacticRole, string> = {
   cutter: '커터',
   post: '포스트',
   spacer: '스페이서',
+}
+
+export const SITUATION_LABEL: Record<Situation, string> = {
+  half_court: '하프코트',
+  inbound: '인바운드',
 }
 
 export const DEFENSE_LABEL: Record<Defense, string> = {

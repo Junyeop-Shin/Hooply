@@ -51,7 +51,9 @@ function PlayHeader({ play }: { play: Play }) {
     <div className="space-y-1">
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-bold text-ink">{play.name}</h2>
-        <Badge tone={play.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[play.defense]}</Badge>
+        {play.situation === 'inbound'
+          ? <Badge tone="court">인바운드</Badge>
+          : <Badge tone={play.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[play.defense]}</Badge>}
       </div>
       <p className="text-sm text-muted">{play.summary}</p>
     </div>

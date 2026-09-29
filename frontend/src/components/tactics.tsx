@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { eventsApi } from '../api/events'
 import { tacticsApi } from '../api/tactics'
-import { localISODate, type AiTacticItem, type EventView, type PlayLineup, type SlotLineup, type SquadRecommendation } from '../api/types'
+import { localISODate, type AiTacticItem, type EventView, type Play, type PlayLineup, type SlotLineup, type SquadRecommendation } from '../api/types'
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
 import { Thinking, TypedSections } from './ai-cards'
 import { FirstTimeTip } from './tutorial'
@@ -69,24 +69,36 @@ export function TacticsTab({ teamId }: { teamId: number }) {
         <EventRecommend event={event} zone={zone} setZone={setZone} rec={rec} />
       )}
 
-      <section>
-        <SectionTitle>전술 목록</SectionTitle>
-        {presets.isLoading ? <Spinner /> : (
-          <div className="space-y-2">
-            {presets.data?.items.map((p) => (
-              <Card key={p.key} onClick={() => nav(`/tactics/${p.key}${eventParam}`)} className="space-y-1 py-3" label={`${p.name} 전술판 보기`}>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-ink">{p.name}</span>
-                  <Badge tone={p.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[p.defense]}</Badge>
-                  <span className="ml-auto text-faint" aria-hidden="true">›</span>
-                </div>
-                <p className="text-xs text-muted">{p.summary}</p>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
+      <PresetGroup title="전술 목록" items={presets.data?.items.filter((p) => p.situation === 'half_court')} loading={presets.isLoading} onOpen={(k) => nav(`/tactics/${k}${eventParam}`)} />
+      <PresetGroup
+        title="인바운드" desc="골밑 베이스라인에서 공을 넣을 때 쓰는 전술이에요. 오늘 추천에는 들어가지 않아요."
+        items={presets.data?.items.filter((p) => p.situation === 'inbound')} loading={presets.isLoading} onOpen={(k) => nav(`/tactics/${k}${eventParam}`)}
+      />
     </div>
+  )
+}
+
+function PresetGroup({ title, desc, items, loading, onOpen }: { title: string; desc?: string; items?: Play[]; loading: boolean; onOpen: (key: string) => void }) {
+  if (!loading && !items?.length) return null
+  return (
+    <section>
+      <SectionTitle>{title}</SectionTitle>
+      {desc && <p className="-mt-1 mb-2 px-1 text-[11px] text-muted">{desc}</p>}
+      {loading ? <Spinner /> : (
+        <div className="space-y-2">
+          {items?.map((p) => (
+            <Card key={p.key} onClick={() => onOpen(p.key)} className="space-y-1 py-3" label={`${p.name} 전술판 보기`}>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-ink">{p.name}</span>
+                {p.situation === 'half_court' && <Badge tone={p.defense === 'zone' ? 'navy' : 'neutral'}>{DEFENSE_LABEL[p.defense]}</Badge>}
+                <span className="ml-auto text-faint" aria-hidden="true">›</span>
+              </div>
+              <p className="text-xs text-muted">{p.summary}</p>
+            </Card>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

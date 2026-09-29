@@ -15,6 +15,7 @@ const R = 5.6 // 선수 동그라미 반지름
 const STEP_MS = 1300 // 1× 에서 한 단계 재생 시간
 const HOLD_MS = 450 // 연속 재생 때 단계 사이 멈춤
 const SPEEDS = [1, 2, 0.5] as const
+const OOB_H = 13 // 코트 밖 띠 높이 (베이스라인 뒤 약 1.3m)
 
 export type BoardTone = 'black' | 'white' | 'neutral'
 
@@ -49,6 +50,9 @@ export function TacticBoard({
 }) {
   const n = play.steps.length
   const states = useMemo(() => stepStates(play), [play])
+  // 인바운드처럼 베이스라인 뒤(y<0)에 서는 사람이 있으면 위쪽에 코트 밖 띠를 붙인다
+  const oob = useMemo(() => [...play.start, ...play.steps.flatMap((s) => s.actions.flatMap((a) => (a.to ? [a.to] : [])))].some((p) => p.y < 0), [play])
+  const top = oob ? OOB_H : 0
   const reduced = useReducedMotion()
   const [cursor, setCursorState] = useState(0)
   const cursorRef = useRef(0)
@@ -104,7 +108,7 @@ export function TacticBoard({
 
   return (
     <div className="space-y-2">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full touch-manipulation select-none rounded-2xl" role="img" aria-label={`${play.name} 전술판`}>
+      <svg viewBox={`0 ${-top} ${W} ${H + top}`} className="w-full touch-manipulation select-none rounded-2xl" role="img" aria-label={`${play.name} 전술판`}>
         <defs>
           <marker id={`ah-${ids}`} viewBox="0 0 6 6" refX="5" refY="3" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
             <path d="M0,0 L6,3 L0,6 z" style={{ fill: 'var(--color-ink)' }} />
@@ -113,6 +117,12 @@ export function TacticBoard({
             <path d="M0,0 L6,3 L0,6 z" style={{ fill: 'var(--color-brand-ink)' }} />
           </marker>
         </defs>
+        {oob && (
+          <g>
+            <rect x={0} y={-top} width={W} height={top} style={{ fill: 'var(--color-sunken)' }} />
+            <text x={4} y={-top + 7} fontSize={4.2} style={{ fill: 'var(--color-muted)' }}>코트 밖 (베이스라인 뒤)</text>
+          </g>
+        )}
         <Court />
         {k !== null && play.steps[k] && (
           <g opacity={playing ? 0.35 : 0.85}>

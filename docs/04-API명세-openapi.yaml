@@ -3882,6 +3882,11 @@ components:
           - man
           - zone
           - any
+        situation:
+          type: string
+          enum:
+          - half_court
+          - inbound
         start:
           items:
             $ref: '#/components/schemas/Point'
@@ -4229,7 +4234,7 @@ components:
         y:
           type: number
           maximum: 1.0
-          minimum: 0.0
+          minimum: -0.08
       type: object
       required:
       - x

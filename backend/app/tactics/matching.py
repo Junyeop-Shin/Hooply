@@ -2,7 +2,7 @@
 
 한 팀(블랙 또는 화이트)의 선수 n명 중 5명을 골라 전술의 슬롯 5개에 앉혀, 슬롯 역할 점수의 합이 가장
 크게 한다. 선수를 한 명씩 보면서 "이미 채운 슬롯 집합(5비트)"만 상태로 들고 가는 DP 라서 계산량이
-n × 32 × 5 다. 10명이어도 1,600번이고, 전술 18개 × 두 팀이어도 몇 ms 안쪽이다.
+n × 32 × 5 다. 10명이어도 1,600번이고, 전술 22개 × 두 팀이어도 몇 ms 안쪽이다.
 
 적합도 = 앉힌 5명의 역할 점수 평균 × 100 (0~100).
 """
@@ -103,8 +103,8 @@ def allowed_defenses(zone: bool) -> frozenset[Defense]:
 def rank_plays(
     plays: Iterable[Play], roster: Sequence[PlayerRoles], *, zone: bool = False, top: int = 3,
 ) -> list[PlayFit]:
-    """대상 수비가 맞는 전술만 적합도 높은 순으로 `top` 개. 같으면 프리셋 목록 순서."""
+    """대상 수비가 맞는 하프코트 전술만 적합도 높은 순으로 `top` 개. 같으면 프리셋 목록 순서. 인바운드는 빼고."""
     ok = allowed_defenses(zone)
-    fits = [fit_play(p, roster) for p in plays if p.defense in ok]
+    fits = [fit_play(p, roster) for p in plays if p.defense in ok and p.situation == "half_court"]
     fits.sort(key=lambda f: -f.fit)  # 안정 정렬이라 동점은 목록 순서 유지
     return fits[:top]

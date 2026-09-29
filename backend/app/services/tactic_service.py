@@ -1,6 +1,6 @@
 """전술 추천 · 전술판 (docs/07 FR-43~FR-47).
 
-추천은 그날 **확정 배정**이 있으면 자동으로 만든다. 팀마다 전술 18개의 적합도를 계산해 기준(`FIT_MIN`) 이상인 것 중
+추천은 그날 **확정 배정**이 있으면 자동으로 만든다. 팀마다 하프코트 전술 20개의 적합도를 계산해 기준(`FIT_MIN`) 이상인 것 중
 상위 3개를 보여 준다. 매니저가 고르지 않아도 된다. 자리 배치도 자동이고, 매니저가 전술판에서 자리를 바꿔 저장하면
 그 전술은 저장한 배치로 보인다(최종 결정은 사람이 — 설계서 1.4절). 빈 목록을 저장하면 추천 배치로 돌아간다.
 
@@ -179,7 +179,7 @@ def ranked_lineups(ctx: _Ctx, squad_no: int, *, zone: bool, manager: bool) -> li
     ok = allowed_defenses(zone)
     ranked = []
     for i, play in enumerate(PRESET_LIST):
-        if play.defense not in ok:
+        if play.defense not in ok or play.situation != "half_court":  # 인바운드는 상황 전용이라 오늘 추천에 넣지 않는다
             continue
         got = _lineup(ctx, squad_no, play, manager=manager)
         if got is not None and got[1] >= FIT_MIN:

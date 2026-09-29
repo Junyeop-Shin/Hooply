@@ -598,10 +598,12 @@ export interface GuestClaimView {
 // --- 전술 (docs/07 F20 · F21) ---
 
 export type Defense = 'man' | 'zone' | 'any'
+/** 인바운드는 골밑에서 공을 넣을 때만 쓰는 전술 — 오늘 추천에 들어가지 않는다 */
+export type Situation = 'half_court' | 'inbound'
 export type TacticRole = 'ball_handler' | 'screener_roll' | 'screener_pop' | 'shooter' | 'cutter' | 'post' | 'spacer'
 export type PlayActionType = 'move' | 'dribble' | 'pass' | 'screen' | 'cut' | 'handoff' | 'shot'
 
-/** 코트 좌표 0~1. x 왼쪽→오른쪽, y 베이스라인→하프라인 */
+/** 코트 좌표 0~1. x 왼쪽→오른쪽, y 베이스라인→하프라인. 음수 y 는 베이스라인 뒤(인바운드) */
 export interface CourtPoint { x: number; y: number }
 
 export interface PlayAction {
@@ -618,6 +620,7 @@ export interface Play {
   name: string
   summary: string
   defense: Defense
+  situation: Situation
   start: CourtPoint[]
   ball: number
   roles: TacticRole[]

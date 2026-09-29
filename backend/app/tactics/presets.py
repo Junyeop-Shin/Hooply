@@ -1,4 +1,4 @@
-"""프리셋 전술 18개 (docs/07 FR-42, 6절 — 1단계 8개 + O5 6개 + 지역 수비 4개). 이 파일이 정본이며 DB 에 두지 않는다.
+"""프리셋 전술 22개 (docs/07 FR-42, 6절 — 1단계 8개 + O5 6개 + 지역 수비 6개 + 인바운드 2개). 이 파일이 정본이며 DB 에 두지 않는다.
 
 좌표는 0~1 (court.py 기준: x 왼쪽→오른쪽, y 베이스라인→하프라인). 자주 쓰는 자리는 아래 상수로 모았다.
 슬롯 번호는 전술 안의 자리 번호이지 포지션 번호가 아니다.
@@ -8,7 +8,7 @@
 
 from app.tactics.play import Play
 
-PRESETS_VERSION = 3  # 2: 스페인 픽앤롤 · 혼즈 플레어 · 스태거 · 해머 · 아이버슨 컷 · 오버로드 (명세 O5). 3: 지역 수비 4개
+PRESETS_VERSION = 4  # 2: 스페인 픽앤롤 · 혼즈 플레어 · 스태거 · 해머 · 아이버슨 컷 · 오버로드 (명세 O5). 3: 지역 수비 4개. 4: 지역 2개 · 인바운드 2개
 
 # 자주 쓰는 자리 (x, y)
 TOP = (0.5, 0.66)  # 탑 3점 밖
@@ -24,9 +24,9 @@ def _p(xy: tuple[float, float]) -> dict:
     return {"x": xy[0], "y": xy[1]}
 
 
-def _play(key: str, name: str, summary: str, defense: str, start: list, ball: int, roles: list, steps: list) -> Play:
+def _play(key: str, name: str, summary: str, defense: str, start: list, ball: int, roles: list, steps: list, situation: str = "half_court") -> Play:
     return Play.model_validate({
-        "key": key, "name": name, "summary": summary, "defense": defense,
+        "key": key, "name": name, "summary": summary, "defense": defense, "situation": situation,
         "start": [_p(s) for s in start], "ball": ball, "roles": roles,
         "steps": [{"caption": c, "actions": a} for c, a in steps],
     })
@@ -286,6 +286,67 @@ PRESET_LIST += [
             ("4번이 골밑 5번에게 내려 주는 패스", [_pass(4, 5)]),
             ("5번 골밑 슛", [_shot(5)]),
         ],
+    ),
+]
+
+# --- 지역 수비 2개 더 (존 스크린 · 3-2 공략) ---
+PRESET_LIST += [
+    _play(
+        "zone_screen_flare", "존 스크린 플레어", "빅맨 둘이 탑으로 올라오고, 한 명이 가드 쪽 수비를 막아 가드가 윙으로 빠져 3점", "zone",
+        [TOP, R_CORNER, L_WING, L_BLOCK, R_BLOCK], 1,
+        ["shooter", "spacer", "spacer", "post", "screener_pop"],
+        [
+            ("4번·5번이 골밑에서 탑 양쪽으로 올라온다", [_move(4, (0.4, 0.58)), _move(5, (0.6, 0.58))]),
+            ("1번이 4번에게 패스", [_pass(1, 4)]),
+            ("5번이 1번 쪽 수비를 막는 스크린, 1번은 오른쪽 윙으로 빠진다",
+             [_screen(5, (0.6, 0.64), 1), _move(1, (0.86, 0.52))]),
+            ("4번이 오른쪽 윙 1번에게 스킵 패스", [_pass(4, 1)]),
+            ("1번 3점 슛", [_shot(1)]),
+        ],
+    ),
+    _play(
+        "corner_entry_212", "2-1-2 코너 엔트리", "3-2 지역 수비 공략 — 코너로 공을 넣고, 넣은 사람이 짧은 코너로 파고든다", "zone",
+        [(0.34, 0.66), (0.66, 0.66), L_CORNER, R_CORNER, HIGH_POST], 1,
+        ["cutter", "spacer", "shooter", "spacer", "post"],
+        [
+            ("1번이 왼쪽 코너 3번에게 패스", [_pass(1, 3)]),
+            ("1번은 왼쪽 짧은 코너로 파고들고, 2번은 1번 자리로, 4번은 오른쪽 윙으로",
+             [_move(1, (0.22, 0.16), "cut"), _move(2, (0.34, 0.66)), _move(4, (0.82, 0.46))]),
+            ("3번이 짧은 코너의 1번에게 패스", [_pass(3, 1)]),
+            ("1번 짧은 코너 슛 (막히면 골밑으로 내려오는 5번에게)", [_shot(1)]),
+        ],
+    ),
+]
+
+# --- 인바운드 (골밑 베이스라인에서 공을 넣을 때) — 오늘 추천에는 넣지 않고 목록에서 따로 보여 준다 ---
+INBOUNDER = (0.62, -0.05)  # 베이스라인 뒤, 림 오른쪽
+PRESET_LIST += [
+    _play(
+        "box_inbound", "박스 인바운드", "페인트 네 귀퉁이에서 시작 — 스크린을 걸어 준 사람에게 다시 스크린을 걸어 골밑 슛", "any",
+        [INBOUNDER, L_ELBOW, R_ELBOW, L_BLOCK, R_BLOCK], 1,
+        ["ball_handler", "shooter", "spacer", "cutter", "screener_roll"],
+        [
+            ("4번이 2번에게 다운스크린, 2번은 왼쪽 코너로 빠진다",
+             [_screen(4, (0.34, 0.3), 2), _move(2, L_CORNER)]),
+            ("5번이 스크린을 건 4번에게 다시 스크린, 4번은 골밑으로 컷, 3번은 탑으로 빠진다",
+             [_screen(5, (0.44, 0.24), 4), _move(4, (0.5, 0.12), "cut"), _move(3, (0.62, 0.68))]),
+            ("1번이 골밑 4번에게 패스 (막히면 코너 2번이나 탑 3번에게)", [_pass(1, 4)]),
+            ("4번 골밑 마무리", [_shot(4)]),
+        ],
+        situation="inbound",
+    ),
+    _play(
+        "stack_slip", "스택 슬립", "한 줄로 서 있다가 앞의 둘이 양쪽으로 갈라지면 셋째가 빈자리로 들어가 레이업", "any",
+        [INBOUNDER, (0.5, 0.26), (0.5, 0.36), (0.5, 0.46), (0.5, 0.56)], 1,
+        ["ball_handler", "shooter", "shooter", "cutter", "spacer"],
+        [
+            ("앞의 2번·3번이 양쪽 코너로 갈라지고, 5번은 탑으로 올라간다",
+             [_move(2, (0.08, 0.12)), _move(3, (0.92, 0.12)), _move(5, (0.5, 0.7))]),
+            ("4번이 빈자리로 미끄러져 골밑으로", [_move(4, (0.5, 0.12), "cut")]),
+            ("1번이 4번에게 패스 (막히면 코너 2번·3번에게)", [_pass(1, 4)]),
+            ("4번 레이업", [_shot(4)]),
+        ],
+        situation="inbound",
     ),
 ]
 

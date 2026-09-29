@@ -136,6 +136,7 @@ def test_must_end_with_shot_or_pass_and_nothing_after_shot():
     {"type": "jump", "slot": 1},  # 없는 동작 (FR-39)
     {"type": "move", "slot": 6, "to": {"x": 0.5, "y": 0.5}},  # 없는 슬롯
     {"type": "move", "slot": 1, "to": {"x": 1.2, "y": 0.5}},  # 코트 밖 좌표
+    {"type": "move", "slot": 1, "to": {"x": 0.5, "y": -0.2}},  # 베이스라인 뒤로 너무 멀리 (인바운드 자리는 -0.08 까지)
 ])
 def test_malformed_actions_fail_validation(bad):
     raw = _pnr()
@@ -324,3 +325,12 @@ def test_sixteen_evaluations_are_fast():
     for r in rosters:
         rank_plays(plays, r, top=8)
     assert time.perf_counter() - t < 0.1
+
+
+def test_inbound_plays_are_not_ranked():
+    """인바운드는 상황 전용 — 오늘 추천 순위에 넣지 않는다."""
+    half = Play.model_validate(_pnr(key="half"))
+    raw = _pnr(key="inb", defense="any", situation="inbound")
+    raw["start"][0] = {"x": 0.62, "y": -0.05}  # 공을 넣는 사람은 베이스라인 뒤
+    inb = Play.model_validate(raw)
+    assert [f.play.key for f in rank_plays([inb, half], _random_roster(8, 1), top=5)] == ["half"]

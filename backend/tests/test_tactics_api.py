@@ -12,18 +12,22 @@ API = "/api/v1"
 
 
 # ---------------------------------------------------------------------------
-# T2 프리셋 18개 (1단계 8개 + O5 6개 + 지역 수비 4개)
+# T2 프리셋 22개 (1단계 8개 + O5 6개 + 지역 수비 6개 + 인바운드 2개)
 # ---------------------------------------------------------------------------
 
 
 def test_presets_are_playable():
-    assert len(PRESET_LIST) == 18
+    assert len(PRESET_LIST) == 22
     assert set(PRESETS) == {
         "high_pnr", "horns", "weave", "pistol", "floppy", "ucla", "post_split", "zone_131",
         "spain_pnr", "horns_flare", "stagger", "hammer", "iverson_cut", "overload",
-        "baseline_runner", "skip_reversal", "gap_attack", "high_low",
+        "baseline_runner", "skip_reversal", "gap_attack", "high_low", "zone_screen_flare", "corner_entry_212",
+        "box_inbound", "stack_slip",
     }
-    assert sum(p.defense == "zone" for p in PRESET_LIST) == 6
+    assert sum(p.defense == "zone" for p in PRESET_LIST) == 8
+    inbound = [p for p in PRESET_LIST if p.situation == "inbound"]
+    assert {p.key for p in inbound} == {"box_inbound", "stack_slip"}
+    assert all(p.start[p.ball - 1].y < 0 for p in inbound)  # 공을 넣는 사람은 베이스라인 뒤
     for p in PRESET_LIST:
         assert playability_errors(p) == [], p.key
         assert 3 <= len(p.steps) <= 6, p.key
@@ -35,6 +39,7 @@ def test_three_point_finishes_end_outside_the_arc():
         "horns": "three", "weave": "three", "floppy": "three", "high_pnr": "paint", "ucla": "paint", "zone_131": "paint",
         "spain_pnr": "paint", "horns_flare": "three", "stagger": "three", "hammer": "three", "iverson_cut": "paint", "overload": "mid",
         "baseline_runner": "three", "skip_reversal": "three", "gap_attack": "three", "high_low": "paint",
+        "zone_screen_flare": "three", "corner_entry_212": "mid", "box_inbound": "paint", "stack_slip": "paint",
     }
     for key, zone in expect.items():
         p = PRESETS[key]
@@ -59,7 +64,8 @@ def test_presets_endpoint(client, signup):
     r = client.get(f"{API}/tactics/presets", headers=h)
     assert r.status_code == 200
     body = r.json()
-    assert body["presets_version"] >= 3 and len(body["items"]) == 18
+    assert body["presets_version"] >= 4 and len(body["items"]) == 22
+    assert sum(it["situation"] == "inbound" for it in body["items"]) == 2
     assert body["items"][0]["steps"][0]["actions"][0]["type"] == "screen"
     assert client.get(f"{API}/tactics/presets").status_code == 401
 
@@ -106,7 +112,8 @@ def test_auto_recommendation_for_attendees(client, club, monkeypatch):
         fits = [it["fit"] for it in sq["items"]]
         assert fits == sorted(fits, reverse=True) and all(f >= body["fit_min"] for f in fits)
         for it in sq["items"]:
-            assert get_play(it["play_key"]).defense in ("man", "any") and it["manual"] is False
+            play = get_play(it["play_key"])
+            assert play.defense in ("man", "any") and play.situation == "half_court" and it["manual"] is False  # 인바운드는 추천하지 않는다
             ids = [s["player_id"] for s in it["slots"]]
             assert len(set(ids)) == 5 and set(ids) <= set(squads[sq["squad_no"]])
             for s in it["slots"]:
@@ -131,7 +138,7 @@ def test_auto_recommendation_for_attendees(client, club, monkeypatch):
     r = client.get(f"{API}/events/{eid}/tactics/recommend", params={"zone": "true", "squad_no": 2}, headers=m)
     body = r.json()
     assert [s["squad_no"] for s in body["squads"]] == [2]
-    zone_or_any = {f"preset:{p.key}" for p in PRESET_LIST if p.defense in ("zone", "any")}
+    zone_or_any = {f"preset:{p.key}" for p in PRESET_LIST if p.defense in ("zone", "any") and p.situation == "half_court"}
     assert {it["play_key"] for it in body["squads"][0]["items"]} <= zone_or_any
 
 
