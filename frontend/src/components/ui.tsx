@@ -202,20 +202,3 @@ export function Spinner() {
     </div>
   )
 }
-
-/** 켜고 끄는 스위치 (role="switch"). 누르는 칸은 44px 이상 — 글자까지 눌러도 켜진다 */
-export function Switch({ checked, onChange, label, sub }: { checked: boolean; onChange: (v: boolean) => void; label: string; sub?: string }) {
-  return (
-    <button
-      type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
-      className="inline-flex min-h-11 items-center gap-2 rounded-full pl-1 text-left active:opacity-80"
-    >
-      <span className="text-sm font-semibold text-ink-2">
-        {label}{sub && <span className="block text-[11px] font-normal text-muted">{sub}</span>}
-      </span>
-      <span className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-brand' : 'bg-line-strong'}`} aria-hidden="true">
-        <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
-      </span>
-    </button>
-  )
-}

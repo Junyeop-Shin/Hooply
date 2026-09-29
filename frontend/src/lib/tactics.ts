@@ -29,7 +29,7 @@ export const SITUATION_LABEL: Record<Situation, string> = {
 }
 
 export const DEFENSE_LABEL: Record<Defense, string> = {
-  man: '대인 수비 상대',
+  man: '맨투맨 수비 상대',
   zone: '지역 수비 상대',
   any: '어느 수비든',
 }

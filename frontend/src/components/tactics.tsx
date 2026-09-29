@@ -17,7 +17,7 @@ import { localISODate, type AiTacticItem, type EventView, type Play, type PlayLi
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
 import { Thinking, TypedSections } from './ai-cards'
 import { FirstTimeTip } from './tutorial'
-import { Badge, Card, EmptyState, SectionTitle, Spinner, Switch } from './ui'
+import { Badge, Card, EmptyState, SectionTitle, Spinner } from './ui'
 
 export const CIRCLED = ['①', '②', '③', '④', '⑤']
 const mmdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`
@@ -114,9 +114,22 @@ function SquadLabel({ no, name, count, mine }: { no: number; name: string; count
   )
 }
 
-/** 상대 수비 방식 — 켜면 지역 수비 공략 전술만 */
+/** 상대 수비 방식 토글 — 누를 때마다 맨투맨 ↔ 지역. 지금 켜진 쪽이 채워져 보인다 */
 export function ZoneSwitch({ zone, setZone }: { zone: boolean; setZone: (z: boolean) => void }) {
-  return <Switch checked={zone} onChange={setZone} label="상대 지역 수비" />
+  return (
+    <button
+      type="button" role="switch" aria-checked={zone} aria-label={`상대 수비: ${zone ? '지역 수비' : '맨투맨 수비'} (누르면 바뀜)`}
+      onClick={() => setZone(!zone)}
+      className="relative inline-grid min-h-11 grid-cols-2 items-center rounded-full bg-sunken p-1 text-xs font-bold active:opacity-90"
+    >
+      <span
+        className={`absolute inset-y-1 w-[calc(50%-4px)] rounded-full bg-surface shadow transition-transform ${zone ? 'translate-x-[calc(100%+0px)]' : 'translate-x-0'}`}
+        style={{ left: 4 }} aria-hidden="true"
+      />
+      <span className={`relative z-10 px-3 py-1.5 transition-colors ${zone ? 'text-muted' : 'text-ink'}`}>맨투맨 수비</span>
+      <span className={`relative z-10 px-3 py-1.5 transition-colors ${zone ? 'text-brand-ink' : 'text-muted'}`}>지역 수비</span>
+    </button>
+  )
 }
 
 function EventRecommend({ event, zone, setZone, rec, onlyMine = false, title }: {
