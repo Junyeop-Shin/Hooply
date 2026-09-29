@@ -9,7 +9,7 @@
   assignment_runs          "언제·누가·어떤 조건으로 배정을 돌렸나"  — 한 회차에 최종 편성 하나만 남는다
     ├─ assignment_constraints  그 실행에 걸린 묶기/분리/사전배치
     └─ assignment_candidates   전략별 후보안 (보통 SKILL / CHEMISTRY / BALANCED 3개)
-         └─ assignment_squads    후보안 안의 팀 (2팀이면 블랙/화이트)
+         └─ assignment_squads    후보안 안의 팀 (블랙/화이트, 3팀이면 레드까지)
               └─ assignment_slots  팀에 배정된 선수 한 명 + 배정 포지션
 
 매니저가 후보안 하나를 확정(`:adopt`)하면 그 candidate 의 `is_adopted` 만 true 가 되고, 플레이어는
@@ -58,17 +58,17 @@ class AssignmentRun(CreatedAtMixin, Base):
     id: Mapped[BigPK]
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
     executed_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)  # 실행한 매니저
-    team_count: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 팀 수 T. v1 은 2 고정 (Q4)
+    team_count: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 팀 수 T — 2 또는 3 (assignment_service.MAX_TEAMS, 3팀은 참석 15명 초과)
     # 요청 body 의 strategies 와 9.5절 가중치(w_skill 등) 등 실행 파라미터. 가중치 튜닝 이력 추적용
     params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)  # 가중치
     # 실행 시점 참석자 목록 [{player_id, display_name, skill, positions, is_guest, ...}]
     roster_snapshot: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)  # 실행 시점 참석자·실력
 
     constraints: Mapped[list["AssignmentConstraint"]] = relationship(
-        back_populates="run", cascade="all, delete-orphan"
+        back_populates="run", cascade="all, delete-orphan", passive_deletes=True
     )
     candidates: Mapped[list["AssignmentCandidate"]] = relationship(
-        back_populates="run", cascade="all, delete-orphan"
+        back_populates="run", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -139,7 +139,7 @@ class AssignmentCandidate(Base):
     run: Mapped[AssignmentRun] = relationship(back_populates="candidates")
     # squad_no 순(블랙 → 화이트)으로 로드
     squads: Mapped[list["AssignmentSquad"]] = relationship(
-        back_populates="candidate", cascade="all, delete-orphan", order_by="AssignmentSquad.squad_no"
+        back_populates="candidate", cascade="all, delete-orphan", passive_deletes=True, order_by="AssignmentSquad.squad_no"
     )
 
 
@@ -163,7 +163,7 @@ class AssignmentSquad(Base):
 
     candidate: Mapped[AssignmentCandidate] = relationship(back_populates="squads")
     slots: Mapped[list["AssignmentSlot"]] = relationship(
-        back_populates="squad", cascade="all, delete-orphan"
+        back_populates="squad", cascade="all, delete-orphan", passive_deletes=True
     )
 
 

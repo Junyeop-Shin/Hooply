@@ -19,9 +19,10 @@ export type GuestRegisterResult = { kind: 'registered'; view: AttendanceView } |
 export const eventsApi = {
   create: (teamId: number, input: EventCreateInput) =>
     api<EventView>(`/teams/${teamId}/events`, { method: 'POST', body: input }),
-  list: (teamId: number, params: { status?: string; page?: number; size?: number } = {}) => {
+  list: (teamId: number, params: { status?: string; page?: number; size?: number; from?: string } = {}) => {
     const q = new URLSearchParams()
     if (params.status) q.set('status', params.status)
+    if (params.from) q.set('from', params.from)  // 이 날짜(포함) 이후만 — 홈의 다가오는 일정
     if (params.page) q.set('page', String(params.page))
     if (params.size) q.set('size', String(params.size))
     const qs = q.toString()

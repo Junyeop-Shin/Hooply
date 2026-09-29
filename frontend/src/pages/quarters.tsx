@@ -16,13 +16,13 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { errorMessageWithDetails as errMsg } from '../api/client'
 import { assignmentsApi } from '../api/assignments'
 import { eventsApi } from '../api/events'
 import { quartersApi } from '../api/quarters'
 import { teamsApi } from '../api/teams'
 import type { PlayerCard, QuarterIn, Side, SquadTally } from '../api/types'
-import { squadStyle } from '../lib/squads'
+import { squadName, squadStyle } from '../lib/squads'
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
@@ -32,14 +32,13 @@ type Draft = { quarter_no: number; black_score: number; white_score: number; dur
 type SideKey = 'black' | 'white'
 /** 확정 배정 밖에서 매니저가 팀 명단에 넣은 사람 (그날 늦게 온 회원·게스트·팀을 옮긴 사람). 팀 번호 → player_id */
 type Extra = Record<number, number[]>
-const DEFAULT_NAMES = ['블랙', '화이트', '레드']
+
 
 /** 쿼터 길이 — 백엔드 app/schemas/game.py 와 같은 값 */
 const DEFAULT_DURATION = 8
 const MIN_DURATION = 1
 const MAX_DURATION = 10
 
-const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
 const draftKey = (eventId: number) => `quarters-draft-${eventId}`
 const emptyExtra: Extra = {}
 const uniq = (ids: number[]) => [...new Set(ids)]
@@ -87,7 +86,7 @@ export function QuartersPage() {
   const hasAssignment = (squadIds[1]?.length ?? 0) > 0
   const teamCount = Math.max(2, adopted.data?.squads.length ?? 2)
   const squadNos = useMemo(() => Array.from({ length: teamCount }, (_, i) => i + 1), [teamCount])
-  const nameOfSquad = (no: number) => adopted.data?.squads.find((s) => s.squad_no === no)?.squad_name ?? DEFAULT_NAMES[no - 1] ?? `${no}팀`
+  const nameOfSquad = (no: number) => adopted.data?.squads.find((s) => s.squad_no === no)?.squad_name ?? squadName(no)
 
   /** 팀별 출전 후보: 확정 배정(없으면 참석자 전원) + 이미 그 팀으로 기록된 사람 + 매니저가 추가한 사람 */
   const pool = useMemo(() => {
@@ -129,10 +128,13 @@ export function QuartersPage() {
     setQuarters([{ quarter_no: 1, black_score: 0, white_score: 0, duration_min: DEFAULT_DURATION, black: b, white: w, home: 1, away: 2 }])
   }, [quarters, saved.data, saved.isLoading, adopted.isLoading, hasAssignment, squadIds, id])
 
-  // 임시 저장
+  // 임시 저장 — 누를 때마다 쓰지 않고 입력이 0.3초 멈추면 한 번
   useEffect(() => {
     if (!quarters || !isManager) return
-    try { localStorage.setItem(draftKey(id), JSON.stringify({ quarters, extra })) } catch { /* ignore */ }
+    const t = setTimeout(() => {
+      try { localStorage.setItem(draftKey(id), JSON.stringify({ quarters, extra })) } catch { /* ignore */ }
+    }, 300)
+    return () => clearTimeout(t)
   }, [quarters, extra, id, isManager])
 
   const save = useMutation({

@@ -11,7 +11,7 @@
 용어 (9.5절·9.6절):
 - run        : 배정 실행 1회. 같은 회차에서 재실행하면 run 이 하나 더 쌓인다 (이력 보존)
 - candidate  : 전략(SKILL / CHEMISTRY / BALANCED)별 후보안. run 당 최대 3개, 확정은 1개
-- squad      : 후보안 안의 팀 (블랙/화이트). squad_no 는 1부터
+- squad      : 후보안 안의 팀 (블랙/화이트, 3팀이면 레드). squad_no 는 1부터
 - constraint : 그 회차에만 적용되는 LOCK(묶기) / SEPARATE(갈라놓기) / PIN(사전 배치)
 """
 
@@ -197,5 +197,5 @@ class AdoptedAssignment(BaseModel):
     my_player_id: int | None = Field(default=None, description="호출자의 players.id (배정에 포함된 경우). 프론트가 '(나)' 표시에 쓴다")
     my_assigned_position: str | None = Field(default=None, description="호출자에게 배정된 포지션 (PG/SG/SF/PF/C). 없으면 None")
     adopted_at: datetime | None = None
-    skill_spread: float | None = Field(default=None, description="두 팀 예상 평균 실력 차이 (점/쿼터). 팀 단위 값이라 플레이어에게도 보여준다")
+    skill_spread: float | None = Field(default=None, description="가장 강한 팀과 가장 약한 팀의 예상 평균 실력 차이 (점/쿼터, 2팀이면 두 팀 차). 팀 단위 값이라 플레이어에게도 보여준다")
     total_score: float | None = Field(default=None, description="균형 점수 (낮을수록 균형). 목적함수 J")

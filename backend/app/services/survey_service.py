@@ -21,7 +21,7 @@ from decimal import Decimal
 from statistics import mean, pstdev
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core import errors
 from app.core.errors import ErrorDetail
@@ -35,7 +35,6 @@ from app.models import (
     SurveyQuestion,
     SurveyResponse,
     SurveyTemplate,
-    Team,
     User,
 )
 from app.models.enums import (
@@ -352,14 +351,18 @@ def apply_positions(db: Session, player: Player, f: SurveyFeatures) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _members_with_features(db: Session, team_id: int) -> list[tuple[Player, SurveyFeatures]]:
+def _members_with_features(db: Session, team_id: int, player_ids: list[int] | None = None) -> list[tuple[Player, SurveyFeatures]]:
+    """팀 활성 회원의 설문 특성. `player_ids` 를 주면 그 사람들만 (전술 · AI 는 그날 배정 명단만 쓴다)."""
     tpl_cache: dict[int, SurveyTemplate] = {}
-    rows = db.execute(
+    q = (
         select(Player, SurveyResponse)
         .join(SurveyResponse, SurveyResponse.user_id == Player.user_id)
         .where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE)
-        .options(selectinload(Player.profile), selectinload(Player.user), selectinload(SurveyResponse.answers))
-    ).all()
+        .options(joinedload(Player.profile), joinedload(Player.user), selectinload(SurveyResponse.answers))
+    )
+    if player_ids is not None:
+        q = q.where(Player.id.in_(player_ids))
+    rows = db.execute(q).all()
     out = []
     for player, resp in rows:
         tpl = tpl_cache.get(resp.template_id)
@@ -561,10 +564,6 @@ def my_profile(db: Session, user: User) -> MyProfile:
         survey_submitted_at=resp.submitted_at if resp else None,
         height_cm=user.height_cm, primary_position=primary, playable_positions=playable, teams=teams,
     )
-
-
-def team_of(db: Session, team_id: int) -> Team | None:
-    return db.get(Team, team_id)
 
 
 def ordered_positions(player: Player) -> list[Position]:

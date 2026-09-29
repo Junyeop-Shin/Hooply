@@ -75,7 +75,6 @@ BADGES: tuple[Badge, ...] = (
     Badge("MUTUAL_3", "RELATION", "서로 뽑은 사이", "서로 지목한 사람이 3명이 됐어요", "mutual", 3),
     Badge("GUEST_CONVERTED", "RELATION", "게스트 영입", "내가 부른 게스트가 가입해 기록을 이어받았어요", "guest_converted", 1),
 )
-BY_CODE = {b.code: b for b in BADGES}
 
 
 def _my_player_ids(db: Session, user: User) -> list[int]:

@@ -149,9 +149,7 @@ def test_team_create_join_activate(client, signup):
     assert r.json()["status"] == "ACTIVE" and r.json()["member_count"] == 5
 
 
-# 검증: 아직 구현되지 않은 엔드포인트(카카오 OAuth, 온보딩 설문)는 404가 아니라
-#       501 NOT_IMPLEMENTED로 응답한다. test_openapi가 "경로가 선언되어 있는가"를 보는 것과
-#       짝을 이루어, 스텁이 조용히 사라지거나 엉뚱한 코드로 바뀌지 않았는지 지킨다.
+# 검증: 스텁(501) 엔드포인트는 모두 구현되어 남은 것이 없다. 헬스 체크만 확인한다.
 def test_not_implemented_endpoints_return_501(client):
     # 남은 스텁이 없다 — 이 테스트는 "스텁이 조용히 사라지지 않았는지" 대신 헬스 체크만 확인한다
     assert client.get("/health").json() == {"status": "ok"}

@@ -9,7 +9,7 @@ import { useIsLoggedIn } from './store/auth'
 import { Spinner } from './components/ui'
 // 첫 화면(로그인·홈)은 어차피 바로 필요하므로 함께 받는다
 import { KakaoCallbackPage, LoginPage, SignupPage } from './pages/auth'
-import { HomePage, ProfilePage } from './pages/home'
+import { HomePage } from './pages/home'
 import { TutorialSpotlight } from './components/tutorial'
 
 const page = <T extends Record<string, unknown>, K extends keyof T>(load: () => Promise<T>, name: K) =>
@@ -35,6 +35,7 @@ const SurveyPage = page(() => import('./pages/survey'), 'SurveyPage')
 const EventCreatePage = page(() => import('./pages/events'), 'EventCreatePage')
 const EventDetailPage = page(() => import('./pages/events'), 'EventDetailPage')
 const HelpPage = page(() => import('./pages/help'), 'HelpPage')
+const ProfilePage = page(() => import('./pages/profile'), 'ProfilePage')
 const TacticBoardPage = page(() => import('./pages/tactics'), 'TacticBoardPage')
 const PlayEditorPage = page(() => import('./pages/play-editor'), 'PlayEditorPage')
 

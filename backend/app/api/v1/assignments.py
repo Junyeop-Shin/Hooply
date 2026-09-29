@@ -1,6 +1,6 @@
 """7.3절 팀 배정 — 배정 실행, 제약 검증, 후보안 조회·수정·확정 (F5, F6, F7, F15, F16).
 
-9.5~9.7절 알고리즘의 API 표면이다. 12~14명 2팀 규모에서는 완전 탐색으로 전역 최적을 보장하고,
+9.5~9.7절 알고리즘의 API 표면이다. 2팀은 완전 탐색으로 전역 최적을 보장하고, 3팀(참석 15명 초과)은 지역 탐색으로 찾는다.
 LOCK/SEPARATE/PIN 제약은 Union-Find 슈퍼노드로 축약해 어떤 전략에서도 위반이 불가능하게 한다.
 제약은 회차별(`assignment_runs` 종속)이며 다음 회차에 자동 승계되지 않는다.
 
@@ -74,14 +74,14 @@ def run_assignment(db: DB, me: EventManager, user: CurrentUser, event: Annotated
     """참석 확정자를 팀으로 나눠 전략별 후보안(실력 우선 / 친화도 우선 / 종합)을 만든다.
 
     - **권한:** 팀 매니저 또는 ADMIN.
-    - **처리:** ① 제약 실현가능성 검사 → ② PIN 고정, LOCK 은 Union-Find 슈퍼노드로 축약 → ③ 2팀 완전 탐색
-      (모든 분할을 목적함수로 평가) → ④ 각 팀에 1번·5번 가능자가 있는 해만 남김(없으면 완화+경고) →
+    - **처리:** ① 제약 실현가능성 검사 → ② PIN 고정, LOCK 은 Union-Find 슈퍼노드로 축약 → ③ 2팀은 완전 탐색
+      (모든 분할을 목적함수로 평가), 3팀은 지역 탐색(탐욕 초기해 + 맞바꾸기 · 옮기기 · 흔들기) → ④ 각 팀에 1번·5번 가능자가 있는 해만 남김(없으면 완화+경고) →
       ⑤ 전략별 최솟값을 후보안으로 저장(후보안끼리 편성이 겹치지 않게) → ⑥ 포지션 슬롯 배정과 설명 생성.
       `lock_groups` 에는 묶기 제안(`assignment/suggestions`)에서 승인한 `[게스트, 등록자]` 쌍을 넣는다.
       같은 회차에서 다시 실행하면 새 run 이 쌓이고 이전 결과는 이력으로 남는다.
     - **오류:** `422 NOT_ENOUGH_PLAYERS / LOCK_GROUP_TOO_LARGE / CONSTRAINT_CONFLICT / SEPARATE_INFEASIBLE /
       LOCK_PARTITION_INFEASIBLE / SQUAD_OVERFLOW / PLAYER_NOT_IN_TEAM` — `details[]`에 문제 그룹·선수.
-      `400 VALIDATION_ERROR` — 3팀 이상, 취소된 일정.
+      `400 VALIDATION_ERROR` — 4팀 이상, 취소된 일정.
     - **상태:** `구현됨`.
     - **설계서:** 9.5절 알고리즘, 9.6절 제약, 9.7절 완전 탐색, FR-16 ~ FR-21, FR-33, S-12.
     """

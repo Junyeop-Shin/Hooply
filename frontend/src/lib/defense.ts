@@ -26,7 +26,6 @@ export type DefenseKind = 'man' | 'zone'
 export type ScreenCall = 'switch' | 'stay'
 export interface DefenseScheme { kind: DefenseKind; screen: ScreenCall }
 
-export const DEFENSE_KIND_LABEL: Record<DefenseKind, string> = { man: '맨투맨 수비', zone: '지역 수비 (2-3)' }
 export const SCREEN_CALL_LABEL: Record<ScreenCall, string> = { switch: '스위치', stay: '스테이' }
 
 /** 한 단계 안에서 수비가 스크린에 반응한 일 */

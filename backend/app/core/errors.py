@@ -167,8 +167,6 @@ AlreadyAdopted = _error(409, "ALREADY_ADOPTED", "이미 확정한 팀 배정이 
 IdentityAlreadyLinked = _error(409, "IDENTITY_ALREADY_LINKED", "다른 계정에 이미 연결된 카카오 계정이에요.")
 # merged_into_player_id 가 이미 채워진 게스트를 또 병합 — POST /players/{id}:merge
 AlreadyMerged = _error(409, "ALREADY_MERGED", "이미 기록을 이어 준 게스트예요.")
-# 카카오로 가입한 사람이 이메일로 또 가입한 것으로 의심 — 5.4절 "동일인 중복 가입" (예비)
-PossibleDuplicate = _error(409, "POSSIBLE_DUPLICATE", "같은 사람으로 보이는 계정이 이미 있어요.")
 
 # ---------------------------------------------------------------------------
 # 422 — 형식은 맞지만 도메인 규칙에 걸림.
@@ -185,7 +183,7 @@ InvalidSwap = _error(422, "INVALID_SWAP", "이렇게는 바꿀 수 없어요.")
 CannotDemoteLastManager = _error(422, "CANNOT_DEMOTE_LAST_MANAGER", "매니저가 한 명뿐이라 권한을 뺄 수 없어요.")
 # 정렬·제약 등에 다른 팀의 player_id 가 섞임 — POST /teams/{id}/rankings 등
 PlayerNotInTeam = _error(422, "PLAYER_NOT_IN_TEAM", "이 팀에 없는 사람이 섞여 있어요.")
-# 전술 자리 배치에 그날 그 팀(블랙/화이트)이 아닌 선수를 앉힘 — PUT /events/{id}/tactics/{play_key}/slots
+# 전술 자리 배치에 그날 그 팀(블랙/화이트/레드)이 아닌 선수를 앉힘 — PUT /events/{id}/tactics/{play_key}/slots
 PlayerNotInSquad = _error(422, "PLAYER_NOT_IN_SQUAD", "이 팀에 배정되지 않은 사람이 섞여 있어요.")
 # 직접 만든 전술이 재생 가능성 검사(docs/07 FR-41)를 통과하지 못함 — details[] 에 "N단계: …" 문장
 PlayNotPlayable = _error(422, "PLAY_NOT_PLAYABLE", "이대로는 전술판에서 재생할 수 없어요.")
@@ -206,14 +204,12 @@ LockPartitionInfeasible = _error(422, "LOCK_PARTITION_INFEASIBLE", "지금 묶�
 SquadOverflow = _error(422, "SQUAD_OVERFLOW", "팀 정원을 넘겨 배치할 수 없어요.")
 
 # ---------------------------------------------------------------------------
-# 429 / 500 / 501
+# 429 / 500
 # ---------------------------------------------------------------------------
-# 과다 요청 (예: 비밀번호 찾기 메일 연타). 아직 미들웨어는 없고 코드만 예약
+# 과다 요청 — app/core/ratelimit.check 가 던진다 (로그인 · 비밀번호 찾기 · AI 호출 · 전술 댓글 등)
 RateLimited = _error(429, "RATE_LIMITED", "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.")
 # 예상 못한 서버 오류. 실제 스택은 로그에만 남기고 클라이언트에는 이 문구만
 InternalError = _error(500, "INTERNAL_ERROR", "문제가 생겼어요. 잠시 후 다시 시도해 주세요.")
-# 스켈레톤 단계에서 아직 구현되지 않은 엔드포인트가 던진다. 구현이 끝나면 호출부가 사라져야 한다
-NotImplementedYet = _error(501, "NOT_IMPLEMENTED", "아직 준비 중인 기능이에요.")
 
 
 def install_error_handlers(app: FastAPI) -> None:

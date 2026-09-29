@@ -6,7 +6,7 @@
  * AI 를 쓸 수 없거나 실패하면 같은 자리에 기존 규칙 설명(fallbackText)을 "AI" 표시 없이 보여 준다.
  */
 import type { ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { assignmentsApi } from '../api/assignments'
 import { useDebounced, useTypewriter } from '../lib/typewriter'
 import { Card } from './ui'
@@ -85,7 +85,10 @@ export function TypedSections({ sections, note = true }: { sections: { title?: s
 
 /** 매니저용 — 후보안 하나. rosterKey 는 명단이 바뀌면 달라지는 값. 선수를 옮기는 동안은 멈췄다가 1.2초 뒤에 새로 부른다 */
 export function AiExplainCard({ candidateId, rosterKey, fallbackText }: { candidateId: number; rosterKey: string; fallbackText: string | null }) {
-  const settled = useDebounced(rosterKey, 1200)
+  const qc = useQueryClient()
+  const debounced = useDebounced(rosterKey, 1200)
+  // 이미 설명을 받아 둔 구성으로 돌아오면(옮겼다가 되돌림) 기다리지 않고 바로 그 설명을 쓴다
+  const settled = qc.getQueryData(['ai', 'explain', candidateId, rosterKey]) !== undefined ? rosterKey : debounced
   const q = useQuery({
     queryKey: ['ai', 'explain', candidateId, settled],
     queryFn: () => assignmentsApi.aiExplanation(candidateId),

@@ -142,6 +142,28 @@ def test_chemistry_aggregation_and_compatible(client, club, past_event):
         assert c.together_events == 2 and float(c.pref_score) == 0.5  # 최신(어제) 회차 지목 1.0 / 2 = 0.5
 
 
+# 검증: 투표가 모두 사라지면(일정 삭제) 선호 조합도 비워진다 — 남은 투표 쌍만 다시 읽던 때는 옛 값이 남았다
+def test_chemistry_cleared_when_votes_vanish(client, club, past_event):
+    pid, m = club["pid"], club["manager"]
+    h = {n: club["members"][i] for i, (n, *_) in enumerate(ROSTER)}
+    post = lambda who, votes: client.post(f"{API}/events/{past_event}/post-game-survey", json={"votes": votes}, headers=h[who])
+    assert post("최준용", [{"target_player_id": pid["이정현"], "vote_type": "PLAY_AGAIN"}]).status_code == 201
+    assert post("이정현", [{"target_player_id": pid["최준용"], "vote_type": "PLAY_AGAIN"}]).status_code == 201
+
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models import ChemistryScore
+
+    a, b = sorted((pid["최준용"], pid["이정현"]))
+    with SessionLocal() as db:
+        assert db.scalar(select(ChemistryScore).where(ChemistryScore.player_a_id == a, ChemistryScore.player_b_id == b)).pref_mutual is True
+    assert client.delete(f"{API}/events/{past_event}", headers=m).status_code == 204
+    with SessionLocal() as db:
+        row = db.scalar(select(ChemistryScore).where(ChemistryScore.player_a_id == a, ChemistryScore.player_b_id == b))
+        assert row is None or (row.pref_score is None and row.pref_mutual is False)
+
+
 # 검증: 스펙 3.3절 — 독려 메시지는 매니저만, 링크와 응답 현황 포함. 자동 발송 없음
 def test_share_message(client, club, past_event):
     m, p1 = club["manager"], club["members"][1]

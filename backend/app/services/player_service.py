@@ -25,9 +25,15 @@
 
 from decimal import Decimal
 
+from sqlalchemy.orm import joinedload, selectinload
+
 from app.models import Player
 from app.models.enums import PlayerKind, Position
 from app.schemas.common import PlayerCard, PlayerCardDetailed, SkillGrade
+
+# 선수 카드(to_card)를 만들 때 함께 읽는 관계 — 프로필 · 계정은 1:1 · N:1 이라 조인으로(쿼리 하나), 포지션은 1:N 이라 따로.
+# 서비스마다 selectinload 를 셋 쓰면 선수 목록 한 번에 쿼리가 4개였다 → 2개
+PLAYER_LOAD = (joinedload(Player.profile), selectinload(Player.positions), joinedload(Player.user))
 
 
 def skill_grade_of(skill: Decimal | None) -> SkillGrade | None:

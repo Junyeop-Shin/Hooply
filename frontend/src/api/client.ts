@@ -4,8 +4,9 @@
 import { useAuthStore } from '../store/auth'
 import type { ErrorResponse, TokenPair } from './types'
 
-// 같은 도메인에 nginx 프록시가 있으면 비워 두고(기본), 프론트와 API 를 따로 배포하면 VITE_API_URL=https://api.example.com 으로 지정
-export const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+import { API_ORIGIN } from '../lib/env'
+
+export { API_ORIGIN }
 const BASE = `${API_ORIGIN}/api/v1`
 
 export class ApiError extends Error {
@@ -18,6 +19,16 @@ export class ApiError extends Error {
     this.code = body.code
     this.details = body.details ?? []
   }
+}
+
+/** 화면에 보여 줄 오류 문구 — 서버 문구(ApiError.message), 아니면 fallback */
+export function errorMessage(e: unknown, fallback: string): string {
+  return e instanceof ApiError ? e.message : fallback
+}
+
+/** 배정 제약처럼 어떤 사람·그룹이 문제인지(details[].reason)까지 이어 붙여 보여 줄 때 */
+export function errorMessageWithDetails(e: unknown, fallback: string): string {
+  return e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback
 }
 
 async function parseError(res: Response): Promise<ApiError> {

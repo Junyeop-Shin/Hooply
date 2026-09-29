@@ -2,12 +2,12 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { ApiError, errorMessage as errMsg } from '../api/client'
 import { teamsApi } from '../api/teams'
 import { eventsApi } from '../api/events'
 import { EventRow, GuestClaimCards, useMe } from './home'
 import { SHARE_DONE, shareText } from '../lib/kakao'
-import { AdoptedSummary } from './assignment'
+import { AdoptedSummary } from '../components/adopted'
 import { surveyApi } from '../api/survey'
 import { localISODate, type PlayerCard, type PlayerCardDetailed } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
@@ -15,7 +15,6 @@ import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { RecordsTab } from '../components/records'
 import { TacticsTab } from '../components/tactics'
 
-const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 const EVENTS_PAGE = 5
 type TeamTab = 'events' | 'records' | 'tactics' | 'members'
 const seenMonthKey = (teamId: number) => `hooply:records-seen-month:${teamId}`
@@ -160,6 +159,8 @@ export function TeamDetailPage() {
   const upcomingList = all.filter((e) => e.event_date >= today).sort((a, b) => a.event_date.localeCompare(b.event_date) || (a.start_time ?? '').localeCompare(b.start_time ?? ''))
   const pastList = all.filter((e) => e.event_date < today).sort((a, b) => b.event_date.localeCompare(a.event_date))
   const sortedEvents = [...upcomingList, ...pastList]
+  // 확정 요약은 가장 가까운 확정 일정 하나만 — 일정마다 배정 결과를 따로 부르지 않게
+  const nextAdoptedId = sortedEvents.find((e) => e.adopted_candidate_id && e.event_date >= today)?.id
   const upcomingCount = upcomingList.length
 
   if (team.isLoading) return <Screen><TopBar title="팀" back="/" /><Spinner /></Screen>
@@ -234,7 +235,7 @@ export function TeamDetailPage() {
                       </button>
                     )}
                     <EventRow e={e} withDetail={!!e.adopted_candidate_id && e.event_date >= today} past={e.event_date < today} />
-                    {e.adopted_candidate_id && e.event_date >= today && <AdoptedSummary eventId={e.id} isManager={isManager} />}
+                    {e.id === nextAdoptedId && <AdoptedSummary eventId={e.id} isManager={isManager} />}
                   </div>
                 ))}
               </div>

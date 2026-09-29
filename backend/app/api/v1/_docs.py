@@ -18,5 +18,3 @@ def errors(**by_status: tuple[str, ...] | str) -> dict[int, dict[str, Any]]:
         out.update(err(*codes, status=status))
     return out
 
-
-NOT_IMPLEMENTED = {501: {"model": ErrorResponse, "description": "NOT_IMPLEMENTED (스켈레톤)"}}

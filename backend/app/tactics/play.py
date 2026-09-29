@@ -10,7 +10,6 @@
   shot                   (없음)
 """
 
-import re
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -100,12 +99,12 @@ class Play(BaseModel):
         return self.roles[slot - 1]
 
 
-COUNTER_REF = re.compile(r"\{([1-5])\}")
+COUNTER_REF = r"\{([1-5])\}"  # 막히면 문장의 자리 표시 {1}~{5}
 
 
 def render_counter(text: str, names: list[str] | None = None) -> str:
     """"{5}의 롤이 막히면 {3}이" → "서장훈의 롤이 막히면 허재가" (names 없으면 "5번의 … 3번이"). 조사는 받침에 맞춘다."""
-    return substitute(text, r"\{([1-5])\}", lambda k: names[int(k) - 1] if names else f"{k}번")
+    return substitute(text, COUNTER_REF, lambda k: names[int(k) - 1] if names else f"{k}번")
 
 
 def playability_errors(play: Play) -> list[str]:

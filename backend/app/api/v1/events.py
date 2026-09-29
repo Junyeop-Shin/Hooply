@@ -22,6 +22,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 
 from app.api.deps import (
     DB,
@@ -281,14 +282,17 @@ def guest_presets(db: DB, me: EventMember, user: CurrentUser, event: Annotated[E
     """
     from app.models import Player as _P
 
+    presets = event_service.my_presets(db, event.team_id, user)
+    ids = [pr.last_player_id for pr in presets if pr.last_player_id]
+    # 이어 쓸 수 있는 게스트(활성 · 병합 안 됨)를 한 번에 — 항목마다 조회하지 않게
+    alive_ids = set(db.scalars(select(_P.id).where(_P.id.in_(ids), _P.status == "ACTIVE", _P.merged_into_player_id.is_(None))).all()) if ids else set()
     items = []
-    for pr in event_service.my_presets(db, event.team_id, user):
-        alive = pr.last_player_id and db.get(_P, pr.last_player_id)
+    for pr in presets:
         items.append(
             GuestPresetView(
                 id=pr.id, display_name=pr.display_name, skill_grade=pr.skill_grade, height_cm=pr.height_cm, preferred_position=pr.preferred_position,
                 playable_positions=pr.playable_positions, team_lock_request=pr.team_lock_request,
-                existing_player_id=pr.last_player_id if (alive and alive.status == "ACTIVE" and alive.merged_into_player_id is None) else None,
+                existing_player_id=pr.last_player_id if pr.last_player_id in alive_ids else None,
                 use_count=pr.use_count, last_used_at=pr.last_used_at,
             )
         )

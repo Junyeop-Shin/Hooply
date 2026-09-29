@@ -3,6 +3,7 @@
  * 사용자 정보(UserDetail)는 서버 상태이므로 여기 두지 않고 TanStack Query 로 조회한다.
  */
 import { create } from 'zustand'
+import { API_ORIGIN } from '../lib/env'
 import { persist } from 'zustand/middleware'
 import type { TokenPair } from '../api/types'
 import { queryClient } from '../queryClient'
@@ -26,8 +27,8 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         const refresh = useAuthStore.getState().refreshToken
         if (refresh) {
-          const origin = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
-          fetch(`${origin}/api/v1/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: refresh }), keepalive: true }).catch(() => {})
+          // api() 를 쓰면 client ↔ store 순환 import 라 fetch 를 직접 쓴다. keepalive: 화면을 닫아도 요청은 끝까지 간다
+          fetch(`${API_ORIGIN}/api/v1/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: refresh }), keepalive: true }).catch(() => {})
         }
         queryClient.clear(); set({ accessToken: null, refreshToken: null })
       },

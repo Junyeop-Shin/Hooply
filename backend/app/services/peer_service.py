@@ -53,7 +53,7 @@ from app.schemas.peer import (
     VoteTargets,
     VoteView,
 )
-from app.services.player_service import to_card
+from app.services.player_service import PLAYER_LOAD, to_card
 
 MAX_PER_SIDE = 2  # 같은 팀 최대 2명 + 상대 팀 최대 2명 (사용자 결정). 확정 배정이 없던 회차는 합계 4명까지
 DECAY = 0.9  # 최근 가중 감쇠율 — 약 7회 전 투표는 절반 가중치 (스펙 4.1절)
@@ -86,7 +86,7 @@ def _attending_players(db: Session, event: Event) -> list[Player]:
             select(Player)
             .join(EventAttendance, EventAttendance.player_id == Player.id)
             .where(EventAttendance.event_id == event.id, EventAttendance.status == AttendanceStatus.ATTEND)
-            .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+            .options(*PLAYER_LOAD)
             .order_by(Player.display_name)
         ).all()
     )
@@ -229,9 +229,7 @@ def recompute_team_chemistry(db: Session, team_id: int) -> int:
     events = db.execute(
         select(Event.id, Event.event_date).where(Event.team_id == team_id, Event.status != EventStatus.CANCELED).order_by(Event.event_date.desc(), Event.id.desc())
     ).all()
-    event_ids = [eid for eid, _ in events]
-    if not event_ids:
-        return 0
+    event_ids = [eid for eid, _ in events]  # 비어 있어도 끝까지 간다 — 남은 투표가 없으면 기존 선호를 비워야 한다
     att_rows = db.execute(
         select(EventAttendance.event_id, EventAttendance.player_id).where(EventAttendance.event_id.in_(event_ids), EventAttendance.status == AttendanceStatus.ATTEND)
     ).all()
@@ -249,7 +247,11 @@ def recompute_team_chemistry(db: Session, team_id: int) -> int:
 
     # 지목이 한 번이라도 있는 방향 쌍만 계산 (그 외 페어는 행을 만들지 않는다 — "케미 0점" 오독 방지)
     pairs = {tuple(sorted(k)) for k in voted}
-    existing = {(c.player_a_id, c.player_b_id): c for c in db.scalars(select(ChemistryScore).where(ChemistryScore.player_a_id.in_([a for a, _ in pairs] or [-1]))).all()}
+    # 이 팀 선수의 기존 행 전부 — 지금 투표가 남은 쌍만 읽으면, 투표가 모두 사라진 쌍(일정 삭제 등)의 선호가 초기화되지 않는다
+    team_players = select(Player.id).where(Player.team_id == team_id)
+    existing = {(c.player_a_id, c.player_b_id): c for c in db.scalars(
+        select(ChemistryScore).where(ChemistryScore.player_a_id.in_(team_players), ChemistryScore.player_b_id.in_(team_players))
+    ).all()}
     kept = set()
     for a, b in pairs:
         common = [eid for eid in event_ids if a in attend[eid] and b in attend[eid]]  # 최신순
@@ -266,7 +268,7 @@ def recompute_team_chemistry(db: Session, team_id: int) -> int:
         kept.add((a, b))
     # 투표가 모두 사라진 페어의 pref 는 비운다 (synergy 필드는 그대로)
     for key, row in existing.items():
-        if key not in kept:
+        if key not in kept and (row.pref_score is not None or row.pref_mutual):
             row.pref_score = None
             row.pref_mutual = False
     _recompute_best_scores(db, team_id, [(eid, d) for eid, d in events])
@@ -340,7 +342,7 @@ def compatible(db: Session, player: Player) -> list[CompatiblePlayer]:
         ).all():
             if my_sides.get(qid) == side:
                 together[pid] += 1
-    players = {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(others)).options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))).all()}
+    players = {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(others)).options(*PLAYER_LOAD)).all()}
     out = [
         CompatiblePlayer(
             player=to_card(players[pid]), mutual_play_again=pid in play_again_from_me and pid in play_again_to_me,
@@ -563,7 +565,7 @@ def monthly_margin(db: Session, team_id: int, period: str):
 
     players = db.scalars(
         select(Player).where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE, Player.merged_into_player_id.is_(None))
-        .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+        .options(*PLAYER_LOAD)
     ).all()
     quarters: dict[int, int] = defaultdict(int)
     margin: dict[int, Decimal] = defaultdict(Decimal)
@@ -628,7 +630,7 @@ def leaderboard(db: Session, team_id: int, *, metric: str, period: str | None, i
 
     players = db.scalars(
         select(Player).where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE, Player.merged_into_player_id.is_(None))
-        .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+        .options(*PLAYER_LOAD)
     ).all()
     attended: dict[int, int] = defaultdict(int)
     eligible: dict[int, int] = defaultdict(int)  # 응답 행이 있는 회차 수 = 가입 이후 회차 (행은 일정 생성 시 활성 회원에게만 만들어진다)

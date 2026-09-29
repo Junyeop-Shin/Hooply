@@ -12,7 +12,7 @@
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { errorMessage as errMsg } from '../api/client'
 import { tacticsApi, teamPlaysApi } from '../api/tactics'
 import type { EventPlayView, Play, SlotLineup, SquadBoard } from '../api/types'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
@@ -23,7 +23,6 @@ import { Alert, Badge, Button, SectionTitle, Spinner } from '../components/ui'
 import { DEFENSE_LABEL, ROLE_LABEL, renderCounter } from '../lib/tactics'
 import { squadStyle, squadTone } from '../lib/squads'
 
-const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 const toneOf = (squadNo: number): BoardTone => squadTone(squadNo)
 
 export function TacticBoardPage() {

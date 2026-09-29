@@ -9,7 +9,7 @@
  * 상대 수비(docs/07 FR-55 · FR-56): 전술이 가정한 상대 수비(Play.opp_defense · screen_call)대로 수비 5명(점선 동그라미 1~5)이
  * 함께 움직인다. 방식은 전술마다 고정이고(기본 전술) 직접 만드는 전술은 편집기에서 고른다. 계산은 lib/defense.ts.
  */
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { CourtPoint, Play, PlayAction } from '../api/types'
 import { RIM, frameAt, shownStep, stepStates, zigzag } from '../lib/tactics'
 import { SCREEN_CALL_LABEL, defenseFrameAt, simulateDefense } from '../lib/defense'
@@ -242,7 +242,7 @@ function CtrlButton({ label, onClick, disabled, primary, children }: { label: st
 }
 
 /** 하프코트 (FIBA). 라인은 반투명 오렌지 글자색이라 밝은·어두운 모드 모두에서 보인다 */
-export function Court() {
+export const Court = memo(function Court() {
   const line = { stroke: 'var(--color-brand-ink)', strokeOpacity: 0.45, strokeWidth: 0.7, fill: 'none' }
   return (
     <g>
@@ -258,7 +258,7 @@ export function Court() {
       <path d={`M57,${H} A18,18 0 0 1 93,${H}`} style={line} />
     </g>
   )
-}
+})
 
 /** 원 가장자리에서 시작·끝나도록 선을 줄인다 */
 function trim(x1: number, y1: number, x2: number, y2: number, a: number, b: number): [number, number, number, number] | null {
@@ -309,7 +309,7 @@ export function ActionMark({ a, from, to, arrow, brandArrow }: { a: PlayAction; 
 }
 
 /** 범례 한 줄 — 전술판과 같은 선 모양 */
-export function Legend({ defense = false }: { defense?: boolean }) {
+export const Legend = memo(function Legend({ defense = false }: { defense?: boolean }) {
   const ink = { stroke: 'var(--color-ink)', fill: 'none' }
   const items: [string, ReactNode][] = [
     ['이동', <line key="m" x1={1} y1={4} x2={19} y2={4} style={ink} strokeWidth={1} />],
@@ -328,4 +328,4 @@ export function Legend({ defense = false }: { defense?: boolean }) {
       ))}
     </div>
   )
-}
+})

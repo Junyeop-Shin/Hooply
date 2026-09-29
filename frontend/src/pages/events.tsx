@@ -5,7 +5,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { errorMessage as errMsg } from '../api/client'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
 import { SHARE_DONE, shareText } from '../lib/kakao'
@@ -14,9 +14,8 @@ import { fmtEvent } from '../lib/format'
 import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 import { EventTactics } from '../components/tactics'
-import { AdoptedSection } from './assignment'
+import { AdoptedSection } from '../components/adopted'
 
-const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 
 
 /* ---------- S-09 일정 등록 ---------- */
@@ -360,7 +359,6 @@ export function EventDetailPage() {
       {sheet && (
         <GuestSheet
           eventId={id}
-          teamId={e.team_id}
           editing={sheet === 'new' ? null : sheet}
           onClose={() => setSheet(null)}
           onDone={() => { setSheet(null); refresh() }}
@@ -434,7 +432,7 @@ function AttendeeRow({ a, isMe, onEdit, onRemove, onSetStatus, showGrade }: { a:
 }
 
 /* ---------- 게스트 등록/수정 바텀시트 (S-10 · S-11 공용) ---------- */
-function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId: number; teamId: number; editing: AttendanceView | null; onClose: () => void; onDone: () => void; showGrade: boolean }) {
+function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId: number; editing: AttendanceView | null; onClose: () => void; onDone: () => void; showGrade: boolean }) {
   const [name, setName] = useState(editing?.player.display_name ?? '')
   const [grade, setGrade] = useState<number | null>(null)
   const [height, setHeight] = useState<string>(editing?.player.height_cm ? String(editing.player.height_cm) : '')

@@ -4,6 +4,10 @@
  */
 export type SquadTone = 'black' | 'white' | 'red'
 
+/** 팀 기본 이름 — 백엔드 app/models/enums.DEFAULT_SQUAD_NAMES 와 같다 */
+export const SQUAD_NAMES = ['블랙', '화이트', '레드'] as const
+export const squadName = (no: number): string => SQUAD_NAMES[no - 1] ?? `${no}팀`
+
 export const squadTone = (no: number): SquadTone => (no === 1 ? 'black' : no === 3 ? 'red' : 'white')
 
 export const SQUAD_STYLE: Record<SquadTone, { card: string; sub: string; dot: string; picked: string; soft: string }> = {

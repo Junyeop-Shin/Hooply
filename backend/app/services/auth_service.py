@@ -14,8 +14,7 @@
 - `users.email`은 NULL 허용이다 (카카오 전용 계정). 그래서 이메일 로그인 경로에서는
   `password_hash is None`인 계정(소셜 전용)을 명시적으로 걸러야 한다.
 
-카카오 OAuth(`/auth/kakao/*`)와 비밀번호 재설정은 아직 라우터에서 501을 반환하며,
-이 모듈에는 포함되어 있지 않다.
+카카오 OAuth(`/auth/kakao/*`)는 kakao_service, 비밀번호 재설정은 이 모듈의 재설정 함수와 mail_service 가 맡는다.
 """
 
 import logging

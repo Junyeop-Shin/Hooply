@@ -93,7 +93,7 @@ class _Ctx:
 
     cand: AssignmentCandidate
     by_squad: dict[int, list[int]]  # squad_no → player_id (회원 먼저·이름순)
-    names: dict[int, str]  # squad_no → 블랙/화이트
+    names: dict[int, str]  # squad_no → 블랙/화이트/레드
     players: dict[int, Player]
     scores: dict[int, PlayerRoles]
     saved: dict[tuple[int, str], list[int | None]]  # (squad_no, play_key) → 슬롯 1~5 player_id
@@ -111,7 +111,7 @@ def _order(players: dict[int, Player], ids: list[int]) -> list[int]:
 
 def role_scores_for(db: Session, event: Event, players: dict[int, Player]) -> dict[int, PlayerRoles]:
     """확정 배정에 든 사람 전원의 역할 점수. 설문은 회원만, 키·포지션은 게스트도 자기 값."""
-    features = {p.id: f for p, f in survey_service._members_with_features(db, event.team_id)}
+    features = {p.id: f for p, f in survey_service._members_with_features(db, event.team_id, list(players))}
     inputs = [
         role_input_from_features(
             pid, features.get(pid),

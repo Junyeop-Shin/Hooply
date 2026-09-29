@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.core import errors
 from app.models import Player, PlayerPosition, PlayerProfile, SkillRatingHistory, Team, User
@@ -33,6 +33,7 @@ from app.models.enums import (
     RatingSource,
     TeamRole,
 )
+from app.services.player_service import PLAYER_LOAD
 
 GUEST_GRADE_CONFIDENCE = Decimal("0.25")
 GUEST_DEFAULT_CONFIDENCE = Decimal(0)
@@ -63,7 +64,7 @@ def can_manage_guest(db: Session, user: User, guest: Player) -> bool:
 
 
 def require_guest(db: Session, player_id: int) -> Player:
-    p = db.get(Player, player_id, options=[selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user)])
+    p = db.get(Player, player_id, options=PLAYER_LOAD)
     if p is None:
         raise errors.NotFound("이 사람을 찾을 수 없어요.")
     if p.kind != PlayerKind.GUEST:
@@ -167,7 +168,7 @@ def find_similar(db: Session, team_id: int, display_name: str) -> list[Player]:
                 Player.team_id == team_id, Player.kind == PlayerKind.GUEST, Player.status == PlayerStatus.ACTIVE,
                 Player.merged_into_player_id.is_(None), func.lower(Player.display_name) == name.lower(),
             )
-            .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+            .options(*PLAYER_LOAD)
             .order_by(Player.joined_at.desc())
         ).all()
     )
@@ -177,7 +178,7 @@ def search_guests(db: Session, team_id: int, q: str | None) -> list[Player]:
     stmt = (
         select(Player)
         .where(Player.team_id == team_id, Player.kind == PlayerKind.GUEST, Player.status == PlayerStatus.ACTIVE)
-        .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+        .options(*PLAYER_LOAD)
         .order_by(Player.display_name)
     )
     if q:
@@ -270,7 +271,7 @@ def merge_candidates(db: Session, team_id: int) -> list[tuple[Player, Player]]:
     members = db.scalars(
         select(Player)
         .where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE)
-        .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user), selectinload(Player.user))
+        .options(*PLAYER_LOAD)
     ).all()
     # 회원 본인 확인(pending_claims)과 같은 정규화를 쓴다 — "게스트 허웅" 으로 등록된 게스트도 "허웅" 회원과 짝지어진다
     by_name: dict[str, list[Player]] = {}
@@ -315,7 +316,7 @@ def pending_claims(db: Session, user: User) -> list[tuple[Player, Player, dict]]
             select(Player).where(
                 Player.team_id == me.team_id, Player.kind == PlayerKind.GUEST, Player.status == PlayerStatus.ACTIVE,
                 Player.merged_into_player_id.is_(None),
-            ).options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+            ).options(*PLAYER_LOAD)
         ).all()
         for g in guests:
             if g.id in decided or _norm_name(g.display_name) not in my_names:
@@ -350,12 +351,7 @@ def claim(db: Session, user: User, guest: Player, accept: bool) -> Player | None
         db.add(existing)
     existing.status = ClaimStatus.CONFIRMED if accept else ClaimStatus.DECLINED
     if accept:
-        merge(db, guest, me.id)
-        db.flush()
-        from app.services import rating_service
-
-        rating_service.recompute_team(db, guest.team_id)
-        db.commit()
+        merge(db, guest, me.id)  # 병합 · 실력 재계산 · commit 까지 한다 — 여기서 다시 돌리지 않는다
         db.refresh(me)
         return me
     db.commit()

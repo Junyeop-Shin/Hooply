@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class AiExplanation(BaseModel):
     """체인 A (매니저용). `fallback=true` 면 AI 문장 대신 `text`(기존 규칙 설명)를 보여 준다."""
 
-    summary: str = Field(description="두 팀 색깔을 대비한 핵심 한 문장")
+    summary: str = Field(description="팀들의 색깔을 대비한 핵심 한 문장")
     key_players: list[str] = Field(description="활약이 기대되는 선수 (팀 · 선수 · 기대 장면)")
     chemistry: list[str] = Field(description="호흡이 좋을 조합 (두 사람 · 이유)")
     gaps: list[str] = Field(description="부족한 역할이 있는 팀")

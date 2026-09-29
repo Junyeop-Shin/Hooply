@@ -28,6 +28,14 @@ test('매니저가 픽앤롤을 그려 저장하고, 역할을 붙이고, 댓글
   await slot(page, 1)
   await tapCourt(page, 0.56, 0.62)
   await expect(page.getByText('5번 스크린 → 1번').first()).toBeVisible()
+  // 되돌리기로 방금 넣은 스크린을 빼고, 다시 넣는다
+  await page.getByRole('button', { name: '↶ 되돌리기' }).click()
+  await expect(page.getByText('5번 스크린 → 1번')).toHaveCount(0)
+  await slot(page, 5)
+  await page.getByRole('button', { name: '스크린', exact: true }).click()
+  await slot(page, 1)
+  await tapCourt(page, 0.56, 0.62)
+  await expect(page.getByText('5번 스크린 → 1번').first()).toBeVisible()
   // 2단계: 1번 드리블 · 5번 컷
   await page.getByRole('tab', { name: '+ 단계' }).click()
   await slot(page, 1)

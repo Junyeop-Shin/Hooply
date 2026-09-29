@@ -31,7 +31,6 @@ export const teamsApi = {
   mergeCandidates: (teamId: number) => api<{ items: MergeCandidate[] }>(`/teams/${teamId}/guests/merge-candidates`),
   mergeGuest: (guestPlayerId: number, intoPlayerId: number) =>
     api<PlayerCard>(`/players/${guestPlayerId}:merge`, { method: 'POST', body: { into_player_id: intoPlayerId } }),
-  unmergeGuest: (playerId: number) => api<PlayerCard>(`/players/${playerId}:unmerge`, { method: 'POST' }),
   // 본인 확인 병합: 같은 이름의 게스트 기록을 회원이 직접 가져간다
   myGuestClaims: () => api<{ items: GuestClaimView[] }>('/me/guest-claims'),
   claimGuest: (guestPlayerId: number, accept: boolean) => api<{ items: GuestClaimView[] }>(`/players/${guestPlayerId}:claim`, { method: 'POST', body: { accept } }),

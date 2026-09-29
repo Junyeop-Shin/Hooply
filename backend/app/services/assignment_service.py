@@ -31,7 +31,7 @@ from statistics import mean, pstdev
 
 import numpy as np
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, contains_eager, selectinload
 
 from app.core import errors
 from app.core.errors import ErrorDetail
@@ -48,6 +48,7 @@ from app.models import (
     User,
 )
 from app.models.enums import (
+    DEFAULT_SQUAD_NAMES,
     AttendanceStatus,
     ConstraintType,
     EventStatus,
@@ -70,14 +71,15 @@ from app.schemas.assignment import (
     ValidateResult,
 )
 from app.schemas.common import SquadView
-from app.services.player_service import to_card
+from app.services.player_service import PLAYER_LOAD, to_card
 
-SQUAD_NAMES = ["블랙", "화이트", "레드", "블루"]  # 13.1절 Q6 기본값
+SQUAD_NAMES = list(DEFAULT_SQUAD_NAMES)  # 13.1절 Q6 기본값 — 1 블랙 · 2 화이트 · 3 레드
 MAX_SUPERNODES = 18  # 완전 탐색 상한 (2^18 ≈ 26만, 약 0.6초). 초과 시 안내 — 실측 22개는 10초라 내렸다
 HARD_PENALTY = 10.0
-MIN_SQUAD_SIZE = 5  # 수동 수정 후에도 출전 5명은 남아야 한다
+MIN_SQUAD = 5  # 팀마다 코트에 설 5명은 있어야 한다 (배정 · 수동 수정 모두)
 MAX_TEAMS = 3
 LS_RESTARTS = 6  # 3팀 지역 탐색: 전략마다 새로 출발하는 횟수
+LS_PATIENCE = 8  # 흔들기가 이만큼 연달아 나아지지 않으면 멈춘다 (시간 대부분이 헛도는 흔들기였다)
 LS_KICKS = 25  # 국소 최적에 빠지면 두 번 무작위로 맞바꿔 흔든 뒤 다시 내려가 보는 횟수 (더 나으면 옮겨 간다)
 LS_SEED = 20260929  # 같은 입력이면 같은 결과가 나오도록 고정
 
@@ -129,7 +131,7 @@ def build_roster(db: Session, event: Event) -> list[RosterPlayer]:
         select(Player)
         .join(EventAttendance, EventAttendance.player_id == Player.id)
         .where(EventAttendance.event_id == event.id, EventAttendance.status == AttendanceStatus.ATTEND)
-        .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+        .options(*PLAYER_LOAD)
         .order_by(Player.display_name)
     ).scalars().all()
     known = []
@@ -153,9 +155,6 @@ def build_roster(db: Session, event: Event) -> list[RosterPlayer]:
             )
         )
     return roster
-
-
-MIN_SQUAD = 5  # 팀마다 코트에 설 5명은 있어야 한다
 
 
 def _squad_sizes(n: int, t: int) -> list[int]:
@@ -280,7 +279,7 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
             v.append(ConstraintViolation(code="SEPARATE_INFEASIBLE", message="갈라놓기로 지정한 두 사람이 같은 팀에 배치됐어요.", player_ids=supernodes[a] + supernodes[b]))
 
     if t == 2 and len(supernodes) > MAX_SUPERNODES:  # 완전 탐색 상한 — 3팀은 지역 탐색이라 상한이 없다
-        v.append(ConstraintViolation(code="VALIDATION_ERROR", message=f"참석 인원이 너무 많아요 (묶음 후 {len(supernodes)}개). 18개 이하로 줄여 주세요."))
+        v.append(ConstraintViolation(code="VALIDATION_ERROR", message=f"참석 인원이 너무 많아요 (묶음 후 {len(supernodes)}개). {MAX_SUPERNODES}개 이하로 줄여 주세요."))
 
     # 경고 (차단 아님)
     handlers = sum(1 for r in roster if r.can_handle)
@@ -575,8 +574,9 @@ def _terms_matrix(prep: Prepared, st: _NodeStats, P: np.ndarray, n_recent: int) 
     role = np.maximum(0, counts - slots).sum(axis=(0, 2)) / n_roster
     m = P.shape[0]
     if st.has_pairs:
-        pref_sum = sum(np.einsum("pi,ij,pj->p", M, st.pref_u, M) for M in Ms) + st.pref_const
-        repeats = sum(np.einsum("pi,ij,pj->p", M, st.rec_u, M) for M in Ms) + st.rec_const
+        # 같은 팀 쌍 합 = Σ_s rowsum((M_s U) ⊙ M_s) — einsum 보다 행렬곱이 열 배 넘게 빠르다
+        pref_sum = sum(((M @ st.pref_u) * M).sum(axis=1) for M in Ms) + st.pref_const
+        repeats = sum(((M @ st.rec_u) * M).sum(axis=1) for M in Ms) + st.rec_const
     else:
         pref_sum = np.zeros(m)
         repeats = np.zeros(m)
@@ -683,25 +683,40 @@ def _canon(part: tuple[int, ...], pinned: bool) -> tuple[int, ...]:
     return tuple(remap.setdefault(x, len(remap)) for x in part)
 
 
-def _neighbors(prep: Prepared, part: np.ndarray, free: list[int], sep: np.ndarray, st: _NodeStats, max_spread: float) -> np.ndarray:
-    """맞바꾸기(서로 다른 팀의 두 노드) · 옮기기(노드 하나를 다른 팀으로) 이웃 중 인원 · 갈라놓기 조건을 지키는 것."""
+@dataclass
+class _MoveIndex:
+    """이웃을 만들 인덱스 — 자유 노드 쌍(맞바꾸기)과 (노드, 팀)(옮기기). 탐색 동안 바뀌지 않아 한 번만 만든다."""
+
+    swap_a: np.ndarray
+    swap_b: np.ndarray
+    move_node: np.ndarray
+    move_team: np.ndarray
+
+
+def _move_index(free: list[int], t: int) -> _MoveIndex:
+    pairs = [(a, b) for x, a in enumerate(free) for b in free[x + 1:]]
+    moves = [(a, s) for a in free for s in range(t)]
+    arr = lambda xs, k: np.array([p[k] for p in xs], dtype=int)
+    return _MoveIndex(arr(pairs, 0), arr(pairs, 1), arr(moves, 0), arr(moves, 1))
+
+
+def _neighbors(prep: Prepared, part: np.ndarray, mi: _MoveIndex, sep: np.ndarray, st: _NodeStats, max_spread: float) -> np.ndarray:
+    """맞바꾸기(서로 다른 팀의 두 노드) · 옮기기(노드 하나를 다른 팀으로) 이웃 중 인원 · 갈라놓기 조건을 지키는 것.
+    행을 하나씩 복사하지 않고 인덱스 배열로 한꺼번에 만든다 (예전 파이썬 루프의 절반 이상이던 시간)."""
     t = prep.team_count
-    rows = []
-    for x, a in enumerate(free):
-        for b in free[x + 1:]:
-            if part[a] != part[b]:
-                r = part.copy()
-                r[a], r[b] = part[b], part[a]
-                rows.append(r)
-        for s in range(t):
-            if s != part[a]:
-                r = part.copy()
-                r[a] = s
-                rows.append(r)
-    if not rows:
-        return np.zeros((0, len(part)), dtype=int)
-    P = np.stack(rows)
-    sizes = np.stack([(P == s).astype(float) @ st.size for s in range(t)])
+    sw = part[mi.swap_a] != part[mi.swap_b]
+    a, b = mi.swap_a[sw], mi.swap_b[sw]
+    P1 = np.repeat(part[None, :], len(a), axis=0)
+    r1 = np.arange(len(a))
+    P1[r1, a], P1[r1, b] = part[b], part[a]
+    mv = part[mi.move_node] != mi.move_team
+    n, sq = mi.move_node[mv], mi.move_team[mv]
+    P2 = np.repeat(part[None, :], len(n), axis=0)
+    P2[np.arange(len(n)), n] = sq
+    P = np.concatenate([P1, P2]) if len(P2) else P1
+    if not len(P):
+        return P
+    sizes = np.stack([(P == s) @ st.size for s in range(t)])
     ok = (sizes.min(axis=0) >= MIN_SQUAD) & ((sizes.max(axis=0) - sizes.min(axis=0)) <= max_spread + 1e-9)
     if len(sep):
         ok &= (P[:, sep[:, 0]] != P[:, sep[:, 1]]).all(axis=1)
@@ -721,6 +736,7 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
     free = [i for i in range(len(prep.supernodes)) if i not in prep.pins]
     ideal = _squad_sizes(sum(len(x) for x in prep.supernodes), prep.team_count)
     ideal_spread = max(ideal) - min(ideal)
+    mi = _move_index(free, prep.team_count)
     optima: dict[tuple[int, ...], tuple[int, ...]] = {}
     evaluated = 0
     n_recent = len(recent_pairs)
@@ -728,7 +744,7 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
     def descend(part: np.ndarray, cur: float, w: dict[str, float], max_spread: float) -> tuple[np.ndarray, float]:
         nonlocal evaluated
         while True:
-            P = _neighbors(prep, part, free, sep, st, max_spread)
+            P = _neighbors(prep, part, mi, sep, st, max_spread)
             if not len(P):
                 return part, cur
             j = _totals(_terms_matrix(prep, st, P, n_recent), w)
@@ -749,7 +765,11 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
             part, cur = descend(part, float(_totals(_terms_matrix(prep, st, part[None, :], n_recent), w)[0]), w, max_spread)
             optima.setdefault(_canon(tuple(int(x) for x in part), bool(prep.pins)), ())
             # 흔들기: 서로 다른 팀의 두 노드를 두 번 맞바꾼 뒤 다시 내려간다. 더 나으면 거기서 이어 간다
+            stale = 0
             for _ in range(LS_KICKS):
+                if stale >= LS_PATIENCE:  # 연달아 나아지지 않으면 이 출발점은 여기까지
+                    break
+                stale += 1
                 trial = part.copy()
                 for _ in range(2):
                     x, y = rng.sample(free, 2) if len(free) >= 2 else (free[0], free[0])
@@ -761,7 +781,7 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
                 trial, t_cur = descend(trial, t_cur, w, max_spread)
                 optima.setdefault(_canon(tuple(int(x) for x in trial), bool(prep.pins)), ())
                 if t_cur < cur - 1e-9:
-                    part, cur = trial, t_cur
+                    part, cur, stale = trial, t_cur, 0
     parts = list(optima)
     if parts:
         sizes = [sum(len(prep.supernodes[i]) for i, s in enumerate(parts[0]) if s == sq) for sq in range(prep.team_count)]
@@ -974,6 +994,7 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
         used.add(pick.partition)
         _persist_candidate(db, run_row, strategy, pick, prep)
     db.commit()
+    players = {r.id: r.player for r in roster}
     loaded = db.get(
         AssignmentRun, run_row.id,
         options=[
@@ -982,6 +1003,7 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
         ],
         populate_existing=True,
     )
+    loaded._roster_players = players  # type: ignore[attr-defined]  # run_view 가 선수를 다시 읽지 않도록 (명단은 방금 읽었다)
     return loaded, prep.warnings
 
 
@@ -1016,8 +1038,7 @@ def _persist_candidate(db: Session, run_row: AssignmentRun, strategy: Strategy, 
         },
         explanation=explain_manager(sc, strategy, prep), squads=squads,
     )
-    db.add(cand)
-    db.flush()
+    db.add(cand)  # flush 는 run() 이 후보안을 다 만든 뒤 한 번에 (commit)
     return cand
 
 
@@ -1037,7 +1058,7 @@ def _load_run(db: Session, run_id: int) -> AssignmentRun:
 
 
 def _players_of(db: Session, ids: list[int]) -> dict[int, Player]:
-    return {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(ids)).options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user), selectinload(Player.user))).all()}
+    return {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(ids)).options(*PLAYER_LOAD)).all()}
 
 
 def _avg_height(players: list[Player]) -> float | None:
@@ -1090,7 +1111,7 @@ def candidate_view(db: Session, cand: AssignmentCandidate, *, mask: bool = False
 
 def run_view(db: Session, run_row: AssignmentRun, warnings: list[str] | None = None) -> AssignmentRunView:
     ids = list({s.player_id for c in run_row.candidates for sq in c.squads for s in sq.slots})
-    players = _players_of(db, ids) if ids else {}
+    players = getattr(run_row, "_roster_players", None) or (_players_of(db, ids) if ids else {})
     return AssignmentRunView(
         id=run_row.id, event_id=run_row.event_id, team_count=run_row.team_count, created_at=run_row.created_at,
         constraints=constraints_of(run_row), candidates=[candidate_view(db, c, players=players) for c in run_row.candidates],
@@ -1134,15 +1155,6 @@ def _load_candidate(db: Session, candidate_id: int) -> AssignmentCandidate:
     if c is None:
         raise errors.NotFound("배정안을 찾을 수 없어요.")
     return c
-
-
-def _guard_editable(cand: AssignmentCandidate) -> tuple[set[int], set[int], dict[int, AssignmentSlot]]:
-    if cand.is_adopted:
-        raise errors.AlreadyAdopted("확정된 후보안은 수정할 수 없어요. 재배정을 실행해 주세요.")
-    locked = {c.player_id for c in cand.run.constraints if c.type == ConstraintType.LOCK}
-    pinned = {c.player_id for c in cand.run.constraints if c.type == ConstraintType.PIN}
-    slot_of: dict[int, AssignmentSlot] = {s.player_id: s for sq in cand.squads for s in sq.slots}
-    return locked, pinned, slot_of
 
 
 def _separate_group_of(cand: AssignmentCandidate) -> dict[int, int]:
@@ -1223,8 +1235,8 @@ def exchange(db: Session, cand: AssignmentCandidate, exchanges: list[Exchange]) 
             if len({new_sq[p] for p in members}) < len(members):
                 raise errors.InvalidSwap("갈라놓기로 설정된 사람은 갈라놓은 상대와 함께 팀을 바꿔야 해요. 한 명만 옮기면 같은 팀이 돼요.")
         for sid in squad_ids:
-            if sum(1 for v in new_sq.values() if v == sid) < MIN_SQUAD_SIZE:
-                raise errors.InvalidSwap(f"{name_of[sid]} 팀에 최소 {MIN_SQUAD_SIZE}명은 남아야 해요.")
+            if sum(1 for v in new_sq.values() if v == sid) < MIN_SQUAD:
+                raise errors.InvalidSwap(f"{name_of[sid]} 팀에 최소 {MIN_SQUAD}명은 남아야 해요.")
         for pid in a | b:
             slot_of[pid].squad_id = new_sq[pid]
             slot_of[pid].is_manual_override = True
@@ -1347,7 +1359,7 @@ def _prune_history(db: Session, run_row: AssignmentRun) -> None:
 def adopted_candidate(db: Session, event: Event) -> AssignmentCandidate | None:
     return db.scalar(
         select(AssignmentCandidate).join(AssignmentRun).where(AssignmentRun.event_id == event.id, AssignmentCandidate.is_adopted.is_(True))
-        .options(selectinload(AssignmentCandidate.squads).selectinload(AssignmentSquad.slots), selectinload(AssignmentCandidate.run))
+        .options(selectinload(AssignmentCandidate.squads).selectinload(AssignmentSquad.slots), contains_eager(AssignmentCandidate.run))
         .order_by(AssignmentRun.created_at.desc())
     )
 

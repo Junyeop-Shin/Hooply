@@ -7,7 +7,7 @@
 - POST /events/{id}/post-game-survey             투표 제출 (카테고리당 0~2명, 이유 태그 선택)
 - GET  /events/{id}/post-game-survey/share-message  매니저 독려 메시지 (카카오톡 공유용)
 - GET  /players/{id}/compatible                  나와 잘 맞는 참여자
-- GET  /players/{id}/stats, GET /teams/{id}/stats/leaderboard  (스켈레톤)
+- GET  /players/{id}/stats, GET /teams/{id}/stats/leaderboard
 
 케미 정책 (9.4절): 케미는 코트 마진으로 **측정하지 않고** 피어 투표로 **선언받는다**. "잘한 사람" 투표는
 표시 전용이며 실력 산출에 입력하지 않는다 (스펙 4.2절). 게스트는 투표의 대상은 되지만 응답자는 될 수 없다.

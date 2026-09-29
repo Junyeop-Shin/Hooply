@@ -10,6 +10,7 @@
  * 5. 이 전술이 가정한 상대 수비(맨투맨 · 지역 2-3)와 스크린 대응(스위치 · 스테이) — 전술판의 수비가 이대로 움직인다.
  *    기본 전술은 이 값이 고정이고, 여기서만 고른다 (v1.7)
  * 6. 미리 보기(상대 수비 포함) · 막히면 · 저장
+ * 7. 되돌리기(바로 앞 변경 취소, 50번까지) · 처음으로(이 화면을 열었을 때의 움직임으로) — 시작 위치 · 처음 공 · 단계·동작이 대상
  */
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -21,12 +22,9 @@ import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { ActionMark, Court, H, OOB_H, R, TONE, TacticBoard, W, sx, sy } from '../components/tactic-board'
 import { CIRCLED } from '../components/tactics'
 import { Alert, Button, Field, SectionTitle, Spinner } from '../components/ui'
-import { ROLE_LABEL, renderCounter, stepStates } from '../lib/tactics'
+import { ACTION_LABEL, ROLE_LABEL, renderCounter, stepStates } from '../lib/tactics'
 import { useDebounced } from '../lib/typewriter'
 
-const ACTION_LABEL: Record<PlayActionType, string> = {
-  move: '이동', dribble: '드리블', pass: '패스', screen: '스크린', cut: '컷', handoff: '핸드오프', shot: '슛',
-}
 const BALL_TYPES: PlayActionType[] = ['dribble', 'pass', 'handoff', 'shot']
 const OFF_TYPES: PlayActionType[] = ['move', 'cut', 'screen']
 const ROLES = Object.keys(ROLE_LABEL) as TacticRole[]
@@ -85,11 +83,14 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
   const [rolesFor, setRolesFor] = useState<string | null>(null) // 역할을 붙일 때의 동작 (바뀌면 다시 붙이라고 알린다)
 
   // 서버에 보낼 값 — 빈 단계는 빼고, 비어 있는 설명은 자동 문장으로
+  const cleanSteps = useMemo(
+    () => steps.filter((s) => s.actions.length).map((s) => ({ caption: s.caption.trim() || autoCaption(s.actions), actions: s.actions })),
+    [steps],
+  )
   const body: TeamPlayIn = useMemo(() => ({
     name, summary, defense: null, opp_defense: oppDefense, screen_call: screenCall, situation, counter, start, ball,
-    steps: steps.filter((s) => s.actions.length).map((s) => ({ caption: s.caption.trim() || autoCaption(s.actions), actions: s.actions })),
-    roles, role_source: roles ? roleSource : 'RULE',
-  }), [name, summary, oppDefense, screenCall, situation, counter, start, ball, steps, roles, roleSource])
+    steps: cleanSteps, roles, role_source: roles ? roleSource : 'RULE',
+  }), [name, summary, oppDefense, screenCall, situation, counter, start, ball, cleanSteps, roles, roleSource])
   const shape = JSON.stringify({ start: body.start, ball: body.ball, steps: body.steps.map((s) => s.actions), situation })
   const settled = useDebounced(shape, 400)
   const check = useQuery({
@@ -108,6 +109,12 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
     situation, counter, start, ball, roles: shownRoles, steps,
   }
   const states = stepStates(draftPlay)
+  // 미리 보기 전술 — 움직임 · 수비 · 역할이 바뀔 때만 새로 만든다. 이름 · 설명 · 막히면을 칠 때마다 수비 계산을 다시 하지 않게
+  const previewRoles = shownRoles.join()
+  const preview: Play = useMemo(
+    () => ({ key: 'draft', name: '미리 보기', summary: '', counter: '', defense: oppDefense, opp_defense: oppDefense, screen_call: screenCall, situation, start, ball, roles: previewRoles.split(',') as TacticRole[], steps: cleanSteps }),
+    [oppDefense, screenCall, situation, start, ball, previewRoles, cleanSteps],
+  )
   const k = mode === 'start' ? null : mode
   const before = k === null ? states[0] : states[k]
   const holder = before.holder
@@ -129,9 +136,37 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tactics', 'team-plays', teamId] }); nav(`/teams/${teamId}`, { replace: true }) },
   })
 
+  // 되돌리기: 움직임(시작 위치 · 처음 공 · 단계)을 바꾸기 직전 모습을 쌓아 둔다
+  type Snapshot = { start: CourtPoint[]; ball: number; steps: PlayStep[]; edited: Set<number> }
+  const [history, setHistory] = useState<Snapshot[]>([])
+  const [initialShape] = useState<Snapshot>(() => ({ start, ball, steps, edited }))  // 이 화면을 열었을 때의 움직임
+  // 바로 앞 기록과 같은 모습이면 쌓지 않는다 (동그라미를 눌렀다가 옮기지 않은 경우)
+  const remember = () => setHistory((h) => {
+    const last = h[h.length - 1]
+    return last && last.start === start && last.ball === ball && last.steps === steps ? h : [...h.slice(-49), { start, ball, steps, edited }]
+  })
+  const restore = (snap: Snapshot) => {
+    setStart(snap.start); setBall(snap.ball); setSteps(snap.steps); setEdited(snap.edited)
+    setMode((m) => (m === 'start' || snap.steps.length === 0 ? 'start' : Math.min(m, snap.steps.length - 1)))
+    setPending(null)
+  }
+  const undo = () => {
+    const last = history[history.length - 1]
+    if (!last) return
+    setHistory((h) => h.slice(0, -1))
+    restore(last)
+  }
+  const resetAll = () => {
+    if (!window.confirm(playId ? '고치기 전 움직임으로 되돌릴까요?' : '그린 움직임을 모두 지우고 처음부터 할까요?')) return
+    remember() // 처음으로 돌린 것도 되돌리기로 취소할 수 있다
+    restore(initialShape)
+  }
+  const changed = start !== initialShape.start || ball !== initialShape.ball || steps !== initialShape.steps
+
   const setStep = (i: number, next: PlayStep) => setSteps((ss) => ss.map((s, j) => (j === i ? next : s)))
   const addAction = (a: PlayAction) => {
     if (k === null) return
+    remember()
     const cur = steps[k]
     const isBall = BALL_TYPES.includes(a.type)
     // 한 사람은 한 단계에 동작 하나, 공 동작도 한 단계에 하나 — 겹치면 새 것으로 바꾼다
@@ -142,16 +177,19 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
   }
   const removeAction = (i: number) => {
     if (k === null) return
+    remember()
     const actions = steps[k].actions.filter((_, j) => j !== i)
     setStep(k, { caption: edited.has(k) ? steps[k].caption : autoCaption(actions), actions })
   }
   const addStep = () => {
+    remember()
     setSteps((ss) => [...ss, { caption: '', actions: [] }])
     setMode(steps.length)
     setPending(null)
   }
   const deleteStep = () => {
     if (k === null) return
+    remember()
     setSteps((ss) => ss.filter((_, j) => j !== k))
     setEdited((e) => new Set([...e].filter((j) => j !== k).map((j) => (j > k ? j - 1 : j))))
     setMode(k > 0 ? k - 1 : 'start')
@@ -206,7 +244,12 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
         </section>
 
         <section className="space-y-2">
-          <SectionTitle>움직임 그리기</SectionTitle>
+          <SectionTitle action={
+            <span className="flex gap-3">
+              <button type="button" onClick={undo} disabled={!history.length} className="text-sm font-semibold text-brand-ink disabled:opacity-30">↶ 되돌리기</button>
+              <button type="button" onClick={resetAll} disabled={!changed} className="text-sm font-semibold text-muted disabled:opacity-30">처음으로</button>
+            </span>
+          }>움직임 그리기</SectionTitle>
           <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label="단계">
             <StepTab active={mode === 'start'} onClick={() => { setMode('start'); setPending(null) }}>시작 위치</StepTab>
             {steps.map((s, i) => (
@@ -220,13 +263,14 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
             actions={k !== null ? steps[k].actions : []} to={k !== null ? states[k + 1].pos : before.pos}
             selected={pending?.slot ?? null} targeting={pending?.target ?? null}
             onDrag={k === null ? (slot, p) => setStart((ps) => ps.map((q, i) => (i === slot - 1 ? p : q))) : undefined}
+            onDragStart={remember}
             onTapSlot={tapSlot} onTapCourt={tapCourt}
           />
           {k === null ? (
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-muted">처음 공</span>
               {[1, 2, 3, 4, 5].map((s) => (
-                <button key={s} type="button" aria-pressed={ball === s} onClick={() => setBall(s)} className={`min-h-10 min-w-10 rounded-full text-sm font-bold ${ball === s ? 'bg-brand text-on-brand' : 'border border-line bg-surface text-ink-2'}`}>{s}</button>
+                <button key={s} type="button" aria-pressed={ball === s} onClick={() => { if (s !== ball) { remember(); setBall(s) } }} className={`min-h-10 min-w-10 rounded-full text-sm font-bold ${ball === s ? 'bg-brand text-on-brand' : 'border border-line bg-surface text-ink-2'}`}>{s}</button>
               ))}
             </div>
           ) : (
@@ -267,7 +311,7 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
         {playable && (
           <section className="space-y-2">
             <SectionTitle>미리 보기</SectionTitle>
-            <TacticBoard key={`${shape}${oppDefense}${screenCall}`} play={{ ...draftPlay, steps: body.steps }} />
+            <TacticBoard key={`${shape}${oppDefense}${screenCall}`} play={preview} />
           </section>
         )}
 
@@ -385,10 +429,10 @@ function CounterInput({ value, onChange }: { value: string; onChange: (v: string
 }
 
 /** 편집용 코트 — 시작 위치에서는 끌어서 옮기고, 단계에서는 동그라미·코트를 눌러 동작을 넣는다 */
-function EditorCourt({ positions, to, holder, inbound, actions, selected, targeting, onDrag, onTapSlot, onTapCourt }: {
+function EditorCourt({ positions, to, holder, inbound, actions, selected, targeting, onDrag, onDragStart, onTapSlot, onTapCourt }: {
   positions: CourtPoint[]; to: CourtPoint[]; holder: number | null; inbound: boolean; actions: PlayAction[]
   selected: number | null; targeting: number | null
-  onDrag?: (slot: number, p: CourtPoint) => void; onTapSlot: (slot: number) => void; onTapCourt: (p: CourtPoint) => void
+  onDrag?: (slot: number, p: CourtPoint) => void; onDragStart?: () => void; onTapSlot: (slot: number) => void; onTapCourt: (p: CourtPoint) => void
 }) {
   const svg = useRef<SVGSVGElement>(null)
   const [drag, setDrag] = useState<number | null>(null)
@@ -437,7 +481,7 @@ function EditorCourt({ positions, to, holder, inbound, actions, selected, target
         return (
           <g
             key={i} role="button" aria-label={`${slot}번`} className="cursor-pointer"
-            onPointerDown={(e) => { if (onDrag) { e.preventDefault(); svg.current?.setPointerCapture(e.pointerId); setDrag(slot) } }}
+            onPointerDown={(e) => { if (onDrag) { e.preventDefault(); svg.current?.setPointerCapture(e.pointerId); onDragStart?.(); setDrag(slot) } }}
             onClick={(e) => { e.stopPropagation(); if (!onDrag) onTapSlot(slot) }}
           >
             <circle cx={sx(p)} cy={sy(p)} r={R + 4} fill="transparent" />

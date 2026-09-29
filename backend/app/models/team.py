@@ -189,3 +189,4 @@ class GuestClaim(CreatedAtMixin, Base):
     guest_player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     status: Mapped[ClaimStatus] = mapped_column(db_enum(ClaimStatus, 10), nullable=False)
+

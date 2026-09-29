@@ -6,14 +6,13 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { errorMessage as errMsg } from '../api/client'
 import { eventsApi } from '../api/events'
 import { teamsApi } from '../api/teams'
 import { localISODate, type PlayerCard } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, Field, SectionTitle, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 
-const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 
 export function PastRecordPage() {
   const { teamId } = useParams()

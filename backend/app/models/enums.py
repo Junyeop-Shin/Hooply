@@ -140,7 +140,7 @@ class RatingSource(StrEnum):
     SURVEY = "SURVEY"  # 온보딩 설문 제출로 초기값 생성
     MANAGER_SORT = "MANAGER_SORT"  # 매니저 실력 정렬(F14) 반영
     RESIDUAL = "RESIDUAL"  # 쿼터 저장 시 기대 마진 대비 잔차로 Elo 갱신 (9.2절)
-    PEER_VOTE = "PEER_VOTE"  # 경기 후 피어 투표 반영 (가중치 상한 0.3)
+    PEER_VOTE = "PEER_VOTE"  # 예약 — 피어 투표는 실력에 넣지 않아(9.4절) 지금은 쓰지 않는다. DB 값 · 화면 라벨 호환 때문에 남긴다
     MANAGER_ADJUST = "MANAGER_ADJUST"  # 매니저가 신규 선수 초기값을 1회 보정
     ADMIN_ADJUST = "ADMIN_ADJUST"  # 관리자 콘솔에서 수동 보정 (audit_logs 에도 기록)
     MERGE = "MERGE"  # 게스트→회원 병합으로 기록이 합산되며 값이 바뀜
@@ -196,8 +196,8 @@ class Strategy(StrEnum):
 class Side(StrEnum):
     """quarter_lineups.side — 그 쿼터에 어느 팀으로 뛰었는가. 기본 팀명이 블랙/화이트다 (Q6)."""
 
-    BLACK = "BLACK"  # quarters.black_score 쪽 팀 (squad_no 1)
-    WHITE = "WHITE"  # quarters.white_score 쪽 팀 (squad_no 2)
+    BLACK = "BLACK"  # 첫째 칸 — quarters.black_score, 그 칸의 팀은 quarters.home_squad_no (2팀이면 1 블랙)
+    WHITE = "WHITE"  # 둘째 칸 — quarters.white_score, 그 칸의 팀은 quarters.away_squad_no (2팀이면 2 화이트)
 
 
 class VoteType(StrEnum):
@@ -238,3 +238,7 @@ class TutorialPath(StrEnum):
 
     PLAYER = "PLAYER"
     MANAGER = "MANAGER"
+
+
+# 팀(squad) 기본 이름 — 1 블랙 · 2 화이트 · 3 레드 (설계서 13.1절 Q6, 3팀은 참석 15명 초과). 배정 · 쿼터 기록이 함께 쓴다
+DEFAULT_SQUAD_NAMES: tuple[str, ...] = ("블랙", "화이트", "레드")

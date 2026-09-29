@@ -5,12 +5,17 @@
  * 단계마다 끝난 뒤의 위치·공 가진 슬롯을 미리 계산해 두고(stepStates), 프레임은 그 사이를 보간한다(frameAt).
  */
 import { RIM_X, RIM_Y, COURT_H, COURT_W } from './court'
-import type { CourtPoint, Defense, Play, PlayAction, Situation, TacticRole } from '../api/types'
+import type { CourtPoint, Defense, Play, PlayAction, PlayActionType, TacticRole } from '../api/types'
 import { substitute } from './josa'
 
 /** 막혔을 때의 대안: "{5}의 롤이 막히면 {2}에게" → 이름(없으면 "5번")으로. 조사는 받침에 맞춘다 */
 export function renderCounter(text: string, names?: (string | null)[]): string {
   return substitute(text, '\\{([1-5])\\}', (k) => names?.[Number(k) - 1] ?? `${k}번`)
+}
+
+/** 동작 이름 — 백엔드 app/tactics/play.ACTION_LABEL 과 같다 */
+export const ACTION_LABEL: Record<PlayActionType, string> = {
+  move: '이동', dribble: '드리블', pass: '패스', screen: '스크린', cut: '컷', handoff: '핸드오프', shot: '슛',
 }
 
 export const ROLE_LABEL: Record<TacticRole, string> = {
@@ -21,11 +26,6 @@ export const ROLE_LABEL: Record<TacticRole, string> = {
   cutter: '커터',
   post: '포스트',
   spacer: '스페이서',
-}
-
-export const SITUATION_LABEL: Record<Situation, string> = {
-  half_court: '하프코트',
-  inbound: '인바운드',
 }
 
 export const DEFENSE_LABEL: Record<Defense, string> = {

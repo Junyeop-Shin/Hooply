@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import String, delete, func, literal_column, or_, select, union_all
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.core import errors
 from app.models import (
@@ -55,9 +55,9 @@ from app.schemas.event import (
     LockSuggestion,
 )
 from app.services import guest_service
-from app.services.player_service import to_card
+from app.services.player_service import PLAYER_LOAD, to_card
 
-TEAM_COUNT_DEFAULT = 2  # 현재 운영은 2팀 고정 (13.1절 Q4)
+TEAM_COUNT_DEFAULT = 2  # 인원 부족 경고의 기준 팀 수 (3팀은 배정 화면에서 매니저가 고른다)
 
 
 # ---------------------------------------------------------------------------
@@ -174,14 +174,6 @@ def rsvp_open(event: Event) -> bool:
     if event.status != EventStatus.OPEN:
         return False
     return event.rsvp_deadline is None or event.rsvp_deadline > datetime.now(UTC)
-
-
-def _attend_count(db: Session, event_id: int) -> int:
-    return db.scalar(
-        select(func.count()).select_from(EventAttendance).where(
-            EventAttendance.event_id == event_id, EventAttendance.status == AttendanceStatus.ATTEND
-        )
-    ) or 0
 
 
 def _bulk_stats(db: Session, event_ids: list[int], me: Player | None) -> dict[int, dict]:
@@ -367,8 +359,12 @@ def attendance_list(db: Session, event: Event, me: Player, viewer: User, status_
     by_player = {r.player_id: r for r in rows}
     players = db.scalars(
         select(Player)
-        .where(Player.team_id == event.team_id, Player.status == PlayerStatus.ACTIVE)
-        .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+        .where(
+            Player.team_id == event.team_id, Player.status == PlayerStatus.ACTIVE,
+            # 게스트는 이 회차에 행이 있는 사람만 — 팀에 쌓인 지난 게스트 전원을 읽어 버리지 않게
+            or_(Player.kind == PlayerKind.MEMBER, Player.id.in_(list(by_player))),
+        )
+        .options(*PLAYER_LOAD)
     ).all()
     # 회원은 행이 없어도 PENDING 으로, 게스트는 행이 있을 때만
     entries: list[tuple[EventAttendance | None, Player]] = []
@@ -533,13 +529,18 @@ def lock_suggestions(db: Session, event: Event) -> list[LockSuggestion]:
             EventAttendance.event_id == event.id, EventAttendance.status == AttendanceStatus.ATTEND,
             EventAttendance.team_lock_request_player_id.is_not(None), Player.kind == PlayerKind.GUEST,
         )
-        .options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
+        .options(*PLAYER_LOAD)
     ).all()
+    # 대상의 참석 상태와 선수 카드는 한 번에 읽는다 (게스트마다 두 번씩 조회하지 않게)
+    target_ids = {row.team_lock_request_player_id for row, _ in rows}
+    attending = set(db.scalars(select(EventAttendance.player_id).where(
+        EventAttendance.event_id == event.id, EventAttendance.player_id.in_(target_ids), EventAttendance.status == AttendanceStatus.ATTEND,
+    )).all()) if target_ids else set()
+    targets = {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(attending)).options(*PLAYER_LOAD)).all()} if attending else {}
     out = []
     for row, guest in rows:
-        target_row = _get_row(db, event.id, row.team_lock_request_player_id)
-        if target_row is None or target_row.status != AttendanceStatus.ATTEND:
+        target = targets.get(row.team_lock_request_player_id)
+        if target is None:
             continue
-        target = db.get(Player, row.team_lock_request_player_id, options=[selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user)])
         out.append(LockSuggestion(guest=to_card(guest, include_grade=True), target=to_card(target, include_grade=True), requested_by_user_id=row.registered_by))
     return out

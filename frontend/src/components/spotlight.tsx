@@ -22,8 +22,9 @@ export function Spotlight({ target, title, text, onClose }: { target: string; ti
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     const sel = `[data-tutorial="${target}"]`
     const started = performance.now()
-    let raf = 0
+    let timer = 0
     let scrolled = false
+    // 매 프레임 레이아웃을 재지 않고 0.2초마다 — 안내 칸은 스크롤 · 화면 전환 정도로만 움직인다
     const tick = () => {
       const els = Array.from(document.querySelectorAll<HTMLElement>(sel))
       if (els.length) {
@@ -35,15 +36,15 @@ export function Spotlight({ target, title, text, onClose }: { target: string; ti
         setBoxes([])
         return
       }
-      raf = requestAnimationFrame(tick)
+      timer = window.setTimeout(tick, 200)
     }
-    raf = requestAnimationFrame(tick)
+    tick()
     // 밝은 칸을 누르면(= 안내대로 행동하면) 사라진다. 누른 동작 자체는 그대로 전달된다
     const onDown = (e: PointerEvent) => { if ((e.target as Element | null)?.closest?.(sel)) closeRef.current() }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current() }
     document.addEventListener('pointerdown', onDown, true)
     document.addEventListener('keydown', onKey)
-    return () => { cancelAnimationFrame(raf); document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey) }
+    return () => { clearTimeout(timer); document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey) }
   }, [target])
 
   if (!boxes || boxes.length === 0) return null

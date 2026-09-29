@@ -11,30 +11,28 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { errorMessageWithDetails as errMsg } from '../api/client'
 import { assignmentsApi } from '../api/assignments'
 import { eventsApi } from '../api/events'
-import { POSITIONS, type AttendanceView, type CandidateView, type ConstraintSet, type EventView, type PlayerCard, type SquadView, type Strategy } from '../api/types'
-import { Alert, Avatar, Badge, Button, Card, GradeDot, SectionTitle, Spinner } from '../components/ui'
+import { POSITIONS, type AttendanceView, type CandidateView, type ConstraintSet, type SquadView, type Strategy } from '../api/types'
+import { Alert, Button, Card, GradeDot, SectionTitle, Spinner } from '../components/ui'
 import { inSameLock, mergeLock } from '../lib/locks'
-import { SHARE_DONE, shareImage } from '../lib/kakao'
-import { fmtEvent } from '../lib/format'
-import { renderSquadImage } from '../lib/squad-image'
-import { teamsApi } from '../api/teams'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
-import { AiExplainCard, AiMessageCard } from '../components/ai-cards'
-import { THREE_TEAM_FROM, squadStyle } from '../lib/squads'
+import { AiExplainCard } from '../components/ai-cards'
+import { SquadCard, rosterKey, type Marks } from '../components/adopted'
+import { THREE_TEAM_FROM, squadName, squadStyle } from '../lib/squads'
 import { josa } from '../lib/josa'
+import { useDebounced } from '../lib/typewriter'
 
-const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? `${e.message}${e.details.length ? ' ' + e.details.map((d) => d.reason).join(' ') : ''}` : fallback)
 const STRATEGY_LABEL: Record<Strategy, string> = { SKILL: '실력 우선', CHEMISTRY: '친화도 우선', BALANCED: '종합' }
-const TEAM_NAMES = ['블랙', '화이트', '레드']
-const teamName = (no: number) => TEAM_NAMES[no - 1] ?? `${no}팀`
+const teamName = squadName
 /** 참석 N명을 T팀으로 가장 고르게: 21·3 → "7·7·7" */
 const splitText = (n: number, t: number) => Array.from({ length: t }, (_, i) => Math.floor(n / t) + (i < n % t ? 1 : 0)).join('·')
 /** "블랙으로" · "화이트로" · "레드로" — 받침에 맞춘다 */
 const toTeam = (no: number) => `${teamName(no)}${josa(teamName(no), '으로')}`
+/** from 팀 칸에서 to 팀 칸으로 — 칸이 오른쪽이면 "레드로 →", 왼쪽이면 "← 블랙으로" */
+const moveLabel = (from: number, to: number, text: string) => (to > from ? `${text} →` : `← ${text}`)
 const LOCK_COLORS = ['border-court-500 ring-brand-line', 'border-navy-500 ring-navy-200', 'border-emerald-500 ring-emerald-200', 'border-amber-500 ring-amber-200']
 
 /* ============================ S-12 배정 실행 ============================ */
@@ -66,7 +64,12 @@ export function AssignPage() {
     constraints: { lock_groups: locks, separate_groups: seps, pins: Object.entries(activePins).map(([pid, sq]) => ({ player_id: Number(pid), squad_no: sq })) } as ConstraintSet,
   }), [locks, seps, activePins, teams])
 
-  const validate = useQuery({ queryKey: ['events', id, 'validate', body], queryFn: () => assignmentsApi.validate(id, body), enabled: attendees.length > 0 })
+  // 조건을 바꿀 때마다 부르지 않고 0.3초 모아서. 조합마다 캐시에 쌓아 두지 않는다(gcTime 0)
+  const settledBody = useDebounced(body, 300)
+  const validate = useQuery({
+    queryKey: ['events', id, 'validate', settledBody], queryFn: () => assignmentsApi.validate(id, settledBody),
+    enabled: attendees.length > 0, gcTime: 0, placeholderData: (prev) => prev,
+  })
   const run = useMutation({
     mutationFn: () => assignmentsApi.run(id, body),
     onSuccess: (r) => nav(`/assignments/runs/${r.id}`),
@@ -243,7 +246,7 @@ export function AssignPage() {
                       <li key={a.player.id} className={narrow ? 'space-y-0.5' : 'flex items-center justify-between gap-2'}>
                         <span className="block truncate">{a.player.display_name}</span>
                         <span className="flex shrink-0 gap-2">
-                          <button onClick={() => flipPin(a.player.id)} className="text-[11px] opacity-80">{teams === 2 ? (sq === 1 ? '화이트로 →' : '← 블랙으로') : `${toTeam(nextTeam(sq))} →`}</button>
+                          <button onClick={() => flipPin(a.player.id)} className="text-[11px] opacity-80">{moveLabel(sq, nextTeam(sq), toTeam(nextTeam(sq)))}</button>
                           <button onClick={() => unpin(a.player.id)} className="text-[11px] opacity-60">빼기</button>
                         </span>
                       </li>
@@ -270,9 +273,6 @@ export function AssignPage() {
 }
 
 /* ============================ S-13 결과 (매니저) ============================ */
-/** 명단이 바뀌면 달라지는 값 — AI 설명을 새로 부를지 가르는 데 쓴다 */
-const rosterKey = (squads: SquadView[]) => squads.map((sq) => sq.members.map((m) => m.id).sort((a, b) => a - b).join('.')).join('|')
-
 export function RunResultPage() {
   const { runId } = useParams()
   const id = Number(runId)
@@ -284,7 +284,8 @@ export function RunResultPage() {
   const [pick, setPick] = useState<Record<number, number[]>>({})
   const noPick: Record<number, number[]> = {}
   const [msg, setMsg] = useState<string | null>(null)
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['runs', id] }); qc.invalidateQueries({ queryKey: ['events'] }) }
+  // 옮기기 · 되돌리기는 이 실행만 바뀐다. 확정은 일정 화면(배정 결과)도 바뀐다
+  const refresh = (events = false) => { qc.invalidateQueries({ queryKey: ['runs', id] }); if (events) qc.invalidateQueries({ queryKey: ['events'] }) }
   const exchange = useMutation({
     mutationFn: ({ cid, a, b, to }: { cid: number; a: number[]; b: number[]; to?: number }) => assignmentsApi.exchange(cid, a, b, to),
     onSuccess: () => { setPick(noPick); setMsg(null); refresh() },
@@ -297,7 +298,7 @@ export function RunResultPage() {
   })
   const adopt = useMutation({
     mutationFn: (cid: number) => assignmentsApi.adopt(cid),
-    onSuccess: () => { refresh(); nav(`/events/${run.data!.event_id}`, { replace: true }) },
+    onSuccess: () => { refresh(true); nav(`/events/${run.data!.event_id}`, { replace: true }) },
     onError: (e) => setMsg(errMsg(e, '확정하지 못했어요.')),
   })
 
@@ -372,7 +373,7 @@ export function RunResultPage() {
           <div className="space-y-2">
             {picked.length === 1 && cand.squads.filter((s) => s.squad_no !== picked[0][0]).map((s) => (
               <Button key={s.squad_no} variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: [...picked[0][1]], b: [], to: s.squad_no })}>
-                선택한 {label(picked[0][1])}을 {toTeam(s.squad_no)} 옮기기 →
+                {moveLabel(picked[0][0], s.squad_no, `선택한 ${label(picked[0][1])}을 ${toTeam(s.squad_no)} 옮기기`)}
               </Button>
             ))}
             {picked.length === 2 && (
@@ -406,8 +407,6 @@ export function RunResultPage() {
   )
 }
 
-type Marks = { locked: Map<number, number>; lockGroups: Map<number, number[]>; pinned: Set<number>; sepGroup: Map<number, number[]> }
-
 /** run 의 제약을 표시용으로 정리한다: player_id → 묶음 번호·묶음 멤버 / 사전 배치 여부 / 갈라놓기 그룹 */
 function constraintMarks(c: ConstraintSet): Marks {
   const locked = new Map<number, number>()
@@ -417,46 +416,6 @@ function constraintMarks(c: ConstraintSet): Marks {
   const sepGroup = new Map<number, number[]>()
   c.separate_groups.forEach((g) => g.forEach((pid) => sepGroup.set(pid, g)))
   return { locked, lockGroups, pinned, sepGroup }
-}
-
-/** 팀 카드. narrow = 3팀을 한 줄에 셋 놓을 때 — 글자를 줄이고 표시를 한 글자로 */
-function SquadCard({ squad, picked, onPick, showSkill, highlightId, marks, title, compact, narrow }: { squad: SquadView; picked?: number[]; onPick?: (pid: number) => void; showSkill?: boolean; highlightId?: number; marks?: Marks; title?: string; compact?: boolean; narrow?: boolean }) {
-  const st = squadStyle(squad.squad_no)
-  const dark = squad.squad_no !== 2
-  const tag = (full: string, short: string) => (narrow ? short : full)
-  return (
-    <div className={`min-w-0 rounded-2xl border-2 ${narrow ? 'p-2' : 'p-3'} ${st.card}`}>
-      <div className={`flex flex-wrap items-center justify-between gap-1 font-bold ${narrow ? 'text-xs' : 'text-sm'}`}>
-        <span>{title ?? squad.squad_name} ({squad.members.length})</span>
-        {!compact && showSkill && squad.avg_skill !== null && <Badge tone={dark ? 'court' : 'navy'}>{narrow ? '' : '쿼터당 '}{Number(squad.avg_skill) > 0 ? '+' : ''}{squad.avg_skill}</Badge>}
-      </div>
-      {!compact && squad.avg_height_cm !== null && <p className={`text-[11px] ${st.sub}`}>{narrow ? '' : '평균 신장 '}{squad.avg_height_cm}cm</p>}
-      <ul className="mt-2 space-y-1">
-        {squad.members.map((m) => {
-          const pos = squad.assigned_positions[m.id]
-          const on = picked?.includes(m.id) ?? false
-          const me = highlightId === m.id
-          return (
-            <li key={m.id}>
-              <button
-                onClick={onPick ? () => onPick(m.id) : undefined}
-                className={`flex w-full items-center gap-1 rounded-lg ${narrow ? 'px-1 py-0.5 text-xs' : 'gap-1.5 px-1.5 py-1 text-sm'} text-left ${on ? st.picked : me ? st.soft : ''}`}
-              >
-                <span className={`${narrow ? 'w-4 text-[9px]' : 'w-6 text-[10px]'} shrink-0 font-bold ${st.sub}`}>{pos ?? '—'}</span>
-                <span className="min-w-0 truncate font-medium">{m.display_name}{me ? ' (나)' : ''}</span>
-                {m.kind === 'GUEST' && <span className={`shrink-0 text-[10px] ${st.sub}`}>G</span>}
-                {squad.manual_override_ids.includes(m.id) && <span className="text-[10px] text-amber-400">↔</span>}
-                {marks?.locked.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-navy-100 text-navy-700'}`} title="같은 팀으로 묶음">{tag('묶음', '묶')}{marks.locked.get(m.id)}</span>}
-                {marks?.pinned.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-navy-100 text-navy-700'}`} title="사전 배치">{tag('고정', '고')}</span>}
-                {marks?.sepGroup.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-rose-100 text-rose-700'}`} title="갈라놓기">{tag('분리', '분')}</span>}
-                {showSkill && <span className="ml-auto shrink-0"><GradeDot grade={m.skill_grade} small={narrow} /></span>}
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-    </div>
-  )
 }
 
 function PositionTable({ squads }: { squads: SquadView[] }) {
@@ -485,111 +444,4 @@ function PositionTable({ squads }: { squads: SquadView[] }) {
 export function AdoptedPage() {
   const { eventId } = useParams()
   return <Navigate to={`/events/${eventId}`} replace />
-}
-
-/**
- * 일정 화면의 팀 배정 결과 (S-14, 배정이 확정된 일정). 순서: 내 팀 → 배정 설명(AI) → 두 팀 명단.
- * 카카오톡 공유는 매니저만 — 팀원은 결과만 보면 된다. 추천 전술은 일정 화면이 이 아래에 붙인다.
- */
-export function AdoptedSection({ event: e }: { event: EventView }) {
-  const id = e.id
-  const view = useQuery({ queryKey: ['events', id, 'adopted'], queryFn: () => assignmentsApi.adopted(id), retry: false })
-  const isManager = e.my_role === 'MANAGER'
-  const team = useQuery({ queryKey: ['team', e.team_id], queryFn: () => teamsApi.get(e.team_id), enabled: isManager })
-  const [shareMsg, setShareMsg] = useState<string | null>(null)
-  // 구성표 이미지 → 카카오톡. 실력 정보는 이미지에 넣지 않는다
-  const share = useMutation({
-    mutationFn: async () => {
-      const v = view.data!
-      const eventLine = `${fmtEvent(e)}${e.venue ? ` · ${e.venue}` : ''}`
-      const img = await renderSquadImage({ teamName: team.data?.name ?? '팀 배정', eventLine, squads: v.squads }, `팀배정-${e.event_date}.png`)
-      return shareImage(img.file, { title: `${team.data?.name ?? '팀 배정'} · ${fmtEvent(e)}`, description: `팀 배정 결과예요. ${v.squads.map((s) => `${s.squad_name} ${s.members.length}명`).join(' · ')}`, url: `${location.origin}/events/${id}`, width: img.width, height: img.height })
-    },
-    onSuccess: (r) => setShareMsg(SHARE_DONE[r]),
-    onError: (err) => setShareMsg(err instanceof Error ? err.message : '공유하지 못했어요.'),
-  })
-  if (view.isLoading) return <Spinner />
-  if (!view.data) return null
-  const v = view.data
-  const mine = v.squads.find((s) => s.squad_no === v.my_squad_no)
-  const others = v.squads.filter((s) => s.squad_no !== v.my_squad_no)
-  const me: PlayerCard | undefined = mine?.members.find((m) => m.id === (v.my_player_id ?? undefined))
-
-  return (
-    <section className="space-y-3">
-      <SectionTitle>팀 배정 결과</SectionTitle>
-      <FirstTimeTip id="adopted" />
-      {mine && (
-        <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${squadStyle(mine.squad_no).card}`}>
-          <span className="text-xs opacity-70">내 팀</span>
-          <span className="text-xl font-black">{mine.squad_name}</span>
-          {v.my_assigned_position && <span className="rounded-lg bg-court-500 px-2 py-0.5 text-sm font-bold text-white">{v.my_assigned_position}</span>}
-        </div>
-      )}
-      {isManager
-        ? <AiExplainCard candidateId={v.candidate_id} rosterKey={rosterKey(v.squads)} fallbackText={v.explanation} />
-        : v.my_squad_no !== null ? <AiMessageCard eventId={id} fallbackText={v.explanation} /> : <Card><p className="whitespace-pre-line text-sm text-ink-2">{v.explanation}</p></Card>}
-      {isManager && (
-        <Card className="flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-ink">단체방에 팀 구성 보내기</p>
-            <p className="text-xs text-muted">{shareMsg ?? `${v.squads.length === 3 ? '세' : '두'} 팀 명단을 이미지 한 장으로 보내요.`}</p>
-          </div>
-          <button
-            onClick={() => share.mutate()} disabled={share.isPending}
-            className="min-h-10 shrink-0 rounded-xl bg-[#FEE500] px-3 text-sm font-semibold text-[#191919] disabled:opacity-50"
-          >
-            {share.isPending ? '만드는 중…' : '카카오톡 공유'}
-          </button>
-        </Card>
-      )}
-      {mine ? (
-        <>
-          <SquadCard squad={mine} showSkill={isManager} highlightId={me?.id} title={`내 팀 · 팀 ${mine.squad_name}`} />
-          {others.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`상대 · 팀 ${s.squad_name}`} />)}
-        </>
-      ) : (
-        <div className={`grid gap-2 ${v.squads.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-          {v.squads.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`팀 ${s.squad_name}`} narrow={v.squads.length === 3} />)}
-        </div>
-      )}
-      {!isManager && <p className="px-1 text-center text-xs text-faint">실력 수치는 표시하지 않아요. 등급은 8쿼터마다 갱신돼요.</p>}
-    </section>
-  )
-}
-
-export function AvatarRow({ p }: { p: PlayerCard }) {
-  return <span className="inline-flex items-center gap-1"><Avatar name={p.display_name} src={p.profile_image_url} size="sm" />{p.display_name}</span>
-}
-
-
-/** 팀 상세 일정 탭에서 확정된 배정을 대시보드처럼 보여준다: 내 팀(왼쪽) / 상대 팀(오른쪽) / 균형 점수 */
-export function AdoptedSummary({ eventId, isManager }: { eventId: number; isManager: boolean }) {
-  const nav = useNavigate()
-  const view = useQuery({ queryKey: ['events', eventId, 'adopted'], queryFn: () => assignmentsApi.adopted(eventId), retry: false })
-  if (!view.data) return null
-  const v = view.data
-  const mine = v.squads.find((s) => s.squad_no === v.my_squad_no)
-  const others = v.squads.filter((s) => s.squad_no !== v.my_squad_no)
-  const ordered = mine ? [mine, ...others] : v.squads  // 좌측 우리 팀, 우측 상대 팀
-  const myId = v.my_player_id ?? undefined
-  return (
-    <div className="-mt-1 space-y-2 rounded-b-2xl border border-t-0 border-line bg-surface-2 px-3 py-3">
-      <div className="flex items-center justify-between px-1">
-        <p className="text-sm font-bold text-ink">팀 배정 확정</p>
-        <button onClick={() => nav(`/events/${eventId}`)} className="text-xs font-semibold text-brand-ink">자세히 →</button>
-      </div>
-      <div className={`grid gap-2 ${ordered.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-        {ordered.map((s) => (
-          <SquadCard key={s.squad_no} squad={s} showSkill={isManager} highlightId={myId} title={`팀 ${s.squad_name}`} compact narrow={ordered.length === 3} />
-        ))}
-      </div>
-      {v.total_score !== null && v.total_score !== undefined && (
-        <div className="flex items-center justify-between rounded-lg bg-surface px-3 py-1.5 text-xs">
-          <span className="text-muted">균형 점수</span>
-          <span className="font-bold text-ink">{v.total_score} <span className="text-[10px] font-normal text-faint">낮을수록 균형이 좋아요</span></span>
-        </div>
-      )}
-    </div>
-  )
 }

@@ -22,7 +22,7 @@ from app.models import (
     QuarterLineup,
     User,
 )
-from app.models.enums import EventStatus, PlayerStatus, Side
+from app.models.enums import DEFAULT_SQUAD_NAMES, EventStatus, PlayerStatus, Side
 from app.schemas.game import (
     LineupIn,
     LineupView,
@@ -38,8 +38,7 @@ from app.schemas.game import (
 )
 from app.services import rating_service
 
-SIDE_LABEL = {Side.BLACK: "블랙", Side.WHITE: "화이트"}
-DEFAULT_SQUAD_NAMES = ["블랙", "화이트", "레드"]
+SIDE_LABEL = {Side.BLACK: DEFAULT_SQUAD_NAMES[0], Side.WHITE: DEFAULT_SQUAD_NAMES[1]}
 
 
 def _squad_names(db: Session, event: Event) -> dict[int, str]:
@@ -254,7 +253,7 @@ def list_quarters(db: Session, event: Event) -> QuarterListView:
             c.quarters += 1
             c.side, c.squad_no = lineup.side, sq  # 마지막으로 뛴 팀
         for mine, score, other in ((q.home_squad_no, q.black_score, q.white_score), (q.away_squad_no, q.white_score, q.black_score)):
-            t = tally.setdefault(mine, SquadTally(squad_no=mine, squad_name=DEFAULT_SQUAD_NAMES[(mine - 1) % 3], quarters=0, points_for=0, points_against=0, wins=0, losses=0))
+            t = tally.setdefault(mine, SquadTally(squad_no=mine, squad_name=DEFAULT_SQUAD_NAMES[(mine - 1) % len(DEFAULT_SQUAD_NAMES)], quarters=0, points_for=0, points_against=0, wins=0, losses=0))
             t.quarters += 1
             t.points_for += score
             t.points_against += other
