@@ -1,117 +1,91 @@
-# 농구 동호회 팀 매칭 서비스
+# HOOPLY — 농구 동호회 팀 배정 서비스
 
-농구 동호회 · 픽업 게임의 팀 배정 서비스 **HOOPLY** 입니다 — https://hooply-green.vercel.app
+> 매주 참석자가 바뀌고 실력을 모르는 게스트가 섞이는 농구 모임에서, **균형 잡힌 팀 나누기 3가지 안을 추천**하고 **그 팀에 맞는 전술**까지 알려 주는 모바일 웹 서비스
 
-기획서는 [CLAUDE.md](CLAUDE.md) (v1.0 — 서비스 전체 기획과 설계 근거: 실력 모델 · 시뮬레이션 · 케미 정책 · 배정 알고리즘 · AI 원칙)이고, 세부 명세는 [docs/](docs) 의 01~07 입니다(서비스 정의 · 화면 · 데이터 모델 · API · 데모 시나리오 · 배지 · AI 전술). 둘이 다르면 docs 가 정본입니다.
-
-## 구성
-
-```
-docker-compose.yml          db(postgres:16) + api(FastAPI) + web(nginx)
-frontend/                   React + TS + Vite + Tailwind — 자세한 내용은 frontend/README.md
-backend/
-  alembic/versions/0001~0024               스키마 전체 (docs/03 데이터 모델, upgrade/downgrade 왕복 검증)
-  scripts/simulate_rating.py                실력 지표 시뮬레이션 — 원시 마진 vs 잔차 모델 (설계서 9.1·9.3절 근거 재현, 참고 문헌 포함)
-  scripts/eval_llm.py                       AI 설명 검증 — 배포 서버에 체인 A~D 를 돌려 docs/eval_result.md 를 만든다
-  scripts/seed_demo.py                      데모 데이터 (21명 동호회 · 지난 10회차 배정/쿼터/투표 · 배정 전 일정 4건 + 응답 수집 중 1건 · 실력 정렬 · 두 번째 팀 수요 픽업)
-  app/db/survey_seed.py                     설문 문항·선택지 시드 데이터 (v1 이력 + v2 현재)
-  app/
-    core/      config · errors(7.4절 에러 코드) · security(bcrypt/JWT)
-    db/        Base · 세션
-    models/    account · team · profile · ranking · survey · event · assignment · game · peer · audit · badge · tactic · llm
-    schemas/   7.2절 공통 스키마 + 그룹별 요청/응답
-    api/v1/    auth → surveys → teams → guests → rankings → events → assignments → quarters → peer → admin → tutorial → tactics → team_plays → ai
-    services/  auth · team · player · survey · guest · event · ranking · assignment(배정 엔진) · quarter · rating(잔차 Elo) · peer · badge · tutorial · avatar · mail · kakao · tactic · team_play · ai(LangChain)
-    tactics/   전술 모델 · 프리셋 22개 · 역할 점수 · 역할 추출 · 코트 좌표 판정 (docs/07)
-    llm/       LangChain 모델 · 프롬프트 · 가드레일(가명 · 숫자 · 누설 검사, 캐시)
-  tests/       pytest — 권한 · 배정(2·3팀, 제약) · 쿼터 롤백 · 투표 · 전술 · AI 가드레일 · 쿼리 수 예산
-```
-
-## 실행
-
-```bash
-# 1. DB
-docker compose up -d db
-
-# 2. 백엔드 (uv 사용)
-cd backend
-uv sync
-cp .env.example .env            # 필요 시 수정
-uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
-# → http://localhost:8000/docs
-
-# 3. 프론트엔드
-cd frontend
-npm install
-npm run dev
-# → http://localhost:5173  (/api 요청은 8000으로 프록시)
-```
-
-전부 도커로 띄우려면 `docker compose up --build` 후 http://localhost:5173 으로 접속합니다.
-
-데모 데이터(21명 동호회 + 지난 10회차 기록 + 배정 전 일정 4건 · 응답 수집 중 1건 + 게스트 + 두 번째 팀). 전 기능을 둘러보는 순서는 [docs/05-데모시나리오.md](docs/05-데모시나리오.md):
-
-```bash
-docker compose exec api python -m scripts.seed_demo          # 이미 있으면 건너뜀. 다시 만들려면 --reset (전 데이터 삭제)
-# 관리자 콘솔: http://localhost:8000/admin  (admin@demo.com / demo1234)
-# 운영 DB 에 데모 팀을 올릴 때:  DATABASE_URL=<Neon> python -m scripts.seed_demo --no-admin   /  지울 때: python -m scripts.remove_demo --yes
-# 날짜는 실행일 기준(이번 주 일요일)이라 시간이 지나면 '배정 전 일정'이 과거가 된다 → .github/workflows/demo-refresh.yml 이 매주 월요일 00:30(KST) 자동으로 지우고 다시 만든다 (수동: Actions → Demo data refresh, --anchor 로 기준 일요일 지정 가능)
-#   --reset 은 로컬 DB 에서만 동작 (운영 DB 전체 삭제 방지)
-# 의존성 변경 시: cd backend && uv add <pkg> && uv export --no-dev --no-hashes --no-emit-project -o requirements.txt  (Render·Docker 는 requirements.txt 로 설치)
-# 카카오: 백엔드 KAKAO_CLIENT_ID(REST API 키)·KAKAO_CLIENT_SECRET·KAKAO_REDIRECT_URI(<프론트>/auth/kakao/callback), 프론트 VITE_KAKAO_JS_KEY(JavaScript 키, 공개용)
-# 운영 배포 전 확인: JWT_SECRET_KEY 교체 · DOCS_ENABLED=false · ADMIN_COOKIE_SECURE=true · CORS_ORIGINS/FRONTEND_BASE_URL 을 실제 도메인으로 · RATE_LIMIT_ENABLED 는 기본 true(단일 인스턴스 메모리 기준) ·
-# DB 백업: .github/workflows/backup.yml 이 매일 04:00(KST) pg_dump 를 아티팩트로 30일 보관 — 저장소 Secrets 에 BACKUP_DATABASE_URL 필요. 처리되지 않은 오류는 스택과 함께 서버 로그(Render Logs)에 남는다 · 운영 DB 에는 seed_demo 를 --no-admin 없이 실행하지 않기
-# 매니저: manager@demo.com / demo1234   팀원: m01@demo.com ~ m20@demo.com / demo1234 (m19 설문 전 · m20 게스트 출신 가입자)
-# 게스트 불러오기 확인: m04@demo.com(허웅·이승현), m07@demo.com(허훈), manager@demo.com(송교창)
-```
-
-테스트 (docker의 Postgres를 그대로 사용하며 테이블을 비웁니다):
-
-```bash
-cd backend && uv run pytest -q
-```
-
-## 구현 상태
-
-| 구분 | 상태 |
+| | |
 | --- | --- |
-| 스키마 / 마이그레이션 | 완료 (upgrade/downgrade 왕복 검증) |
-| 인증(이메일, 대소문자 무시) · 로그아웃(refresh 폐기·회전) · 로그인/가입/비밀번호 경로 요청 제한(429) · 비밀번호 변경 · 계정 삭제(비식별화) · /me · 팀 생성(관리자 승인 후 활성화)/가입/나가기/활성화/정보 수정 · 팀원 목록/권한(팀장만 부여·회수, 팀장 자진 해제 시 승계)/제외(마지막 매니저 보호) | 구현 |
-| 온보딩 설문 v2 (12문항 · 11화면 — 1번 · 5번 가능 여부는 한 화면, 1인 1회, 팀 내 z-score → prior) + 팀 가입 후 "동호회 내 내 위치" | 구현 |
-| 일정 등록(지난 일정 불러오기: 날짜·마감 +7일)·목록·상세·수정·삭제(참석·배정·투표 함께, 경기 기록 있으면 불가)·응답 미리 마감 · RSVP · 참석 현황/포지션 요약/경고 · 지난 기록 추가(과거 일정 + 참석 + 쿼터) | 구현 |
-| 게스트: 회차별 등록(팀원 누구나, 키 포함)·수정·삭제 권한·동명이인·재사용·묶기 요청·병합 후보·병합/되돌리기·**본인 확인 병합**(같은 이름의 회원이 가입하면 홈에서 직접 확인해 기록 승계) | 구현 |
-| 매니저 실력 정렬 (버전 관리, 설문 0.5 + 정렬 0.5 결합) | 구현 |
-| 팀 배정: 실현가능성 검사, Union-Find 묶음, 2팀 완전 탐색 · 3팀(16명 이상, 선택) 지역 탐색, 전략 3안, 설명, 교체 · 옮기기, 확정, 플레이어 마스킹, 직전 회차 제약 | 구현 |
-| 쿼터 기록 · 잔차 기반 Elo 실력 갱신 (첫 2회 게이트, 삭제 롤백 = 팀 전체 재계산, 병합 게스트 합산, 3팀이면 쿼터마다 대진) | 구현 |
-| 피어 투표 (종료 시각 자동 오픈, '다음에 같이 뛰고 싶은 사람' 같은 팀 2 + 상대 팀 2, 이유 태그, 함께 참석 대비 정규화 + 최근 가중 선호 점수, 매니저 독려 메시지) | 구현 |
-| 선수 통계 (`/players/{id}/stats`: 본인은 쿼터 기록·마진, 매니저는 실력 지표 근거까지) · 팀 리더보드 (참여율/출전 쿼터/잔차) | 구현 |
-| 팀 화면 **기록 탭** — 활동일별 추세 그래프 · 월간 코트 마진 랭킹 (출전 비율 기준, 접기 가능) · 행동 배지 20종 · 동/은/금 묶음 칸 12개 (`/me/badges`, [docs/06-배지.md](docs/06-배지.md)) | 구현 |
-| 도움말 · 문의 (`/help`, 로그인 없이도 열림 · 내 프로필과 로그인 화면에서 진입 · 개발자 연락처) | 구현 |
-| 시작 안내 — 새 가입자 팝업 · 팀원/매니저 체크리스트(서버가 실제 데이터로 판정, 막힌 단계는 대기 중) · 기능별 첫 안내 (`/me/tutorial`) | 구현 |
-| 관리자: SQLAdmin 콘솔 `/admin` (ADMIN 계정, 팀 승인/거절 액션) + 사용자 검색·팀 승인·원시 데이터·지표 보정(이력+감사 로그)·감사 로그 API | 구현 |
-| 카카오 로그인 (인가 URL · 서명 state · 콜백 가입/로그인 · 기존 계정 연결) · 카카오톡 공유 (팀 초대 · 투표 독려 · **확정된 팀 구성 이미지**(캔버스 → 카카오 이미지 업로드 → 피드), SDK 없으면 OS 공유 시트/파일 저장) | 구현 |
-| 비밀번호 재설정 메일 (토큰 해시 저장 · 30분 · 1회, Resend 발송, 키 없으면 로그) | 구현 |
-| 전술 (docs/07): 프리셋 22개 · 확정된 팀마다 자동 추천과 자리 배치 · 전술판 재생 · 수비 시뮬레이션 · 팀원이 그리는 전술 편집기(역할 자동 추출) · 댓글 · 매니저 별표 | 구현 |
-| AI 설명 (LangChain + Gemini, docs/07): 매니저 배정 설명 · 팀원 AI 한마디 · 전술 AI 코치 · 편집기 자리별 이유 — 판단은 규칙, AI 는 문장만, 가드레일 · 캐시 · 폴백 | 구현 |
-| 로테이션 자동 제안(F17) | 범위에서 제외 |
-| 프론트: 로그인·가입·비밀번호 찾기·설문·홈·팀(일정 · 기록 · 전술 · 팀원 탭)·팀원 관리·일정/RSVP·게스트·프로필·실력 정렬·배정 실행/결과/확정 결과·쿼터 기록·피어 투표·매니저 실력 지표·전술판·전술 편집기·도움말 화면 | API 연결됨 |
+| **서비스** | [hooply-green.vercel.app](https://hooply-green.vercel.app) (휴대폰 화면 기준. PC 에서는 창을 좁게) |
+| **데모 계정** | 매니저 `manager@demo.com` · 팀원 `m05@demo.com` · 비밀번호 모두 `demo1234` |
+| **5분 둘러보기** | [데모 시나리오](docs/05-데모시나리오.md)의 "5분 코스: 팀 배정" |
+| **기간** | 2026-09-09 ~ 2026-09-30 (커밋 91개) |
 
-모든 엔드포인트는 `/docs`(로컬)에서 요청·응답 스키마를 확인할 수 있고, 각 함수 docstring 에 권한 · 처리 · 오류 · 설계서의 해당 절이 있습니다.
+## 대표 화면
 
-## 다음 작업 (9.8절 순서)
+<!-- 스크린샷을 docs/images/ 에 넣고 아래 칸의 "(이미지 자리)" 를 ![설명](docs/images/파일명.png) 로 바꾸세요 -->
 
-1. 배치 RAPM(100쿼터 이후) · 앵커 재보정(150쿼터 이후)
+| 팀 배정안 3가지 비교 | 팀원이 보는 배정 결과 · AI 한마디 | 전술판 (상대 수비가 따라 움직임) | 경기 후 쿼터 기록 |
+| :---: | :---: | :---: | :---: |
+| (이미지 자리)<br>`docs/images/01-assign.png` | (이미지 자리)<br>`docs/images/02-result.png` | (이미지 자리)<br>`docs/images/03-tactic-board.png` | (이미지 자리)<br>`docs/images/04-quarters.png` |
 
-## 테스트
+## 5분 요약
 
-| 종류 | 명령 | 내용 |
+1. **문제** — 동호회 모임은 매주 12~14명이 오고, 인원이 모자라면 실력을 모르는 게스트를 2~4명 부릅니다. 팀은 매번 매니저의 감으로 나뉘고, 근거가 없어 불만이 쌓입니다.
+2. **누구를 위해** — 팀을 나누는 **매니저**(1차)와, 균형 잡힌 경기를 원하는 **참가자**(2차).
+3. **어떻게** — 참석자의 실력 · 포지션 · "같이 뛰고 싶은 사람"을 따져 **팀 나누기 3가지 안**(실력 우선 · 친화도 우선 · 종합)을 추천하고, 매니저가 고르거나 고쳐서 확정합니다.
+4. **기록** — 개인 기록 없이 **쿼터마다 뛴 5명과 점수만** 넣으면, "예상보다 얼마나 더 잘했나"를 쌓아 실력 지표가 스스로 보정됩니다.
+5. **검증** — 설계 판단마다 시뮬레이션 · 실측 · 자동 테스트로 확인했습니다 → [주요 의사결정](docs/00_주요_의사결정.md) · [요구사항 추적표](docs/00_요구사항_추적표.md)
+
+## 핵심 원칙 3가지
+
+| 원칙 | 뜻 | 근거 |
 | --- | --- | --- |
-| 백엔드 | `cd backend && uv run pytest -q` | 약 170개 — 권한·팀 승인·배정 제약(2·3팀)·쿼터 롤백·투표·카카오·비밀번호 재설정·전술·AI 가드레일·쿼리 수 (개발 DB 를 비우고 돌리므로 끝나면 `seed_demo --reset`) |
-| 프론트 단위·컴포넌트 | `cd frontend && npm test` | Vitest + Testing Library — 날짜/이유 문구 헬퍼, 로그인 시 캐시 초기화, 투표 화면(2명 제한·자동 접힘·종료 전 안내) |
-| E2E | `docker compose up -d && cd frontend && npm run test:e2e` | Playwright(모바일 Chromium) — 로그인·홈, 팀 배정 실행→확정, 3팀 배정, 쿼터 기록, 등급 비공개, 기록 탭 · 리더보드, 전술 · 전술 편집기, 시작 안내, 프로필 사진, 도움말 (데모 데이터 필요, 로컬은 `RATE_LIMIT_ENABLED=false`) |
-| CI | `.github/workflows/ci.yml` | 푸시·PR 마다 위 세 가지를 GitHub Actions 에서 실행 (PostgreSQL 서비스 컨테이너 + 마이그레이션 + 데모 시드) |
+| **추천은 알고리즘, 결정은 매니저** | 알고리즘은 3가지 안을 내놓기만 합니다. 매니저가 고르고, 선수를 옮기거나 맞바꾸고, **확정해야** 참석자에게 공개됩니다 | [기획서](CLAUDE.md) 1.4절 |
+| **판단은 규칙, 문장은 AI** | 누가 활약할지 · 어떤 전술과 자리가 맞는지는 서버의 계산 규칙이 정합니다. AI(LLM, 문장을 만들어 주는 대형 언어 모델)는 그 결과를 읽기 쉬운 문장으로만 바꿉니다. AI 가 실패하면 규칙 설명이 그대로 나옵니다 | [AI 전술 요구사항](docs/07-AI전술-요구사항.md) 1.2절 |
+| **최소 기록** | 쿼터별 출전 5명과 팀 점수만 입력합니다. 개인 득점 · 리바운드 같은 스탯은 받지 않습니다 | [기획서](CLAUDE.md) 1.4절 · 9장 |
 
-메일 발송은 `RESEND_API_KEY` 와 `MAIL_FROM` 을 넣으면 Resend 로 나가고, 없으면 재설정 링크가 서버 로그에 찍힌다 (로컬 확인용).
+## 기획 과정을 따라가는 법
 
-AI 설명(docs/07)은 LangChain 으로 부른다. `LLM_API_KEY`(Gemini 는 Google AI Studio 키)를 넣으면 켜지고, 없으면 모든 AI 카드가 규칙 문장을 보여 준다. 다른 모델로 바꿀 때는 `LLM_MODEL`(예: `openai:gpt-5-mini`)과 키, 공급자 패키지만 바꾼다.
+코드보다 **문제 정의 → 요구사항 → 설계 판단 → 검증**을 보시려면 이 순서로 읽으세요.
+
+| 단계 | 문서 | 여기서 볼 수 있는 것 |
+| --- | --- | --- |
+| ① 문제 정의 | [서비스 정의](docs/01-서비스정의.md) 1~2장 | 페인포인트 8개(P1~P8)와 핵심 난제(게스트 콜드 스타트 — 데이터가 없는 사람을 어떻게 배정에 넣을까) |
+| ② 요구사항 | [요구사항 추적표](docs/00_요구사항_추적표.md) | 문제 → 요구사항 → 구현된 기능 → 검증 방법 · 결과를 표 하나로 |
+| ③ 설계 판단 | [주요 의사결정](docs/00_주요_의사결정.md) | 선택지와 그 결정을 내린 근거 데이터 (시뮬레이션 수치 등) |
+| ④ 검증 | [AI 설명 검증 결과](docs/eval_result.md) · 자동 테스트 | 배포 서버에서 AI 설명 72건 점검, 역할 일치율, 테스트 300여 건 |
+
+## 문서 지도
+
+전체 목차와 읽는 순서는 [docs/README.md](docs/README.md)에 있습니다.
+
+| 문서 | 이 문서가 답하는 질문 |
+| --- | --- |
+| [요구사항 추적표](docs/00_요구사항_추적표.md) | 어떤 사용자 문제가 어떤 기능이 되었고, 어떻게 확인했나? |
+| [주요 의사결정](docs/00_주요_의사결정.md) | 왜 이렇게 설계했나? 어떤 데이터로 정했나? |
+| [01 서비스 정의](docs/01-서비스정의.md) | 누구의 어떤 문제를 풀고, 무엇을 요구하나? (기능 · 비기능 요구사항) |
+| [02 화면 설계](docs/02-UI흐름및화면설계.md) | 화면 31개는 무엇을 보여 주고 어떻게 이어지나? |
+| [03 데이터 모델](docs/03-데이터모델.md) | 어떤 데이터를 어떤 구조로 저장하나? |
+| [04 API 명세](docs/04-API명세.md) | 화면과 서버가 무엇을 주고받나? |
+| [05 데모 시나리오](docs/05-데모시나리오.md) | 데모 계정으로 무엇을 어떤 순서로 보면 되나? |
+| [06 배지](docs/06-배지.md) | 배지는 무엇을 하면 얻나? |
+| [07 AI 전술 요구사항](docs/07-AI전술-요구사항.md) | AI 설명과 전술 추천은 무엇을 어떤 규칙으로 하나? |
+| [AI 설명 검증 결과](docs/eval_result.md) | AI 설명이 규칙의 판단을 벗어나지 않는지 어떻게 확인했나? |
+| [08 개발 · 실행 가이드](docs/08-개발-실행-가이드.md) | 로컬에서 어떻게 실행하고 테스트하나? (개발자용) |
+| [기획서 CLAUDE.md](CLAUDE.md) | 전체 기획과 설계 근거 — 실력 모델 · 시뮬레이션 · 케미 정책 · 배정 알고리즘 (가장 자세함) |
+
+## 데모 데이터 안내
+
+- 데모와 테스트에 나오는 사람 이름은 **실존 농구 선수의 이름을 빌린 것**입니다. 실력 등급 · 점수 · 설문 응답 · 투표 · 경기 기록은 모두 **임의로 만든 가상 데이터**이고, 실제 선수와는 관계가 없습니다. 이메일도 가짜 주소(`@demo.com`)입니다.
+- 데모 데이터는 매주 월요일 새벽에 자동으로 다시 만들어집니다. 여러 사람이 함께 쓰므로 다른 분이 먼저 배정을 확정했을 수 있습니다 — 대신 쓸 방법은 [데모 시나리오](docs/05-데모시나리오.md)에 있습니다.
+- 실제 동호회 팀의 데이터는 저장소에 없고, AI 평가에도 쓰지 않았습니다([검증 결과](docs/eval_result.md)의 표본 출처).
+
+## 기술 스택과 규모
+
+| 영역 | 사용 기술 |
+| --- | --- |
+| 백엔드 (서버) | Python 3.12 · FastAPI · SQLAlchemy 2.0 · Alembic · Pydantic v2 · NumPy |
+| 데이터베이스 | PostgreSQL (운영 Neon, 로컬 Docker) |
+| AI | LangChain · Google Gemini |
+| 프론트엔드 (화면) | React 19 · TypeScript · Vite · Tailwind CSS v4 · TanStack Query · Zustand |
+| 인증 · 연동 | JWT · bcrypt · 카카오 로그인 · 카카오톡 공유 · Resend(메일) |
+| 테스트 | pytest · Vitest · Testing Library · Playwright |
+| 배포 · 자동화 | Render(서버) · Vercel(화면) · Neon(DB) · Docker Compose · GitHub Actions |
+
+| 규모 | 수 |
+| --- | --- |
+| 화면 | 31개 ([02 화면 설계](docs/02-UI흐름및화면설계.md)) |
+| API (화면과 서버가 주고받는 창구) | 110개, `/health` 포함 ([04 API 명세](docs/04-API명세.md)) |
+| DB 스키마 변경 이력(마이그레이션) | 24개 |
+| 자동 테스트 | 서버 pytest 222건 · 화면 단위 Vitest 63건 · 브라우저로 화면을 눌러 보는 E2E(Playwright) 22건 — 모두 GitHub Actions 에서 푸시마다 실행 |
+
+실행 방법, 폴더 구성, 구현 상태는 [08 개발 · 실행 가이드](docs/08-개발-실행-가이드.md)에 있습니다.
