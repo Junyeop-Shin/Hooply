@@ -3,7 +3,7 @@
 - GET    /teams/{team_id}/plays                               팀 전술 목록 (팀원)
 - POST   /teams/{team_id}/plays                               만들기 (팀원, v1.7)
 - POST   /teams/{team_id}/plays:check                         재생 가능성 검사 + 규칙 역할 추출, 저장 안 함 (팀원)
-- POST   /teams/{team_id}/plays:ai-roles                      AI 역할 태깅 — LangChain 체인 D (팀원)
+- POST   /teams/{team_id}/plays:ai-roles                      AI 역할 설명 — LangChain 체인 D (팀원)
 - GET    /teams/{team_id}/plays/{play_id}                     보기 (팀원)
 - PUT    /teams/{team_id}/plays/{play_id}                     고치기 (만든 사람 · 매니저)
 - DELETE /teams/{team_id}/plays/{play_id}                     지우기 — 그 전술의 자리 배치·댓글·별표도 (만든 사람 · 매니저)
@@ -72,14 +72,15 @@ def check_play(me: TeamMember, team_id: int, body: TeamPlayIn):
 @router.post(
     "/teams/{team_id}/plays:ai-roles", response_model=RoleSuggestion,
     responses=errors(_400="VALIDATION_ERROR", _403="NOT_A_MEMBER", _422="PLAY_NOT_PLAYABLE", _429="RATE_LIMITED"),
-    summary="AI 역할 태깅",
+    summary="AI 역할 설명",
 )
 def ai_roles(db: DB, user: CurrentUser, me: TeamMember, team_id: int, body: TeamPlayIn):
-    """직접 그린 전술의 자리마다 역할을 AI 가 붙인다 (LangChain · 체인 D). 선수 정보는 보내지 않고 전술 모양(자리 이름 · 동작)만 보낸다.
+    """직접 그린 전술의 자리마다 왜 그 역할인지 AI 가 한 문장씩 쓴다 (LangChain · 체인 D). 역할은 바꾸지 않는다 —
+    `roles` 를 보내면 그대로(매니저가 고친 역할), 비우면 규칙 추출 결과를 쓴다. 선수 정보는 보내지 않고 전술 모양(자리 이름 · 동작)만 보낸다.
 
     - **권한:** 팀원 · ADMIN. 사용자당 분당 10회.
-    - **처리:** 규칙 추출 결과를 힌트로 함께 보낸다. 역할이 7개 밖이거나 자리가 빠지면 버리고 규칙 결과(`fallback=true`).
-    - **상태:** `구현됨`. **설계서:** docs/07 FR-59.
+    - **처리:** 자리가 빠지면 버리고 규칙이 읽은 이유(`fallback=true`). 매니저가 규칙과 다르게 바꾼 자리는 역할 설명 한 줄.
+    - **상태:** `구현됨`. **설계서:** docs/07 FR-59, O11.
     """
     return svc.ai_roles(db, body, user)
 

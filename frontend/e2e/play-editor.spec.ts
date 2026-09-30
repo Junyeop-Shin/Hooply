@@ -1,4 +1,4 @@
-/** 전술 편집기 · AI 역할 태깅 · 전술 댓글 (docs/07 S-30, FR-57 ~ FR-60). 만든 전술은 끝에 지워 다른 테스트의 목록 개수를 바꾸지 않는다. */
+/** 전술 편집기 · AI 역할 설명 · 전술 댓글 (docs/07 S-30, FR-57 ~ FR-60). 만든 전술은 끝에 지워 다른 테스트의 목록 개수를 바꾸지 않는다. */
 import { test, expect, type Page } from '@playwright/test'
 import { login } from './helpers'
 
@@ -59,8 +59,8 @@ test('매니저가 픽앤롤을 그려 저장하고, 역할을 붙이고, 댓글
   await page.getByRole('radiogroup', { name: '스크린 대응' }).getByRole('radio', { name: '스위치' }).click()
   await expect(page.getByText('맨투맨 수비 · 스크린 스위치').first()).toBeVisible()
   await expect(page.getByLabel('5번 역할')).toHaveValue('screener_roll')
-  await page.getByRole('button', { name: 'AI로 역할 붙이기' }).click()  // CI 에는 키가 없어 규칙 결과
-  await expect(page.getByText(/AI가 전술의 의도까지|AI를 쓸 수 없어/)).toBeVisible()
+  await page.getByRole('button', { name: 'AI로 이유 설명 받기' }).click()  // CI 에는 키가 없어 규칙이 읽은 이유
+  await expect(page.getByText(/AI가 전술을 읽고 쓴|AI를 쓸 수 없어/)).toBeVisible()
 
   await page.getByRole('button', { name: '전술 저장' }).click()
   await expect(page.getByRole('heading', { name: 'E2E 픽앤롤' })).toBeVisible()

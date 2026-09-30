@@ -2309,7 +2309,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /teams/{team_id}/plays:ai-roles:
     post:
-      summary: AI 역할 태깅
+      summary: AI 역할 설명
       tags:
       - 전술
       parameters:

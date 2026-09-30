@@ -1,4 +1,4 @@
-"""직접 만든 전술 · 역할 자동 추출 · AI 역할 태깅 · 전술 댓글 (docs/07 FR-57 ~ FR-60, T17 ~ T21)."""
+"""직접 만든 전술 · 역할 자동 추출 · AI 역할 설명 · 전술 댓글 (docs/07 FR-57 ~ FR-60, T17 ~ T21)."""
 
 import json
 
@@ -7,9 +7,9 @@ from langchain_core.runnables import RunnableLambda
 
 from app.core.config import get_settings
 from app.llm import model as llm_model
-from app.llm.prompts import RolesD, SlotRoleD
+from app.llm.prompts import ReasonsD, SlotReasonD
 from app.services.team_play_service import spot_name
-from app.tactics.extract import extract_roles
+from app.tactics.extract import ROLE_REASON, extract_roles
 from app.tactics.play import Point
 from app.tactics.presets import PRESET_LIST, PRESETS
 from tests.test_ranking_assignment import _event_with_attendance, club  # noqa: F401
@@ -45,17 +45,37 @@ def pnr(**over):
 # ---------------------------------------------------------------------------
 
 
+def _roles(key: str) -> list[str]:
+    return [r for r, _ in extract_roles(PRESETS[key])]
+
+
 def test_extract_roles_reads_actions():
-    roles = [r for r, _ in extract_roles(PRESETS["high_pnr"])]
-    assert roles[0] == "ball_handler" and roles[4] == "screener_roll" and roles[1] == "shooter"  # 코너는 킥아웃 슈터
-    assert [r for r, _ in extract_roles(PRESETS["zone_131"])][3] == "cutter"
+    roles = _roles("high_pnr")
+    # 움직이지도 공을 받지도 않는 코너는 스페이서 — "킥아웃을 기다리는 슈터" 는 동작에 없는 의도라 매니저가 고친다
+    assert roles[0] == "ball_handler" and roles[4] == "screener_roll" and roles[1] == "spacer"
+    assert _roles("zone_131")[3] == "cutter"
     assert all(reason for _, reason in extract_roles(PRESETS["horns"]))
 
 
+def test_extract_roles_screeners():
+    assert _roles("post_split")[1] == "cutter"  # 공 없는 동료에게 스크린을 걸고 컷
+    assert _roles("box_inbound")[4] == "screener_roll"  # 스크린 뒤 골밑에 남는다
+    assert _roles("spain_pnr")[1] == "shooter"  # 코너에서 올라와 백스크린을 걸고 3점 밖으로
+    assert _roles("ucla")[4] == "screener_pop"  # 빅맨이 스크린 뒤 탑으로 빠진다
+
+
+def test_extract_roles_movement():
+    assert _roles("zone_screen_flare")[0] == "shooter"  # 공을 넘기고 옮겨 가 다시 받아 3점
+    assert _roles("overload")[2] == "shooter"  # 코너로 옮겨 간다
+    assert _roles("overload")[4] == "screener_pop"  # 페인트에서 쇼트 코너로 빠진다
+    assert _roles("high_low")[3] == "post"  # 하이포스트로 올라와 공을 받는다
+    assert _roles("box_inbound")[2] == "spacer"  # 인바운드는 골밑 근처 시작이 빅맨 자리가 아니다
+
+
 def test_extract_roles_agree_with_presets_mostly():
-    """사람이 붙인 프리셋 역할과 60% 이상 같다 — 나머지는 동작에 드러나지 않는 의도라 AI · 매니저가 채운다."""
+    """사람이 붙인 프리셋 역할과 80% 이상 같다 (docs/07 O11) — 나머지는 동작에 드러나지 않는 의도라 매니저가 고친다."""
     same = sum(a == b for p in PRESET_LIST for (a, _), b in zip(extract_roles(p), p.roles, strict=True))
-    assert same / (5 * len(PRESET_LIST)) >= 0.6
+    assert same / (5 * len(PRESET_LIST)) >= 0.8
 
 
 def test_spot_names():
@@ -149,7 +169,7 @@ def test_team_play_joins_recommendation_board_and_slots(client, club, monkeypatc
 
 
 # ---------------------------------------------------------------------------
-# T19 · T20 AI 역할 태깅 (체인 D)
+# T19 · T20 AI 역할 설명 (체인 D) — 역할은 규칙 · 매니저가 정하고 AI 는 이유만 쓴다 (docs/07 O11)
 # ---------------------------------------------------------------------------
 
 
@@ -163,38 +183,55 @@ def fake_d(monkeypatch):
             state["sent"].append(human)
             state["calls"] += 1
             data = json.loads(human)
-            slots = [SlotRoleD(slot=s["slot"], role="shooter" if s["slot"] in (2, 3) else s["role"], reason="코너에서 킥아웃을 기다려요") for s in data["rule_roles"]]
+            slots = [SlotReasonD(slot=s["slot"], reason=f"AI 설명 {s['slot']}") for s in data["slots"]]
             if state["drop"]:
                 slots = slots[:4]
-            return RolesD(slots=list(reversed(slots)))
+            return ReasonsD(slots=list(reversed(slots)))
         return RunnableLambda(respond)
 
     monkeypatch.setattr(llm_model, "structured", structured)
     return state
 
 
-def test_ai_roles_tags_and_caches(client, club, fake_d):
+def test_ai_explains_rule_roles_without_changing_them(client, club, fake_d):
     m, tid = club["manager"], club["team_id"]
+    rule = client.post(f"{API}/teams/{tid}/plays:check", json=pnr(), headers=m).json()
     r = client.post(f"{API}/teams/{tid}/plays:ai-roles", json=pnr(), headers=m)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["source"] == "AI" and body["fallback"] is False
-    assert body["roles"][1] == "shooter" and body["roles"][4] == "screener_roll"  # 자리 순서로 되돌린다
+    assert body["roles"] == rule["roles"]  # 역할은 규칙 그대로
+    assert body["reasons"] == [f"AI 설명 {i}" for i in range(1, 6)]  # 자리 순서로 되돌린다
     sent = json.loads(fake_d["sent"][0])
-    # 좌표가 아니라 자리 이름만, 선수 정보는 없다
+    # 좌표가 아니라 자리 이름만, 선수 정보는 없다. 자리마다 정해진 역할과 규칙이 읽은 근거를 보낸다
     assert sent["slots"][1]["start"] == "오른쪽 코너" and "0.95" not in fake_d["sent"][0]
+    assert [x["role"] for x in sent["slots"]] == rule["roles"] and sent["slots"][4]["hint"] == rule["reasons"][4]
     assert "5번 스크린 → 1번에게" in sent["steps"][0]["actions"][0]
     again = client.post(f"{API}/teams/{tid}/plays:ai-roles", json=pnr(), headers=m).json()
     assert again["cached"] is True and fake_d["calls"] == 1
 
 
-def test_ai_roles_missing_slot_falls_back_to_rule(client, club, fake_d):
+def test_ai_keeps_manager_roles(client, club, fake_d):
+    m, tid = club["manager"], club["team_id"]
+    rule = client.post(f"{API}/teams/{tid}/plays:check", json=pnr(), headers=m).json()["roles"]
+    mine = [*rule[:1], "shooter", *rule[2:]]  # 매니저가 2번(코너)을 슈터로 바꿨다
+    body = client.post(f"{API}/teams/{tid}/plays:ai-roles", json=pnr(roles=mine, role_source="MANAGER"), headers=m).json()
+    assert body["roles"] == mine
+    sent = json.loads(fake_d["sent"][0])
+    assert sent["slots"][1]["role"] == "shooter" and sent["slots"][1]["hint"] == ""  # 규칙과 다른 자리는 근거 없이 역할만
+
+
+def test_ai_missing_slot_falls_back_to_rule_reasons(client, club, fake_d):
     fake_d["drop"] = True
     m, tid = club["manager"], club["team_id"]
     body = client.post(f"{API}/teams/{tid}/plays:ai-roles", json=pnr(), headers=m).json()
     assert body["source"] == "RULE" and body["fallback"] is True and body["fail_reason"] == "unknown_alias"
     rule = client.post(f"{API}/teams/{tid}/plays:check", json=pnr(), headers=m).json()
     assert body["roles"] == rule["roles"] and body["reasons"] == rule["reasons"]
+    # 매니저가 바꾼 자리는 역할 설명 한 줄로
+    mine = [*rule["roles"][:1], "shooter", *rule["roles"][2:]]
+    body = client.post(f"{API}/teams/{tid}/plays:ai-roles", json=pnr(roles=mine), headers=m).json()
+    assert body["reasons"][1] == ROLE_REASON["shooter"] and body["reasons"][0] == rule["reasons"][0]
 
 
 def test_ai_roles_without_key_uses_rule(client, club, monkeypatch):

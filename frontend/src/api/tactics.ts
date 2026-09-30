@@ -23,7 +23,7 @@ export const teamPlaysApi = {
   remove: (teamId: number, id: number) => api<void>(`/teams/${teamId}/plays/${id}`, { method: 'DELETE' }),
   /** 저장하지 않고 재생 가능성 검사 + 규칙 역할 추출 */
   check: (teamId: number, body: TeamPlayIn) => api<PlayCheck>(`/teams/${teamId}/plays:check`, { method: 'POST', body }),
-  /** AI 역할 태깅 (LangChain 체인 D). AI 를 못 쓰면 규칙 결과 */
+  /** AI 역할 설명 (LangChain 체인 D) — 보낸 역할은 그대로, 자리마다 이유만. AI 를 못 쓰면 규칙이 읽은 이유 */
   aiRoles: (teamId: number, body: TeamPlayIn) => api<RoleSuggestion>(`/teams/${teamId}/plays:ai-roles`, { method: 'POST', body }),
 }
 

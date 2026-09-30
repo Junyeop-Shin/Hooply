@@ -694,7 +694,7 @@ export interface EventPlayView {
   squads: SquadBoard[]
 }
 
-// --- 팀이 직접 만든 전술 · 역할 태깅 · 댓글 (docs/07 FR-57 ~ FR-60) ---
+// --- 팀이 직접 만든 전술 · 역할 설명 · 댓글 (docs/07 FR-57 ~ FR-60) ---
 
 export type RoleSource = 'RULE' | 'AI' | 'MANAGER'
 

@@ -15,9 +15,10 @@
 자동 점검 (AI 결과만)
   가명(P숫자)이 남지 않았는가 · 그날 명단에 없는 이름이 없는가 · 팀원용에 등급·점수·순위가 없는가 ·
   전술 설명이 추천 순서를 지켰는가 · 필수 칸이 비지 않았는가
-체인 D (역할 태깅)
+체인 D (역할 설명 — 역할은 규칙 추출, AI 는 자리마다 이유만)
   프리셋 22개를 "동작만 그린 팀 전술" 처럼 보낸다 — 이름 · 한 줄 설명은 보내지 않고, 단계 설명은 "N단계" 로 바꾼다
-  (프리셋 설명에는 "슈터가 …" 같은 답이 들어 있다). 사람이 붙인 역할과 자리별로 맞춰 AI · 규칙 추출의 일치율을 비교한다
+  (프리셋 설명에는 "슈터가 …" 같은 답이 들어 있다). 규칙 추출이 사람이 붙인 역할과 얼마나 같은지, AI 가 역할을 그대로 두고
+  이유 다섯 개를 다 썼는지 본다
 """
 
 from __future__ import annotations
@@ -223,9 +224,11 @@ def _check_d(key, r, took, human, rule) -> Call:
     if call.ok:
         b = call.sample
         b.update(human=human, rule=rule, name=key)
+        if b["roles"] != rule:
+            call.problems.append("역할이 바뀜")
         if not call.fallback:
-            if len(b["roles"]) != 5 or any(not w.strip() for w in b["reasons"]):
-                call.problems.append("자리 · 이유가 빔")
+            if len(b["reasons"]) != 5 or any(not w.strip() for w in b["reasons"]):
+                call.problems.append("이유가 빔")
             if any(ALIAS_LEFT.search(w) for w in b["reasons"]):
                 call.problems.append("가명이 남음")
     return call
@@ -252,31 +255,19 @@ def _d_section(calls: list[Call]) -> list[str]:
     ds = [c for c in calls if c.chain == "D" and c.ok]
     if not ds:
         return []
-    ai = [c for c in ds if not c.fallback]
-    n_all, n_ai = 5 * len(ds), 5 * len(ai)
-    rule_all = sum(_agree(c.sample["rule"], c.sample["human"]) for c in ds)
-    rule_ai = sum(_agree(c.sample["rule"], c.sample["human"]) for c in ai)
-    ai_ok = sum(_agree(c.sample["roles"], c.sample["human"]) for c in ai)
-    fixed = broke = 0  # AI 가 규칙과 다르게 붙인 자리 중 사람과 맞게 고친 것 · 틀리게 바꾼 것
-    for c in ai:
-        for a, ru, h in zip(c.sample["roles"], c.sample["rule"], c.sample["human"], strict=True):
-            if a != ru:
-                fixed += a == h
-                broke += ru == h
-    out = ["## 체인 D — 역할 일치율 (사람이 붙인 프리셋 역할 기준)", "",
-           "| 비교 | 규칙 추출 | AI 태깅 |", "| --- | ---: | ---: |",
-           f"| AI 결과가 나온 전술 {len(ai)}개 ({n_ai}자리) | {_pct(rule_ai, n_ai)} | {_pct(ai_ok, n_ai)} |",
-           f"| 전체 {len(ds)}개 ({n_all}자리, 폴백은 규칙 그대로) | {_pct(rule_all, n_all)} | {_pct(ai_ok + rule_all - rule_ai, n_all)} |",
+    n = 5 * len(ds)
+    rule_ok = sum(_agree(c.sample["rule"], c.sample["human"]) for c in ds)
+    kept = sum(c.sample["roles"] == c.sample["rule"] for c in ds)
+    out = ["## 체인 D — 역할 설명 (역할은 규칙 추출, AI 는 이유만)", "",
+           f"- 규칙 추출이 사람이 붙인 프리셋 역할과 같은 자리: {_pct(rule_ok, n)}",
+           f"- 역할을 그대로 돌려준 호출: {kept}/{len(ds)} · AI 가 이유를 쓴 호출: {sum(not c.fallback for c in ds)}/{len(ds)}",
+           ("- 사람이 붙인 역할에는 \"킥아웃을 기다리는 코너\" · \"둘 중 누가 롤인지\" 처럼 동작에 드러나지 않는 의도가 섞여 있어 "
+            "100% 가 목표는 아니다. 매니저는 편집기에서 언제든 고칠 수 있다 (FR-58). 규칙은 이 22개를 보며 다듬었으므로 새 전술에서는 낮을 수 있다"),
            "",
-           f"- AI 가 규칙과 다르게 붙인 자리: 사람과 맞게 고친 것 {fixed} · 맞던 것을 틀리게 바꾼 것 {broke}",
-           ("- 사람이 붙인 역할에는 \"킥아웃을 기다리는 코너\" 처럼 동작에 드러나지 않는 의도가 섞여 있어 100% 가 목표는 아니다. "
-            "매니저는 편집기에서 언제든 고칠 수 있다 (FR-58)"),
-           "",
-           "| 전술 | 사람 | 규칙 | AI |", "| --- | --- | --- | --- |"]
+           "| 전술 | 사람 | 규칙 |", "| --- | --- | --- |"]
     for c in ds:
         h = c.sample["human"]
-        ai_cell = "(폴백)" if c.fallback else _roles_cell(c.sample["roles"], h)
-        out.append(f"| {c.event} | {' · '.join(ROLE_SHORT.get(r, r) for r in h)} | {_roles_cell(c.sample['rule'], h)} | {ai_cell} |")
+        out.append(f"| {c.event} | {' · '.join(ROLE_SHORT.get(r, r) for r in h)} | {_roles_cell(c.sample['rule'], h)} |")
     out += ["", "굵은 글씨 = 사람이 붙인 역할과 다른 자리", ""]
     return out
 
@@ -285,7 +276,7 @@ def _d_section(calls: list[Call]) -> list[str]:
 # 보고서
 # ---------------------------------------------------------------------------
 
-CHAIN_NAME = {"A": "A · 매니저용 배정 설명", "B": "B · 팀원용 AI 한마디", "C": "C · 전술 추천 설명", "D": "D · 역할 태깅"}
+CHAIN_NAME = {"A": "A · 매니저용 배정 설명", "B": "B · 팀원용 AI 한마디", "C": "C · 전술 추천 설명", "D": "D · 역할 설명"}
 
 
 def _sample_md(call: Call) -> list[str]:
@@ -337,7 +328,7 @@ def report(calls: list[Call], meta: dict[str, Any]) -> str:
     problems = [c for c in calls if c.problems]
     out += ["", "## 자동 점검", ""]
     out += [("- 가명이 남지 않았는가 · 그날 명단에 없는 사람을 말하지 않았는가 · 팀원용에 등급·점수·순위가 없는가 · "
-             "전술 설명이 추천 순서를 지켰는가 · 필수 칸이 비지 않았는가 · 역할 태깅의 자리와 이유가 다 찼는가 (AI 결과만 점검)"), ""]
+             "전술 설명이 추천 순서를 지켰는가 · 필수 칸이 비지 않았는가 · 역할 설명이 역할을 바꾸지 않고 이유를 다 썼는가"), ""]
     out += [f"- {c.event} {c.chain}: {', '.join(c.problems)}" for c in problems] or ["- 문제 없음"]
     out += ["", *_d_section(calls)]
     out += ["## 예시 (체인별 첫 AI 결과)", ""]
@@ -350,8 +341,8 @@ def report(calls: list[Call], meta: dict[str, Any]) -> str:
              "이 평가는 **문장이 규칙의 판단을 벗어나지 않는가**를 본다. 판단 자체의 정확도는 실제 배정이 쌓인 뒤 따로 본다 (명세 O4)."),
             "- 폴백은 오류가 아니다 — 가드레일이 걸러냈거나 공급자가 붐빌 때 기존 규칙 설명을 보여 준 것이다.",
             "- 무료 등급 Gemini 라 응답 시간과 과부하(503)는 시간대에 따라 달라진다.",
-            ("- 체인 D 는 A · B · C 와 달리 AI 가 판단(역할 고르기)까지 한다. 일치율이 규칙 추출과 비슷하면 AI 가 더하는 것이 없다는 뜻이다 — "
-             "그때는 규칙 역할을 그대로 쓰고 AI 는 이유 문장만 쓰는 쪽을 검토한다 (명세 O11)."), ""]
+            ("- 체인 D 도 이제 A · B · C 처럼 판단(역할)은 규칙이 하고 AI 는 문장만 쓴다. 처음에는 AI 가 역할까지 골랐지만 "
+             "사람이 붙인 역할과의 일치율이 규칙 추출과 같아(64% · 65%) 바꿨다 (명세 O11)."), ""]
     return "\n".join(out)
 
 

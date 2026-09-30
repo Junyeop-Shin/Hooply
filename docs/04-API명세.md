@@ -189,7 +189,7 @@
 | GET | `/teams/{team_id}/plays` | 팀이 직접 만든 전술 목록 (팀원) | 200 · 403 |
 | POST | `/teams/{team_id}/plays` | 팀 전술 만들기 — `roles` 를 비우면 규칙 추출, `opp_defense` · `screen_call` 가정한 상대 수비 (팀원) | 201 · 400 · 403 · 422 |
 | POST | `/teams/{team_id}/plays:check` | 재생 가능성 검사 + 역할 자동 추출, 저장 안 함 (팀원) | 200 · 400 · 403 |
-| POST | `/teams/{team_id}/plays:ai-roles` | AI 역할 태깅 — LangChain 체인 D, 실패하면 규칙 결과 (팀원) | 200 · 400 · 403 · 422 · 429 |
+| POST | `/teams/{team_id}/plays:ai-roles` | AI 역할 설명 — LangChain 체인 D. 역할은 보낸 그대로, 자리마다 이유만. 실패하면 규칙이 읽은 이유 (팀원) | 200 · 400 · 403 · 422 · 429 |
 | GET | `/teams/{team_id}/plays/{play_id}` | 팀 전술 보기 (팀원) | 200 · 403 · 404 |
 | PUT | `/teams/{team_id}/plays/{play_id}` | 팀 전술 고치기 — 역할이 바뀌면 저장한 자리 배치 삭제 (만든 사람 · 매니저) | 200 · 400 · 403 · 404 · 422 |
 | DELETE | `/teams/{team_id}/plays/{play_id}` | 팀 전술 지우기 — 자리 배치 · 댓글 · 별표 함께 (만든 사람 · 매니저) | 204 · 403 · 404 |

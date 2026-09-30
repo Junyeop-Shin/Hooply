@@ -80,7 +80,7 @@ export function TacticsTab({ teamId }: { teamId: number }) {
         {own.isLoading ? <Spinner /> : own.data?.items.length ? (
           rest(own.data.items.map((v) => v.play)).length ? <PresetList items={rest(own.data.items.map((v) => v.play))} {...row} /> : <p className="px-1 text-sm text-muted">모두 별표 전술에 있어요.</p>
         ) : (
-          <p className="px-1 text-sm text-muted">코트 위에 다섯 명의 움직임을 그려 우리 팀만의 전술을 만들 수 있어요. 역할은 AI가 붙여 줘요.</p>
+          <p className="px-1 text-sm text-muted">코트 위에 다섯 명의 움직임을 그려 우리 팀만의 전술을 만들 수 있어요. 역할은 움직임에서 자동으로 붙고, AI가 자리마다 할 일을 풀어 줘요.</p>
         )}
       </section>
 

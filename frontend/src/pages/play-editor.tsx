@@ -6,7 +6,8 @@
  * 2. 단계 — 단계를 고른 뒤 "누가(동그라미) → 무엇을(칩) → 누구에게(동그라미) / 어디로(코트)" 순서로 누르면 동작이 들어간다.
  *    한 단계 안의 동작은 동시에 재생된다. 같은 사람이 한 단계에 두 동작을 하면 새 것으로 바뀐다
  * 3. 그리는 동안 서버가 재생 가능성을 검사하고(어느 단계가 왜 안 되는지) 동작에서 역할을 뽑는다(규칙)
- * 4. "AI로 역할 붙이기"(체인 D) — 전술의 의도까지 읽어 역할을 고친다. 매니저가 자리마다 직접 바꿀 수도 있다
+ * 4. 역할은 동작에서 규칙으로 뽑고(3), 매니저가 자리마다 바꿀 수 있다. "AI로 이유 설명 받기"(체인 D)는 역할을 바꾸지 않고
+ *    자리마다 무엇을 하는지 문장으로 풀어 준다 — AI 가 역할을 고르게 했더니 규칙보다 나아지지 않았다 (docs/07 O11)
  * 5. 이 전술이 가정한 상대 수비(맨투맨 · 지역 2-3)와 스크린 대응(스위치 · 스테이) — 전술판의 수비가 이대로 움직인다.
  *    기본 전술은 이 값이 고정이고, 여기서만 고른다 (v1.7)
  * 6. 미리 보기(상대 수비 포함) · 막히면 · 저장
@@ -79,8 +80,9 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
   const [pending, setPending] = useState<Pending | null>(null)
   const [roles, setRoles] = useState<TacticRole[] | null>(initial?.roles ?? null) // null = 규칙 추출을 따라간다
   const [roleSource, setRoleSource] = useState<RoleSource>(initialSource)
-  const [reasons, setReasons] = useState<string[] | null>(null)
-  const [rolesFor, setRolesFor] = useState<string | null>(null) // 역할을 붙일 때의 동작 (바뀌면 다시 붙이라고 알린다)
+  // AI 설명 — 설명을 받을 때의 움직임 · 역할(key)이 그대로일 때만 보인다
+  const [aiReasons, setAiReasons] = useState<{ key: string; reasons: string[]; fallback: boolean } | null>(null)
+  const [rolesFor, setRolesFor] = useState<string | null>(null) // 역할을 직접 고칠 때의 동작 (바뀌면 다시 확인하라고 알린다)
 
   // 서버에 보낼 값 — 빈 단계는 빼고, 비어 있는 설명은 자동 문장으로
   const cleanSteps = useMemo(
@@ -100,7 +102,9 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
     placeholderData: (prev) => prev, retry: false,
   })
   const shownRoles: TacticRole[] = roles ?? check.data?.roles ?? (['spacer', 'spacer', 'spacer', 'spacer', 'spacer'] as TacticRole[])
-  const shownReasons = reasons ?? (roles ? null : check.data?.reasons) ?? null
+  const reasonKey = `${shape}|${shownRoles.join()}`
+  const explained = aiReasons?.key === reasonKey ? aiReasons : null
+  const shownReasons = explained?.reasons ?? (roles ? null : check.data?.reasons) ?? null
   const playable = body.steps.length > 0 && !!check.data?.playable && settled === shape
 
   // 편집 중 상태: 고른 단계를 시작할 때의 위치와 공
@@ -120,8 +124,8 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
   const holder = before.holder
 
   const ai = useMutation({
-    mutationFn: () => teamPlaysApi.aiRoles(teamId, { ...body, roles: null }),
-    onSuccess: (r) => { setRoles(r.roles); setReasons(r.reasons); setRoleSource(r.source === 'AI' ? 'AI' : 'RULE'); setRolesFor(shape) },
+    mutationFn: (_key: string) => teamPlaysApi.aiRoles(teamId, { ...body, roles: shownRoles }),
+    onSuccess: (r, key) => setAiReasons({ key, reasons: r.reasons, fallback: r.fallback }),
   })
   const save = useMutation({
     mutationFn: () => (playId ? teamPlaysApi.update(teamId, playId, body) : teamPlaysApi.create(teamId, body)),
@@ -317,16 +321,17 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
 
         <section className="space-y-2">
           <SectionTitle action={
-            <button type="button" onClick={() => ai.mutate()} disabled={!playable || ai.isPending} className="text-sm font-semibold text-brand-ink disabled:opacity-40">
-              {ai.isPending ? 'AI가 읽는 중…' : 'AI로 역할 붙이기'}
+            <button type="button" onClick={() => ai.mutate(reasonKey)} disabled={!playable || ai.isPending || !!explained} className="text-sm font-semibold text-brand-ink disabled:opacity-40">
+              {ai.isPending ? 'AI가 읽는 중…' : 'AI로 이유 설명 받기'}
             </button>
           }>
             자리별 역할
           </SectionTitle>
           <p className="px-1 text-xs text-muted">
             {roles === null ? '움직임에서 자동으로 뽑은 역할이에요. 추천할 때 이 역할에 맞는 사람을 앉혀요.'
-              : roleSource === 'AI' ? 'AI가 전술의 의도까지 읽고 붙인 역할이에요.' : roleSource === 'MANAGER' ? '직접 정한 역할이에요.' : 'AI를 쓸 수 없어 움직임으로 붙인 역할이에요.'}
-            {roles && rolesFor && rolesFor !== shape && ' 움직임을 바꿨다면 다시 붙여 보세요.'}
+              : roleSource === 'MANAGER' ? '직접 정한 역할이에요.' : roleSource === 'AI' ? 'AI가 붙인 역할이에요.' : '움직임에서 뽑아 저장한 역할이에요.'}
+            {roles && rolesFor && rolesFor !== shape && ' 움직임을 바꿨다면 역할도 다시 확인해 보세요.'}
+            {explained && (explained.fallback ? ' AI를 쓸 수 없어 움직임에서 읽은 이유를 보여 줘요.' : ' 아래 설명은 AI가 전술을 읽고 쓴 거예요.')}
           </p>
           {ai.isError && <Alert>{ai.error instanceof ApiError ? ai.error.message : '역할을 붙이지 못했어요.'}</Alert>}
           <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
@@ -337,7 +342,7 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
                   <label className="sr-only" htmlFor={`role-${i}`}>{i + 1}번 역할</label>
                   <select
                     id={`role-${i}`} value={r}
-                    onChange={(e) => { const next = [...shownRoles]; next[i] = e.target.value as TacticRole; setRoles(next); setRoleSource('MANAGER'); setReasons(null); setRolesFor(shape) }}
+                    onChange={(e) => { const next = [...shownRoles]; next[i] = e.target.value as TacticRole; setRoles(next); setRoleSource('MANAGER'); setRolesFor(shape) }}
                     className="min-h-10 w-full rounded-xl border border-line bg-surface px-2 text-sm text-ink"
                   >
                     {ROLES.map((x) => <option key={x} value={x}>{ROLE_LABEL[x]}</option>)}

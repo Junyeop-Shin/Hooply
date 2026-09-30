@@ -4,23 +4,40 @@
 이 결과를 힌트로 받아 다듬고, AI 를 쓸 수 없으면 이 결과가 그대로 쓰인다. 매니저는 편집기에서 언제든 바꿀 수 있다.
 
 규칙 (위에서부터 먼저 맞는 것)
-  1. 스크린을 건다   → 공 가진 동료에게 걸고 골밑으로 가면(또는 컷) 롤, 3점 밖으로 빠지거나 공 없는 동료에게 걸고 남으면 팝
-  2. 3점 슛으로 끝낸다 (처음 공을 가진 사람이 아니면) → 슈터
-  3. 컷을 한다       → 커터
-  4. 드리블 · 핸드오프를 한다, 또는 공을 들고 시작해 패스로 푼다 → 볼 핸들러
-  5. 골밑에서, 또는 안쪽(엘보·하이포스트)에서 시작해 미드레인지에서 공을 받는다 → 포스트
-  6. 안쪽에서 시작해 3점 밖으로 빠진다 → 팝
-  7. 3점 밖에서 공을 받거나 코너에서 기다린다 → 슈터
-  8. 엘보·하이포스트나 골밑에 선다 → 포스트, 그 밖 → 스페이서 (외곽에서 자리만 지킨다)
+  1. 스크린을 건다
+     - 공 없는 동료에게 걸고 컷해 들어가면 커터 (스크린 후 컷)
+     - 공 가진 동료에게 걸고 컷하거나, 스크린 뒤 골밑에 남으면 롤
+     - 3점 밖에서 온 사람이 걸고 다시 3점 밖으로 빠지면 슈터, 빅맨이 밖에 남거나 빠지면 팝
+  2. 공을 받아 3점 슛을 쏜다 → 슈터 (안쪽에서 시작해 컷 없이 빠져나와 쏘면 팝)
+  3. 코너로 옮겨 간다 → 슈터 (킥아웃을 받을 자리로 간다)
+  4. 컷을 한다 → 커터 (안쪽에서 하이포스트로 올라와 공을 받으면 포스트)
+  5. 드리블 · 핸드오프를 한다, 또는 공을 들고 시작해 패스로 푼다 → 볼 핸들러
+  6. 빅맨이 페인트에서 옆 미드레인지(쇼트 코너)로 빠진다 → 팝
+  7. 골밑에서, 또는 안쪽(엘보·하이포스트)에서 시작해 미드레인지에서 공을 받는다 → 포스트
+  8. 안쪽에서 시작해 3점 밖으로 빠진다 → 팝
+  9. 3점 밖에서 공을 받는다 → 슈터
+ 10. 엘보·하이포스트나 골밑에 선다 → 포스트, 그 밖 → 스페이서 (공도 안 받고 움직이지도 않는 외곽 자리)
+"안쪽에서 시작" 은 빅맨 자리라는 뜻이라 인바운드에는 쓰지 않는다 — 인바운드는 모두 골밑 근처에 모여 시작한다.
 볼 핸들러가 한 명도 없으면 스크리너·커터가 아닌 사람 중 패스를 가장 많이 한 사람(같으면 처음 공을 가진 사람)으로 한다.
-프리셋 22개의 사람이 붙인 역할과 약 3분의 2가 같다 — 나머지는 "킥아웃을 기다리는 코너" 처럼 동작에 드러나지 않는 의도라서,
-AI 태깅과 매니저 수정으로 채운다.
+프리셋 22개의 사람이 붙인 역할과 약 5분의 4가 같다 (docs/07 O11). 나머지는 "킥아웃을 기다리는 코너" · "둘 중 누가 롤인지"
+처럼 동작에 드러나지 않는 의도라서 매니저가 편집기에서 고친다. 규칙은 이 22개를 보며 다듬었으므로 새 전술에서는 이보다 낮을 수 있다.
 """
 
 from app.tactics.court import zone_of
 from app.tactics.play import Play, Point, Role
 
 ZONE_KO = {"three": "3점 밖", "mid": "미드레인지", "paint": "골밑"}
+
+# 역할만 정해져 있고 동작에서 뽑은 이유가 없을 때(매니저가 역할을 바꾼 자리) 쓰는 한 줄
+ROLE_REASON: dict[Role, str] = {
+    "ball_handler": "공을 몰고 드리블·패스로 공격을 풀어요",
+    "screener_roll": "스크린을 건 뒤 골밑으로 들어가요",
+    "screener_pop": "스크린을 건 뒤 밖으로 빠져 슛을 노려요",
+    "shooter": "3점 밖에서 공을 받아 슛을 노려요",
+    "cutter": "공 없이 빈 곳으로 컷해 들어가요",
+    "post": "골밑·하이포스트에서 공을 받아요",
+    "spacer": "외곽에서 자리를 지켜 공간을 넓혀요",
+}
 
 
 def positions(play: Play) -> list[list[Point]]:
@@ -73,31 +90,50 @@ def extract_roles(play: Play) -> list[tuple[Role, str]]:
     for s in range(1, 6):
         st, end = play.start[s - 1], pos[-1][s - 1]
         start_zone, end_zone = _zone(st), _zone(end)
-        inside_start = start_zone != "three" and st.y < 0.45  # 골밑 · 엘보 · 하이포스트에서 시작 (빅맨 자리)
+        # 골밑 · 엘보 · 하이포스트에서 시작 = 빅맨 자리. 인바운드는 모두 골밑 근처에서 시작하므로 보지 않는다
+        inside_start = play.situation != "inbound" and start_zone != "three" and st.y < 0.45
+        moved = end != st
+        center = abs(end.x - 0.5) <= 0.2  # 하이포스트 · 엘보 사이
         if screens[s]:
             k = screens[s][0]
             on_ball = any(a.slot == s and a.type == "screen" and a.target == hold_at[k] for a in play.steps[k].actions)
             later = [a for st_ in play.steps[k + 1:] for a in st_.actions if a.slot == s and a.to is not None]
             dest = _zone(later[0].to) if later else end_zone  # type: ignore[arg-type]
-            dives = bool(later) and later[0].type == "cut" or dest == "paint" and on_ball
-            if dest == "three" or (not dives and not on_ball):
+            cut_after = bool(later) and later[0].type == "cut"
+            if cut_after and not on_ball:
+                out.append(("cutter", "공 없는 동료에게 스크린을 걸어 준 뒤 빈 곳으로 컷해요"))
+            elif cut_after or dest == "paint":
+                out.append(("screener_roll", "스크린을 건 뒤 골밑으로 들어가요"))
+            elif start_zone == "three" and dest == "three":
+                out.append(("shooter", "스크린을 걸어 준 뒤 3점 밖으로 빠져 슛을 노려요"))
+            elif dest == "three" or not on_ball:
                 out.append(("screener_pop", "스크린을 건 뒤 밖에 남거나 3점 밖으로 빠져 공을 받아요"))
             else:
-                out.append(("screener_roll", "공을 가진 동료에게 스크린을 건 뒤 골밑으로 들어가요"))
-        elif shot.get(s) == "three" and s != play.ball:
-            out.append(("shooter", "움직여서 3점 밖에서 공을 받아 슛해요"))
+                out.append(("screener_roll", "공을 가진 동료에게 스크린을 건 뒤 골밑 쪽으로 가요"))
+        elif shot.get(s) == "three" and received[s]:
+            if inside_start and s not in cut:
+                out.append(("screener_pop", "안쪽에서 3점 밖으로 빠져 공을 받아 슛해요"))
+            else:
+                out.append(("shooter", "움직여서 3점 밖에서 공을 받아 슛해요"))
+        elif moved and end.y < 0.2 and not 0.12 < end.x < 0.88:
+            out.append(("shooter", "코너로 옮겨 가 킥아웃을 기다려요"))
         elif s in cut:
-            out.append(("cutter", "공 없이 빈 곳으로 컷해 들어가요"))
+            if inside_start and end_zone == "mid" and center and received[s]:
+                out.append(("post", "하이포스트로 올라와 공을 받아 내줘요"))
+            else:
+                out.append(("cutter", "공 없이 빈 곳으로 컷해 들어가요"))
         elif s in handled or (s == play.ball and s in passed):
             out.append(("ball_handler", "공을 몰고 드리블·패스로 공격을 풀어요"))
         elif shot.get(s) == "three":
             out.append(("shooter", "3점 밖에서 슛으로 마무리해요"))
+        elif inside_start and moved and end_zone == "mid" and not center:
+            out.append(("screener_pop", "골밑에서 옆으로 빠져 중거리 슛을 노려요"))
         elif "paint" in received[s] or ("mid" in received[s] and inside_start):
             out.append(("post", "안쪽에서 공을 받아 마무리하거나 내줘요"))
         elif inside_start and end_zone == "three":
             out.append(("screener_pop", "안쪽에서 3점 밖으로 빠져 공간을 만들어요 (팝)"))
-        elif "three" in received[s] or (end_zone == "three" and end.y < 0.2):
-            out.append(("shooter", "3점 밖(코너)에서 킥아웃을 기다려요"))
+        elif "three" in received[s]:
+            out.append(("shooter", "3점 밖에서 공을 받아 슛을 노려요"))
         elif inside_start and start_zone == "mid":
             out.append(("post", "하이포스트·엘보에서 공을 받을 자리를 잡아요"))
         elif start_zone == "paint" and end_zone == "paint":
@@ -105,8 +141,9 @@ def extract_roles(play: Play) -> list[tuple[Role, str]]:
         else:
             out.append(("spacer", f"{ZONE_KO[end_zone]}에서 자리를 지켜 공간을 넓혀요"))
     if not any(r == "ball_handler" for r, _ in out):
-        # 볼 핸들러가 없으면 스크리너·커터가 아닌 사람 중 패스를 가장 많이 한 사람 (같으면 처음 공을 가진 사람)
-        free = [s for s in range(1, 6) if out[s - 1][0] not in ("screener_roll", "screener_pop", "cutter")]
+        # 볼 핸들러가 없으면 외곽에서 공을 돌린 사람 중 패스를 가장 많이 한 사람 (같으면 처음 공을 가진 사람).
+        # 스크리너 · 커터 · 포스트와 슛으로 마무리한 사람은 이미 할 일이 분명하므로 뺀다
+        free = [s for s in range(1, 6) if out[s - 1][0] in ("shooter", "spacer") and s not in shot]
         pick = max(free, key=lambda s: (passed.get(s, 0), s == play.ball), default=None)
         if pick is not None and (passed.get(pick, 0) or pick == play.ball):
             out[pick - 1] = ("ball_handler", "공을 돌리며 공격을 시작해요")

@@ -2,14 +2,15 @@
 
 편집기 흐름
   1. 매니저가 시작 위치 · 공 · 단계를 그린다 → `check()` 가 재생 가능성 검사와 규칙 역할 추출을 돌려준다 (저장하지 않음)
-  2. "AI로 역할 붙이기" → `ai_roles()` (체인 D). 선수 정보 없이 전술 모양만 보낸다. 실패하면 규칙 결과
+  2. "AI로 이유 설명 받기" → `ai_roles()` (체인 D). 역할은 그대로 두고 자리마다 왜 그 역할인지 AI 가 풀어 쓴다.
+     선수 정보 없이 전술 모양만 보낸다. 실패하면 규칙이 뽑은 이유 (docs/07 O11)
   3. 매니저가 역할을 고칠 수 있다 → 저장(`create` · `update`). 역할을 비워 보내면 규칙 결과로 채운다
 
 저장한 전술은 프리셋과 똑같이 추천 후보가 되고(그 팀 일정만), 전술판 · 자리 배치 · AI 전술 설명이 그대로 동작한다.
 play_key 는 "team:<id>".
 
 권한 (v1.7)
-  목록 · 보기 · 만들기 · 검사 · AI 역할 태깅 · 댓글 읽기/쓰기   그 팀 활성 팀원 (팀원이 아닌 ADMIN 은 댓글을 쓸 수 없다)
+  목록 · 보기 · 만들기 · 검사 · AI 역할 설명 · 댓글 읽기/쓰기   그 팀 활성 팀원 (팀원이 아닌 ADMIN 은 댓글을 쓸 수 없다)
   팀 전술 고치기 · 지우기          만든 사람 · 매니저 · ADMIN
   댓글 지우기                      쓴 사람 · 매니저 · ADMIN
   별표 달기 · 떼기 (FR-61)         매니저 · ADMIN
@@ -24,7 +25,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors, ratelimit
 from app.llm import llm_guard
-from app.llm.prompts import PROMPT_VERSION_D, SYSTEM_D, RolesD
+from app.llm.prompts import PROMPT_VERSION_D, SYSTEM_D, ReasonsD
 from app.models import EventPlayAssignment, Player, TacticComment, TacticStar, TeamPlay, User
 from app.models.enums import TeamRole
 from app.schemas.tactic import (
@@ -39,8 +40,8 @@ from app.schemas.tactic import (
 )
 from app.services.tactic_service import find_play, team_play_to_play, team_plays
 from app.tactics.court import zone_of
-from app.tactics.extract import extract_roles, positions
-from app.tactics.play import ACTION_LABEL, Play, Point, playability_errors
+from app.tactics.extract import ROLE_REASON, extract_roles, positions
+from app.tactics.play import ACTION_LABEL, Play, Point, Role, playability_errors
 from app.tactics.presets import TEAM_KEY_PREFIX, play_key
 
 DEFAULT_SUMMARY = "우리 팀이 만든 전술"
@@ -199,7 +200,7 @@ def spot_name(p: Point) -> str:
     return f"{side}미드레인지"
 
 
-def _describe(play: Play) -> dict[str, Any]:
+def _describe(play: Play, roles: list[Role], hints: list[str]) -> dict[str, Any]:
     pos = positions(play)
     steps = []
     for k, st in enumerate(play.steps):
@@ -215,17 +216,19 @@ def _describe(play: Play) -> dict[str, Any]:
             else:
                 acts.append(f"{a.slot}번 {label} → {spot_name(a.to)}")  # type: ignore[arg-type]
         steps.append({"step": k + 1, "caption": st.caption, "actions": acts})
-    rule = extract_roles(play)
     return {
         "situation": "인바운드" if play.situation == "inbound" else "하프코트",
-        "slots": [{"slot": i + 1, "start": spot_name(p), "ball": i + 1 == play.ball} for i, p in enumerate(play.start)],
+        "slots": [
+            {"slot": i + 1, "start": spot_name(p), "ball": i + 1 == play.ball, "role": roles[i], "hint": hints[i]}
+            for i, p in enumerate(play.start)
+        ],
         "steps": steps,
-        "rule_roles": [{"slot": i + 1, "role": r, "why": w} for i, (r, w) in enumerate(rule)],
     }
 
 
 def ai_roles(db: Session, body: TeamPlayIn, user: User) -> RoleSuggestion:
-    """직접 그린 전술의 자리마다 역할을 AI 가 붙인다. 재생할 수 없는 전술이면 422 (먼저 고치게)."""
+    """자리마다 왜 그 역할인지 AI 가 한 문장씩 쓴다. 역할은 보낸 값(매니저가 고친 역할) 또는 규칙 추출 그대로다.
+    재생할 수 없는 전술이면 422 (먼저 고치게). AI 를 못 쓰면 규칙이 뽑은 이유, 매니저가 바꾼 자리는 역할 설명 한 줄."""
     if not body.steps:
         raise errors.ValidationError("단계를 하나 이상 추가해 주세요.")
     play = _to_play(body)
@@ -233,15 +236,17 @@ def ai_roles(db: Session, body: TeamPlayIn, user: User) -> RoleSuggestion:
     if found:
         raise errors.PlayNotPlayable(details=[errors.ErrorDetail(field="steps", reason=m) for m in found])
     rule = extract_roles(play)
-    payload = _describe(play)
-    fallback = {"slots": [{"slot": i + 1, "role": r, "reason": w} for i, (r, w) in enumerate(rule)]}
+    roles: list[Role] = list(body.roles) if body.roles else [r for r, _ in rule]
+    hints = [w if r == rr else "" for r, (rr, w) in zip(roles, rule, strict=True)]  # 규칙과 같은 자리만 동작 근거가 있다
+    payload = _describe(play, roles, hints)
+    fallback = {"slots": [{"slot": i + 1, "reason": h or ROLE_REASON[r]} for i, (r, h) in enumerate(zip(roles, hints, strict=True))]}
 
     def ordered(o: dict[str, Any]) -> dict[str, Any]:
         got = {it["slot"]: it for it in o.get("slots", [])}
         return {"slots": [got[i] for i in range(1, 6)]}
 
     call = llm_guard.ChainCall(
-        chain="D", schema=RolesD,
+        chain="D", schema=ReasonsD,
         messages=[("system", SYSTEM_D), ("human", json.dumps(payload, ensure_ascii=False))],
         payload=payload, aliases=llm_guard.Aliases(), fallback=fallback,
         key_parts={"v": PROMPT_VERSION_D, "input": payload},
@@ -250,9 +255,8 @@ def ai_roles(db: Session, body: TeamPlayIn, user: User) -> RoleSuggestion:
         max_chars=60, post=ordered,
     )
     out = llm_guard.run(db, call, user_id=user.id)
-    slots = out.output["slots"]
     return RoleSuggestion(
-        roles=[s["role"] for s in slots], reasons=[s["reason"] for s in slots],
+        roles=roles, reasons=[s["reason"] for s in out.output["slots"]],
         source="RULE" if out.fallback else "AI", fallback=out.fallback, cached=out.cached, fail_reason=out.fail_reason,
     )
 
