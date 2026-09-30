@@ -11,7 +11,7 @@ import { peerApi } from '../api/peer'
 import { SHARE_DONE, shareText } from '../lib/kakao'
 import { POSITIONS, localISODate, type AttendanceView, type EventGuestInput, type GuestPreset, type PlayerCard, type Position } from '../api/types'
 import { fmtEvent } from '../lib/format'
-import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, Spinner } from '../components/ui'
+import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, Sheet, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 import { EventTactics } from '../components/tactics'
 import { AdoptedSection } from '../components/adopted'
@@ -47,6 +47,9 @@ export function EventCreatePage() {
   const qc = useQueryClient()
   const [f, setF] = useState(EMPTY_EVENT)
   const [prefilled, setPrefilled] = useState(false)
+  // 시작 시각을 바꾸면 종료도 같은 간격만큼 따라온다. 기본 2시간이고, 종료를 직접 고치거나 지난 일정을 채우면
+  // 그 길이를 기억해 이후 시작 변경에도 유지한다 (3시간짜리 모임이 2시간으로 줄어들지 않게)
+  const [durationMin, setDurationMin] = useState(DEFAULT_DURATION_MIN)
   useEffect(() => {
     if (!existing.data || prefilled) return
     const e = existing.data
@@ -56,12 +59,11 @@ export function EventCreatePage() {
       title: e.title ?? '', event_date: e.event_date, start_time: e.start_time?.slice(0, 5) ?? '', end_time: e.end_time?.slice(0, 5) ?? '',
       venue: e.venue ?? '', rsvp_date: dl ? localISODate(dl) : '', rsvp_time: dl ? `${pad(dl.getHours())}:${pad(dl.getMinutes())}` : '', memo: e.memo ?? '',
     })
+    const s = toMinutes(e.start_time?.slice(0, 5) ?? ''), en = toMinutes(e.end_time?.slice(0, 5) ?? '')
+    if (s !== null && en !== null && en > s) setDurationMin(en - s)  // 고치는 일정의 길이를 기억한다
     setPrefilled(true)
   }, [existing.data, prefilled])
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((prev) => ({ ...prev, [k]: e.target.value }))
-  // 시작 시각을 바꾸면 종료도 같은 간격만큼 따라온다. 기본 2시간이고, 종료를 직접 고치거나 지난 일정을 채우면
-  // 그 길이를 기억해 이후 시작 변경에도 유지한다 (3시간짜리 모임이 2시간으로 줄어들지 않게)
-  const [durationMin, setDurationMin] = useState(DEFAULT_DURATION_MIN)
   const setStart = (e: { target: { value: string } }) => {
     const v = e.target.value
     setF((prev) => ({ ...prev, start_time: v, end_time: v ? addMinutes(v, durationMin) : prev.end_time }))
@@ -269,7 +271,7 @@ export function EventDetailPage() {
 
         {isManager && s && !past && !e.adopted_candidate_id && (
           <Button variant="secondary" full disabled={s.attend < 10} onClick={() => nav(`/events/${id}/assign`)}>
-            {e.adopted_candidate_id ? '재배정하기' : s.attend < 10 ? `팀 배정 (참석 10명 이상 필요 · 현재 ${s.attend}명)` : '팀 배정하러 가기'}
+            {s.attend < 10 ? `팀 배정 (참석 10명 이상 필요 · 현재 ${s.attend}명)` : '팀 배정하러 가기'}
           </Button>
         )}
 
@@ -463,13 +465,7 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
   const busy = create.isPending || update.isPending
 
   return (
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/40" onClick={onClose}>
-      <div className="safe-bottom max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5" onClick={(ev) => ev.stopPropagation()}>
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
-        <div className="flex items-start justify-between">
-          <h3 className="text-lg font-bold text-ink">{editing ? '게스트 수정' : '게스트 초대'}</h3>
-          <button type="button" onClick={onClose} aria-label="닫기" className="-mr-1 -mt-1 flex size-9 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
-        </div>
+    <Sheet label={editing ? '게스트 수정' : '게스트 초대'} title={editing ? '게스트 수정' : '게스트 초대'} onClose={onClose}>
         <p className="mb-4 text-xs text-muted">이름만 있으면 돼요. 실력을 알면 등급까지 넣어 주세요.</p>
         {!editing && !similar && presets.data && presets.data.items.length > 0 && (
           <div className="mb-4">
@@ -532,8 +528,7 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
             </Button>
           </div>
         )}
-      </div>
-    </div>
+    </Sheet>
   )
 }
 

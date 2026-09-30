@@ -11,10 +11,9 @@ test('쿼터 기록: 명단에 없던 사람을 반대 팀에 넣을 수 있다'
   await page.getByRole('button', { name: /경기 기록 \d+쿼터/ }).click()
   await expect(page.getByRole('heading', { name: '경기 기록' })).toBeVisible()
 
-  // 쿼터 길이는 1~10분만 받는다
+  // 쿼터 길이는 1~10분 중에서 고른다
   const dur = page.getByLabel('1쿼터 길이(분)')
-  await expect(dur).toHaveAttribute('min', '1')
-  await expect(dur).toHaveAttribute('max', '10')
+  await expect(dur.locator('option')).toHaveText(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'])
 
   const whiteOwn = page.locator('[data-roster="white-own"]').first()
   const before = await whiteOwn.locator('input[type=checkbox]').count()

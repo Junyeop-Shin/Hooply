@@ -67,8 +67,11 @@ def _validate_matchup(db: Session, event: Event, home: int, away: int, names: di
 # ---------------------------------------------------------------------------
 
 
-def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn]) -> dict[int, Player]:
-    """사이드별 정확히 5명, 중복 없음, 전원 이 팀의 참가자. 위반은 400 / 422."""
+def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn], kept: frozenset[int] = frozenset()) -> None:
+    """사이드별 정확히 5명, 중복 없음, 새로 넣은 사람은 이 팀의 활동 중인 참가자. 위반은 400 / 422.
+
+    `kept` = 이 쿼터에 이미 기록돼 있던 사람. 그 뒤 팀을 떠났거나 회원에게 이어 준 게스트여도 기록은 그대로 두어야
+    하므로 다시 검사하지 않는다 — 검사하면 지난 경기의 점수 하나만 고쳐도 저장이 막힌다."""
     for side in (Side.BLACK, Side.WHITE):
         n = sum(1 for lineup in lineups if lineup.side == side)
         if n != 5:
@@ -76,8 +79,11 @@ def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn]) -> dic
     ids = [lineup.player_id for lineup in lineups]
     if len(set(ids)) != len(ids):
         raise errors.ValidationError("같은 사람이 두 번 들어 있어요.")
-    players = {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(ids), Player.team_id == event.team_id, Player.status == PlayerStatus.ACTIVE)).all()}
-    missing = [pid for pid in ids if pid not in players]
+    new_ids = [pid for pid in ids if pid not in kept]
+    if not new_ids:
+        return
+    players = {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(new_ids), Player.team_id == event.team_id, Player.status == PlayerStatus.ACTIVE)).all()}
+    missing = [pid for pid in new_ids if pid not in players]
     if missing:
         raise errors.PlayerNotInTeam(details=[ErrorDetail(field="lineups", reason=f"이 팀에 없는 사람이 {len(missing)}명 있어요.")])
     # 회원 계정에 병합된 게스트 행은 쓸 수 없다 — 같은 사람이 두 번 세어진다. 회원 행(id)을 대신 넣어야 한다
@@ -87,7 +93,6 @@ def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn]) -> dic
             "기록을 이미 팀원에게 이어 준 게스트예요. 팀원 이름으로 넣어 주세요.",
             details=[ErrorDetail(field="lineups", reason=f"이어 준 게스트 {len(merged)}명이 들어 있어요.")],
         )
-    return players
 
 
 def _apply(
@@ -97,8 +102,9 @@ def _apply(
     _validate_matchup(db, event, home, away, names)
     q.black_score, q.white_score, q.duration_min = black_score, white_score, duration_min
     q.home_squad_no, q.away_squad_no = home, away
-    if lineups is not None:
-        _validate_lineups(db, event, lineups)
+    if lineups is not None and {(x.player_id, x.side, x.position) for x in lineups} != {(x.player_id, x.side, x.position) for x in q.lineups}:
+        # 라인업이 그대로면 검사 · 다시 넣기를 건너뛰고 마진만 다시 계산한다 (지난 쿼터 점수만 고치는 흔한 경우)
+        _validate_lineups(db, event, lineups, kept=frozenset(x.player_id for x in q.lineups))
         for old in list(q.lineups):
             db.delete(old)
         db.flush()

@@ -127,7 +127,8 @@ class PlayCheck(BaseModel):
 
 
 class RoleSuggestion(BaseModel):
-    """AI 역할 태깅 (체인 D). AI 를 쓸 수 없으면 규칙 추출 결과(`fallback=true`)."""
+    """AI 역할 설명 (체인 D). `roles` 는 보낸 역할(없으면 규칙 추출) 그대로, `reasons` 는 자리마다 이유.
+    AI 를 쓸 수 없으면 규칙이 읽은 이유(`fallback=true`)."""
 
     roles: list[Role]
     reasons: list[str]

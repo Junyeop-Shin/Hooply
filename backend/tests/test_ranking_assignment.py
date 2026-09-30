@@ -240,6 +240,22 @@ def test_constraints_always_honored(client, club):
     assert checked >= 4
 
 
+# 검증: 배정안을 고칠 때는 지금의 참석 응답이 아니라 그 배정안에 든 사람들로 다시 채점한다
+def test_edit_rescored_with_candidate_roster(client, club):
+    m = club["manager"]
+    eid, _ = _event_with_attendance(client, club)
+    cand = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2}, headers=m).json()["candidates"][0]
+    everyone = {x["id"] for s in cand["squads"] for x in s["members"]}
+    # 배정을 돌린 뒤 한 명이 불참으로 바꿨다 — 재배정 전까지 이 배정안에는 그대로 있다
+    assert client.put(f"{API}/events/{eid}/attendance", json={"status": "ABSENT"}, headers=club["members"][3]).status_code == 200
+    black, white = cand["squads"]
+    r = client.patch(f"{API}/assignments/candidates/{cand['id']}", json={"swaps": [{"player_id_a": black["members"][0]["id"], "player_id_b": white["members"][0]["id"]}]}, headers=m)
+    assert r.status_code == 200, r.text
+    squads = r.json()["squads"]
+    assert {x["id"] for s in squads for x in s["members"]} == everyone
+    assert all(s["assigned_positions"].get(str(x["id"])) for s in squads for x in s["members"])  # 빠진 사람 없이 모두 포지션을 받는다
+
+
 # 검증: FR-22 · FR-23 · FR-24 — 교체 후 재계산, 묶인 사람 교체 거부, 확정 → 플레이어 뷰 마스킹, 재확정 409, 직전 회차 제약
 def test_swap_adopt_and_player_view(client, club):
     m, pid = club["manager"], club["pid"]

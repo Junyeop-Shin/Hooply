@@ -38,6 +38,7 @@ type Extra = Record<number, number[]>
 const DEFAULT_DURATION = 8
 const MIN_DURATION = 1
 const MAX_DURATION = 10
+const DURATIONS = Array.from({ length: MAX_DURATION - MIN_DURATION + 1 }, (_, k) => MIN_DURATION + k)
 
 const draftKey = (eventId: number) => `quarters-draft-${eventId}`
 const emptyExtra: Extra = {}
@@ -100,19 +101,23 @@ export function QuartersPage() {
 
   const nameOf = (pid: number) => people.get(pid)?.display_name ?? `#${pid}`
 
-  // 초기값: 서버 기록 > 로컬 임시 저장 > 빈 쿼터 1개 (배정 팀원 5명씩 미리 체크)
+  // 임시 저장이 어느 서버 기록을 바탕으로 고친 것인지 — 서버 기록이 그대로일 때만 임시 저장을 되살린다
+  const serverBase = useMemo(() => JSON.stringify((saved.data?.items ?? []).map((q) => [
+    q.quarter_no, q.black_score, q.white_score, q.duration_min, q.home_squad_no, q.away_squad_no, q.lineups.map((l) => `${l.player_id}${l.side}`).sort(),
+  ])), [saved.data])
+
+  // 초기값: 이 서버 기록을 고치던 로컬 임시 저장 > 서버 기록 > (기록 없음) 로컬 임시 저장 > 빈 쿼터 1개 (배정 팀원 5명씩 미리 체크)
   useEffect(() => {
     if (quarters || saved.isLoading || adopted.isLoading) return
-    if (saved.data && saved.data.items.length > 0) {
-      setQuarters(saved.data.items.map((q) => ({ quarter_no: q.quarter_no, black_score: q.black_score, white_score: q.white_score, duration_min: q.duration_min, home: q.home_squad_no ?? 1, away: q.away_squad_no ?? 2, black: q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.player_id), white: q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.player_id) })))
-      return
-    }
+    const hasSaved = !!saved.data && saved.data.items.length > 0
+    const fromServer: Draft[] = (saved.data?.items ?? []).map((q) => ({ quarter_no: q.quarter_no, black_score: q.black_score, white_score: q.white_score, duration_min: q.duration_min, home: q.home_squad_no ?? 1, away: q.away_squad_no ?? 2, black: q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.player_id), white: q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.player_id) }))
     try {
       const raw = localStorage.getItem(draftKey(id))
       if (raw) {
-        const parsed = JSON.parse(raw) as Draft[] | { quarters: Draft[]; extra?: Extra & { black?: number[]; white?: number[] } }
+        const parsed = JSON.parse(raw) as Draft[] | { quarters: Draft[]; extra?: Extra & { black?: number[]; white?: number[] }; base?: string }
         const qs = (Array.isArray(parsed) ? parsed : parsed.quarters)?.map((q) => ({ ...q, home: q.home ?? 1, away: q.away ?? 2 }))  // 예전 형식(배열 · 대진 없음)도 읽는다
-        if (qs?.length) {
+        const base = Array.isArray(parsed) ? undefined : parsed.base
+        if (qs?.length && (!hasSaved || (base === serverBase && JSON.stringify(qs) !== JSON.stringify(fromServer)))) {
           setQuarters(qs)
           if (!Array.isArray(parsed) && parsed.extra) {
             const e = parsed.extra
@@ -123,19 +128,20 @@ export function QuartersPage() {
         }
       }
     } catch { /* 저장소 없음 */ }
+    if (hasSaved) { setQuarters(fromServer); return }
     const b = hasAssignment ? (squadIds[1] ?? []).slice(0, 5) : []
     const w = hasAssignment ? (squadIds[2] ?? []).slice(0, 5) : []
     setQuarters([{ quarter_no: 1, black_score: 0, white_score: 0, duration_min: DEFAULT_DURATION, black: b, white: w, home: 1, away: 2 }])
-  }, [quarters, saved.data, saved.isLoading, adopted.isLoading, hasAssignment, squadIds, id])
+  }, [quarters, saved.data, saved.isLoading, adopted.isLoading, hasAssignment, squadIds, id, serverBase])
 
-  // 임시 저장 — 누를 때마다 쓰지 않고 입력이 0.3초 멈추면 한 번
+  // 임시 저장 — 누를 때마다 쓰지 않고 입력이 0.3초 멈추면 한 번. 바탕이 된 서버 기록(base)을 같이 적는다
   useEffect(() => {
     if (!quarters || !isManager) return
     const t = setTimeout(() => {
-      try { localStorage.setItem(draftKey(id), JSON.stringify({ quarters, extra })) } catch { /* ignore */ }
+      try { localStorage.setItem(draftKey(id), JSON.stringify({ quarters, extra, base: serverBase })) } catch { /* ignore */ }
     }, 300)
     return () => clearTimeout(t)
-  }, [quarters, extra, id, isManager])
+  }, [quarters, extra, id, isManager, serverBase])
 
   const save = useMutation({
     mutationFn: () => {
@@ -149,7 +155,6 @@ export function QuartersPage() {
     onSuccess: () => {
       try { localStorage.removeItem(draftKey(id)) } catch { /* ignore */ }
       qc.invalidateQueries({ queryKey: ['events'] }); qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] })
-      setMsg(`저장했어요. 실력에 반영했어요.`)
       goBack(`/events/${id}`)
     },
     onError: (e) => setMsg(errMsg(e, '저장하지 못했어요.')),
@@ -231,12 +236,14 @@ export function QuartersPage() {
             <div className="flex items-center justify-between">
               <p className="font-bold text-ink">{q.quarter_no}쿼터
                 <label className="ml-2 text-xs font-normal text-muted">
-                  <input
-                    type="number" min={MIN_DURATION} max={MAX_DURATION} value={q.duration_min}
-                    onChange={(ev2) => update(i, { duration_min: Math.max(MIN_DURATION, Math.min(MAX_DURATION, Number(ev2.target.value) || DEFAULT_DURATION)) })}
+                  {/* 숫자 칸은 휴대폰에서 지우면 바로 8로 돌아가 고치기 어렵다 — 1~10분 중에서 고른다 */}
+                  <select
+                    value={q.duration_min} onChange={(ev2) => update(i, { duration_min: Number(ev2.target.value) })}
                     aria-label={`${q.quarter_no}쿼터 길이(분)`}
-                    className="w-10 rounded border border-line px-1 text-center"
-                  />분
+                    className="min-h-9 rounded-lg border border-line bg-surface px-1 text-center text-ink"
+                  >
+                    {DURATIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>분
                 </label>
               </p>
               {quarters.length > 1 && <button className="text-xs text-danger-ink" onClick={() => removeQuarter(i)}>삭제</button>}
@@ -423,14 +430,14 @@ function Stepper({ label, squadNo, value, onChange }: { label: string; squadNo: 
     <div className={`rounded-xl border p-2 ${squadStyle(squadNo).card}`}>
       <p className="text-[11px] font-semibold opacity-70">{label}</p>
       <div className="flex items-center justify-between">
-        <button onClick={() => onChange(Math.max(0, value - 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-white/10' : 'bg-stone-200'}`}>−</button>
+        <button type="button" aria-label={`${label} 1점 빼기`} onClick={() => onChange(Math.max(0, value - 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-white/10' : 'bg-stone-200'}`}>−</button>
         <input
           type="text" inputMode="numeric" pattern="[0-9]*" value={value} aria-label={`${label} 득점`}
           onChange={(e) => { const d = e.target.value.replace(/\D/g, '').slice(-2); onChange(d === '' ? 0 : Number(d)) }}  // 두 자리가 찬 뒤 더 치면 앞자리가 밀린다 (13 → 4 입력 → 34)
           onFocus={(e) => e.target.select()}
           className="w-14 bg-transparent text-center text-2xl font-black tabular-nums outline-none"
         />
-        <button onClick={() => onChange(Math.min(99, value + 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-court-500 text-white' : 'bg-court-100 text-court-700'}`}>+</button>
+        <button type="button" aria-label={`${label} 1점 더하기`} onClick={() => onChange(Math.min(99, value + 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-court-500 text-white' : 'bg-court-100 text-court-700'}`}>+</button>
       </div>
     </div>
   )

@@ -48,7 +48,7 @@ class TeamPlay(Base):
     """팀이 직접 만든 전술 (docs/07 FR-57). play_key 는 "team:<id>", Play.key 는 "team_<id>".
 
     시작 위치 · 공 · 단계는 `body`(JSON) 에, 역할은 `roles` 에 둔다. 저장할 때 app/tactics/play.py 의 Play 검증과
-    재생 가능성 검사(FR-41)를 통과해야 한다. 역할은 규칙 추출 → AI 태깅 → 매니저 수정 중 마지막 것이 남는다(`role_source`).
+    재생 가능성 검사(FR-41)를 통과해야 한다. 역할은 규칙 추출 → 매니저 수정 중 마지막 것이 남는다(`role_source`, v1.9 전에 AI 가 붙인 전술은 AI).
     """
 
     __tablename__ = "team_plays"

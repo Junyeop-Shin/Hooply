@@ -168,6 +168,13 @@ def test_merged_guest_quarters_count_for_member(client, signup, club):
     # 병합된 게스트 id 로는 더 이상 라인업에 넣을 수 없다 (회원 이중 계산 방지)
     r = client.post(f"{API}/events/{eid}/quarters", json={"quarter_no": 2, "black_score": 1, "white_score": 0, "lineups": lineups}, headers=m)
     assert r.status_code == 422 and r.json()["code"] == "PLAYER_NOT_IN_TEAM"
+    # 그래도 게스트로 뛴 지난 쿼터는 점수만 고쳐 다시 저장할 수 있다 (기록 화면은 쿼터 전체를 다시 보낸다)
+    r = client.put(f"{API}/events/{eid}/quarters", json={"quarters": [{"quarter_no": 1, "black_score": 12, "white_score": 8, "lineups": lineups}]}, headers=m)
+    assert r.status_code == 200, r.text
+    # 새로 넣는 사람은 여전히 검사한다 — 팀 밖 id 는 422
+    swapped = [dict(x, player_id=999999) if x["player_id"] == club["pid"][BOT5[0]] else x for x in lineups]
+    r = client.put(f"{API}/events/{eid}/quarters", json={"quarters": [{"quarter_no": 1, "black_score": 12, "white_score": 8, "lineups": swapped}]}, headers=m)
+    assert r.status_code == 422 and r.json()["code"] == "PLAYER_NOT_IN_TEAM"
     # 되돌리면 회원 기록에서 빠진다
     assert client.post(f"{API}/players/{gid}:unmerge", headers=m).status_code == 200
     member = next(c for c in client.get(f"{API}/teams/{club['team_id']}/players", headers=m).json()["items"] if c["id"] == new_pid)

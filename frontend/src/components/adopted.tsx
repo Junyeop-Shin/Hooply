@@ -37,10 +37,11 @@ export function SquadCard({ squad, picked, onPick, showSkill, highlightId, marks
           const pos = squad.assigned_positions[m.id]
           const on = picked?.includes(m.id) ?? false
           const me = highlightId === m.id
+          const Row = onPick ? 'button' : 'div'  // 고를 수 없는 결과 화면에서는 누를 수 없는 줄 (쓸데없는 탭 이동을 만들지 않게)
           return (
             <li key={m.id}>
-              <button
-                onClick={onPick ? () => onPick(m.id) : undefined}
+              <Row
+                {...(onPick && { type: 'button' as const, onClick: () => onPick(m.id), 'aria-pressed': on })}
                 className={`flex w-full items-center gap-1 rounded-lg ${narrow ? 'px-1 py-0.5 text-xs' : 'gap-1.5 px-1.5 py-1 text-sm'} text-left ${on ? st.picked : me ? st.soft : ''}`}
               >
                 <span className={`${narrow ? 'w-4 text-[9px]' : 'w-6 text-[10px]'} shrink-0 font-bold ${st.sub}`}>{pos ?? '—'}</span>
@@ -51,7 +52,7 @@ export function SquadCard({ squad, picked, onPick, showSkill, highlightId, marks
                 {marks?.pinned.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-navy-100 text-navy-700'}`} title="사전 배치">{tag('고정', '고')}</span>}
                 {marks?.sepGroup.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-rose-100 text-rose-700'}`} title="갈라놓기">{tag('분리', '분')}</span>}
                 {showSkill && <span className="ml-auto shrink-0"><GradeDot grade={m.skill_grade} small={narrow} /></span>}
-              </button>
+              </Row>
             </li>
           )
         })}

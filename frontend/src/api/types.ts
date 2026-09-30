@@ -488,13 +488,6 @@ export interface ShareMessage {
   open: boolean
   opens_at: string
 }
-export interface CompatiblePlayer {
-  player: PlayerCard
-  mutual_play_again: boolean
-  voted_me_best: number
-  i_voted_best: number
-  together_quarters: number
-}
 
 // --- 선수 통계 (GET /players/{id}/stats) ---
 export interface MarginPoint {

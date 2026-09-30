@@ -246,9 +246,12 @@ def explain_tactics(db: Session, event: Event, me: Player, user: User, *, squad_
     fallback = {"one_liner": "", "items": [{"play_id": k, "reason": v, "key_roles": [], "caution": ""} for k, v in rule.items()]}
 
     def in_order(o: dict[str, Any]) -> dict[str, Any]:
-        """추천 순서대로, 빠진 전술은 규칙 문장으로 채운다."""
+        """추천 순서대로, 빠진 전술은 규칙 문장으로 채운다. 숫자 검사에 걸려 비워진 이유도 규칙 문장으로."""
         got = {it["play_id"]: it for it in o.get("items", [])}
-        items = [got.get(k) or {"play_id": k, "reason": rule[k], "key_roles": [], "caution": ""} for k in play_ids]
+        items = [
+            {**got[k], "reason": got[k].get("reason") or rule[k]} if k in got else {"play_id": k, "reason": rule[k], "key_roles": [], "caution": ""}
+            for k in play_ids
+        ]
         return {"one_liner": o.get("one_liner", ""), "items": [{**it, "key_roles": it["key_roles"][:3]} for it in items]}
 
     call = llm_guard.ChainCall(

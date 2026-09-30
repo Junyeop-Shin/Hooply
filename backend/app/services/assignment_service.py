@@ -24,6 +24,7 @@ from __future__ import annotations
 import itertools
 import random
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -134,23 +135,28 @@ def build_roster(db: Session, event: Event) -> list[RosterPlayer]:
         .options(*PLAYER_LOAD)
         .order_by(Player.display_name)
     ).scalars().all()
-    known = []
-    for p in rows:
-        prof = p.profile
-        v = prof.skill_overall if prof and prof.skill_overall is not None else (prof.prior_overall if prof else None)
-        if v is not None and not (prof and prof.skill_confidence == 0):
-            known.append(float(v))
+    return _roster_from(rows)
+
+
+def _skill_of(p: Player) -> tuple[float | None, bool]:
+    """(실력값, 믿을 만한가). 경기 실력 > 사전값. 게스트처럼 신뢰도 0 이면 모르는 값으로 본다."""
+    prof = p.profile
+    v = prof.skill_overall if prof and prof.skill_overall is not None else (prof.prior_overall if prof else None)
+    return (float(v) if v is not None else None), v is not None and not (prof and prof.skill_confidence == 0)
+
+
+def _roster_from(rows: Sequence[Player]) -> list[RosterPlayer]:
+    """참가자 → 배정 입력. 실력을 모르는 사람은 이 명단의 평균으로 둔다. `rows` 는 이름순이어야 한다."""
+    skills = [(p, *_skill_of(p)) for p in rows]
+    known = [v for _, v, ok in skills if ok and v is not None]
     default = mean(known) if known else 0.0
     roster = []
-    for p in rows:
-        prof = p.profile
-        v = prof.skill_overall if prof and prof.skill_overall is not None else (prof.prior_overall if prof else None)
-        is_known = v is not None and not (prof and prof.skill_confidence == 0)
+    for p, v, is_known in skills:
         playable = {pp.position for pp in p.positions if pp.can_play}
         ranked = sorted((pp for pp in p.positions if pp.can_play and pp.preference_rank), key=lambda x: x.preference_rank)
         roster.append(
             RosterPlayer(
-                player=p, skill=float(v) if is_known else default, known=is_known, playable=playable,
+                player=p, skill=v if is_known and v is not None else default, known=is_known, playable=playable,
                 primary=ranked[0].position if ranked else None, pref_rank={pp.position: pp.preference_rank for pp in ranked},
             )
         )
@@ -1296,8 +1302,11 @@ def reset_manual(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
 
 
 def _recompute_candidate(db: Session, cand: AssignmentCandidate, *, manual: bool = True) -> None:
+    """고친 편성을 다시 채점한다. 명단은 지금의 참석 응답이 아니라 이 후보안에 든 사람들이다 — 배정 뒤 참석을 바꾼
+    사람이 1팀 점수에 섞이거나 빠지지 않게 (재배정은 따로 한다)."""
     event = db.get(Event, cand.run.event_id)
-    roster = build_roster(db, event)
+    ids = [s.player_id for sq in cand.squads for s in sq.slots]
+    roster = _roster_from(sorted(_players_of(db, ids).values(), key=lambda p: p.display_name))
     rmap = {r.id: r for r in roster}
     squads: list[list[RosterPlayer]] = []
     for sq in sorted(cand.squads, key=lambda x: x.squad_no):

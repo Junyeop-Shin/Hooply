@@ -1,4 +1,4 @@
-"""팀이 직접 만든 전술 · 역할 자동 추출 · AI 역할 태깅 · 전술 댓글 (docs/07 FR-57 ~ FR-60).
+"""팀이 직접 만든 전술 · 역할 자동 추출 · AI 역할 설명 · 전술 댓글 (docs/07 FR-57 ~ FR-60).
 
 편집기 흐름
   1. 매니저가 시작 위치 · 공 · 단계를 그린다 → `check()` 가 재생 가능성 검사와 규칙 역할 추출을 돌려준다 (저장하지 않음)
@@ -181,7 +181,7 @@ def remove(db: Session, team_id: int, play_id: int, me: Player) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 체인 D — AI 역할 태깅
+# 체인 D — AI 역할 설명 (역할은 그대로, 자리마다 이유만)
 # ---------------------------------------------------------------------------
 
 
@@ -210,7 +210,7 @@ def _describe(play: Play, roles: list[Role], hints: list[str]) -> dict[str, Any]
             if a.type == "screen":
                 acts.append(f"{a.slot}번 {label} → {a.target}번에게 ({spot_name(a.to)})")  # type: ignore[arg-type]
             elif a.type in ("pass", "handoff"):
-                acts.append(f"{a.slot}번 {label} → {a.target}번 ({spot_name(pos[k][a.target - 1])})")  # type: ignore[index]
+                acts.append(f"{a.slot}번 {label} → {a.target}번 ({spot_name(pos[k + 1][a.target - 1])})")  # type: ignore[index]  받는 곳 = 그 단계가 끝난 위치 (전술판 · 역할 추출과 같다)
             elif a.type == "shot":
                 acts.append(f"{a.slot}번 {label} ({spot_name(pos[k][a.slot - 1])})")
             else:
@@ -242,8 +242,9 @@ def ai_roles(db: Session, body: TeamPlayIn, user: User) -> RoleSuggestion:
     fallback = {"slots": [{"slot": i + 1, "reason": h or ROLE_REASON[r]} for i, (r, h) in enumerate(zip(roles, hints, strict=True))]}
 
     def ordered(o: dict[str, Any]) -> dict[str, Any]:
+        """자리 순서로 되돌리고, 숫자 검사에 걸려 비워진 이유는 규칙 · 역할 설명으로 채운다."""
         got = {it["slot"]: it for it in o.get("slots", [])}
-        return {"slots": [got[i] for i in range(1, 6)]}
+        return {"slots": [{**got[i], "reason": got[i]["reason"] or fallback["slots"][i - 1]["reason"]} for i in range(1, 6)]}
 
     call = llm_guard.ChainCall(
         chain="D", schema=ReasonsD,

@@ -38,10 +38,7 @@ from sqlalchemy.orm import Session
 
 from app.core import ratelimit
 from app.core.config import get_settings
-from app.core.josa import (  # noqa: F401 — josa 는 테스트·다른 모듈이 여기서 가져간다
-    josa,
-    substitute,
-)
+from app.core.josa import substitute
 from app.llm import model as llm_model
 from app.models import LlmResult
 
@@ -204,7 +201,7 @@ def cache_key(chain: str, parts: dict[str, Any]) -> str:
 class ChainCall:
     """체인 하나를 부르는 데 필요한 것. 입력(`payload`·`messages`)은 이미 가명으로 바꾼 상태여야 한다."""
 
-    chain: str  # A · B · C
+    chain: str  # A · B · C · D
     schema: type[BaseModel]
     messages: list[tuple[str, str]]  # [("system", …), ("human", …)]
     payload: dict[str, Any]  # 숫자 검사의 기준이 되는 입력

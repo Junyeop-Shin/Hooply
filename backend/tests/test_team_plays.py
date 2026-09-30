@@ -175,7 +175,7 @@ def test_team_play_joins_recommendation_board_and_slots(client, club, monkeypatc
 
 @pytest.fixture
 def fake_d(monkeypatch):
-    state = {"calls": 0, "sent": [], "drop": False}
+    state = {"calls": 0, "sent": [], "drop": False, "odd_number": False}
 
     def structured(schema, **_kw):
         def respond(messages):
@@ -184,6 +184,8 @@ def fake_d(monkeypatch):
             state["calls"] += 1
             data = json.loads(human)
             slots = [SlotReasonD(slot=s["slot"], reason=f"AI 설명 {s['slot']}") for s in data["slots"]]
+            if state["odd_number"]:
+                slots[1] = SlotReasonD(slot=2, reason="45도 각도에서 기다려요")  # 입력에 없는 숫자 → 가드레일이 비운다
             if state["drop"]:
                 slots = slots[:4]
             return ReasonsD(slots=list(reversed(slots)))
@@ -209,6 +211,15 @@ def test_ai_explains_rule_roles_without_changing_them(client, club, fake_d):
     assert "5번 스크린 → 1번에게" in sent["steps"][0]["actions"][0]
     again = client.post(f"{API}/teams/{tid}/plays:ai-roles", json=pnr(), headers=m).json()
     assert again["cached"] is True and fake_d["calls"] == 1
+
+
+def test_ai_blanked_reason_falls_back_per_slot(client, club, fake_d):
+    fake_d["odd_number"] = True
+    m, tid = club["manager"], club["team_id"]
+    rule = client.post(f"{API}/teams/{tid}/plays:check", json=pnr(), headers=m).json()
+    body = client.post(f"{API}/teams/{tid}/plays:ai-roles", json=pnr(), headers=m).json()
+    assert body["fallback"] is False and body["reasons"][0] == "AI 설명 1"
+    assert body["reasons"][1] == rule["reasons"][1]  # 비워진 자리만 규칙 이유로
 
 
 def test_ai_keeps_manager_roles(client, club, fake_d):

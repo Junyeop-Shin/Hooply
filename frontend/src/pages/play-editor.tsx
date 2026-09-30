@@ -333,7 +333,7 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
             {roles && rolesFor && rolesFor !== shape && ' 움직임을 바꿨다면 역할도 다시 확인해 보세요.'}
             {explained && (explained.fallback ? ' AI를 쓸 수 없어 움직임에서 읽은 이유를 보여 줘요.' : ' 아래 설명은 AI가 전술을 읽고 쓴 거예요.')}
           </p>
-          {ai.isError && <Alert>{ai.error instanceof ApiError ? ai.error.message : '역할을 붙이지 못했어요.'}</Alert>}
+          {ai.isError && <Alert>{ai.error instanceof ApiError ? ai.error.message : '이유를 받지 못했어요.'}</Alert>}
           <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
             {shownRoles.map((r, i) => (
               <li key={i} className="flex items-start gap-3 px-4 py-2.5">

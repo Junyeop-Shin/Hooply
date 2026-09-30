@@ -116,7 +116,7 @@ export function AssignPage() {
   const suggestions = (sug.data?.items ?? []).filter((s) => !inSameLock(locks, s.guest.id, s.target.id))
   const approvable = suggestions.filter((s) => !dismissed.includes(s.guest.id))
   const approveAll = () => setLocks((l) => approvable.reduce((acc, s) => mergeLock(acc, [s.guest.id, s.target.id]), l))
-  const feasible = validate.data?.feasible ?? false
+  const feasible = settledBody === body && !validate.isPlaceholderData && (validate.data?.feasible ?? false)  // 이전 조건의 검사 결과로 켜지지 않게
 
   return (
     <Screen>

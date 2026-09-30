@@ -16,7 +16,7 @@ import { localISODate, type BadgeGroup, type BadgeTier, type BadgeView, type Mar
 import { SERIES_INFO, SINGLE_PICT, type BadgeFrame, type BadgePict } from './badge-art'
 import { BadgeDefs, BadgeIcon } from './badge-icon'
 import { FirstTimeTip } from './tutorial'
-import { Avatar, Card, EmptyState, SectionTitle, Spinner } from './ui'
+import { Avatar, Card, EmptyState, SectionTitle, Sheet, Spinner } from './ui'
 
 /** "2026-09" → "9월" (같은 해) / "2025년 12월" (다른 해) */
 function monthLabel(p: string, today = localISODate()) {
@@ -289,13 +289,7 @@ function BadgeTile({ t, onOpen }: { t: BadgeTileModel; onOpen: () => void }) {
 /** 칸을 누르면 올라오는 시트 — 게스트 초대 시트와 같은 모양 */
 function BadgeSheet({ t, onClose }: { t: BadgeTileModel; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${t.title} 배지`}>
-      <div className="safe-bottom max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
-        <div className="flex items-start justify-between">
-          <h3 className="text-lg font-bold text-ink">{t.title}</h3>
-          <button type="button" onClick={onClose} aria-label="닫기" className="-mr-1 -mt-1 flex size-9 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
-        </div>
+    <Sheet label={`${t.title} 배지`} title={t.title} onClose={onClose}>
         <p className="mb-3 text-xs text-muted">{t.desc}</p>
         <div className="divide-y divide-line">
           {t.items.map((b) => {
@@ -320,7 +314,6 @@ function BadgeSheet({ t, onClose }: { t: BadgeTileModel; onClose: () => void }) 
             )
           })}
         </div>
-      </div>
-    </div>
+    </Sheet>
   )
 }

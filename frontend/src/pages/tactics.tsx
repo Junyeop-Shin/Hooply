@@ -6,7 +6,7 @@
  * - 수비는 전술이 가정한 방식(opp_defense · screen_call)으로 고정이다 — 고르는 칸이 없다 (v1.7).
  * - `event` 가 없으면 전술 설명만 (전술 탭 목록에서 들어왔고 그날 참석자가 아닌 경우).
  * - `event` 가 있으면 그날 그 팀(`squad`, 없으면 내 팀)의 자리 배치를 함께 보여 준다. 상대 팀으로 바꿔 보는 칸은 없다. 배치는 서버가 자동으로 추천한 것이고,
- *   매니저가 자리를 바꿔 저장했으면 그 배치다. 자리 목록에는 괄호로 예비(같은 전술판 5명 중 그 역할도 맞는 사람)를 단다.
+ *   매니저가 자리를 바꿔 저장했으면 그 배치다. 자리 목록에는 이름 아래 줄에 예비(같은 전술판 5명 중 그 역할도 맞는 사람)를 단다.
  * - 매니저는 동그라미나 자리 목록을 눌러 사람을 바꾸고 저장한다. "추천 배치로 되돌리기" 로 저장을 지운다.
  */
 import { useState, type ReactNode } from 'react'
@@ -19,7 +19,7 @@ import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { TacticBoard, type BoardTone } from '../components/tactic-board'
 import { TacticComments } from '../components/tactic-comments'
 import { CIRCLED, SlotPeople, TacticExplain, useAiTactics } from '../components/tactics'
-import { Alert, Badge, Button, SectionTitle, Spinner } from '../components/ui'
+import { Alert, Badge, Button, SectionTitle, Sheet, Spinner } from '../components/ui'
 import { DEFENSE_LABEL, ROLE_LABEL, renderCounter } from '../lib/tactics'
 import { squadStyle, squadTone } from '../lib/squads'
 
@@ -226,13 +226,7 @@ function PickSheet({ squad, slot, role, row, onPick, onClose }: {
   squad: SquadBoard; slot: number; role: string; row: number[]; onPick: (pid: number) => void; onClose: () => void
 }) {
   return (
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${slot}번 자리 선수 고르기`}>
-      <div className="safe-bottom max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-surface p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
-        <div className="flex items-start justify-between">
-          <h3 className="text-lg font-bold text-ink">{CIRCLED[slot - 1]} {role}</h3>
-          <button type="button" onClick={onClose} aria-label="닫기" className="-mr-1 -mt-1 flex size-9 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
-        </div>
+    <Sheet label={`${slot}번 자리 선수 고르기`} title={<>{CIRCLED[slot - 1]} {role}</>} onClose={onClose} tall={false}>
         <p className="mb-3 text-xs text-muted">{squad.squad_name} 팀에서 이 자리에 설 사람을 골라요. 다른 자리에 있던 사람을 고르면 두 자리가 바뀌고, 벤치에 있던 사람을 고르면 지금 사람이 벤치로 가요.</p>
         <div className="space-y-1.5">
           {squad.members.map((m) => {
@@ -249,7 +243,6 @@ function PickSheet({ squad, slot, role, row, onPick, onClose }: {
             )
           })}
         </div>
-      </div>
-    </div>
+    </Sheet>
   )
 }

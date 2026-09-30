@@ -5,7 +5,7 @@
  *   ghost                = 취소·뒤로 등 눈에 띄지 않아야 하는 액션
  * 터치 영역은 최소 44px (설계서 5.1절).
  */
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 import { API_ORIGIN } from '../api/client'
 import type { ApprovalStatus, SkillGrade, TeamRole, TeamStatus } from '../api/types'
@@ -192,6 +192,29 @@ export function EmptyState({ title, desc, action }: { title: string; desc?: stri
       <p className="font-semibold text-ink">{title}</p>
       {desc && <p className="text-sm text-muted">{desc}</p>}
       {action && <div className="mt-2">{action}</div>}
+    </div>
+  )
+}
+
+/** 아래에서 올라오는 시트. 바깥을 누르거나 Esc 로 닫고, 안쪽 스크롤이 끝에 닿아도 뒤 화면이 따라 밀리지 않는다 */
+export function Sheet({ label, title, onClose, tall = true, children }: {
+  label: string; title: ReactNode; onClose: () => void; tall?: boolean; children: ReactNode
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label={label}>
+      <div className={cx('safe-bottom w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl bg-surface p-5', tall ? 'max-h-[90vh]' : 'max-h-[80vh]')} onClick={(e) => e.stopPropagation()}>
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-bold text-ink">{title}</h3>
+          <button type="button" onClick={onClose} aria-label="닫기" className="-mr-1 -mt-1 flex size-9 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
+        </div>
+        {children}
+      </div>
     </div>
   )
 }

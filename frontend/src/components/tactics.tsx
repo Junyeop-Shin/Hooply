@@ -158,7 +158,7 @@ export function ZoneSwitch({ zone, setZone }: { zone: boolean; setZone: (z: bool
     <button
       type="button" role="switch" aria-checked={zone} aria-label={`상대 수비: ${zone ? '지역 수비' : '맨투맨 수비'} (누르면 바뀜)`}
       onClick={() => setZone(!zone)}
-      className="relative inline-grid min-h-11 grid-cols-2 items-center rounded-full bg-sunken p-1 text-xs font-bold active:opacity-90"
+      className="relative isolate inline-grid min-h-11 grid-cols-2 items-center rounded-full bg-sunken p-1 text-xs font-bold active:opacity-90"
     >
       <span
         className={`absolute inset-y-1 w-[calc(50%-4px)] rounded-full bg-surface shadow transition-transform ${zone ? 'translate-x-[calc(100%+0px)]' : 'translate-x-0'}`}

@@ -27,6 +27,7 @@ import argparse
 import os
 import re
 import statistics
+import sys
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -72,6 +73,7 @@ class Client:
         for _ in range(3):  # 로그인은 IP 당 분당 10회 제한 — 팀원 20명을 로그인하다 걸리면 창이 비길 기다린다
             if r.status_code != 429:
                 break
+            print(f"  로그인 제한 — 61초 기다림 ({email})", file=sys.stderr, flush=True)
             time.sleep(61)
             r = self.http.post(f"{self.base}/auth/login", json={"email": email, "password": PASSWORD})
         if r.status_code != 200:
@@ -89,6 +91,7 @@ class Client:
         t0 = time.monotonic()
         r = self.req(who, method, path, **kw)
         took = time.monotonic() - t0
+        print(f"  {path.rsplit('/', 1)[-1]} {r.status_code} {took:.1f}s", file=sys.stderr, flush=True)  # 진행 상황
         if r.status_code == 200 and not r.json().get("cached"):
             self.last_call[who] = time.monotonic()
         return r, took
@@ -155,7 +158,7 @@ def run(base: str, n_events: int) -> tuple[list[Call], dict[str, Any]]:
             r, took = c.ai(MANAGER, "POST", f"/events/{ev['id']}/tactics/ai-recommend", params={"squad_no": sq["squad_no"]})
             calls.append(_check_c(label, r, took, [it["play_key"] for it in sq["items"]], roster, everyone))
 
-    # D — 프리셋마다 역할 태깅 (사람이 붙인 역할이 정답)
+    # D — 프리셋마다 역할 설명. 규칙 역할을 보내고 그대로 돌아오는지 본다 (사람이 붙인 역할과의 일치율은 규칙 추출의 몫)
     for p in c.req(MANAGER, "GET", "/tactics/presets").json()["items"]:
         body = {
             "start": p["start"], "ball": p["ball"], "situation": p["situation"],
@@ -163,7 +166,7 @@ def run(base: str, n_events: int) -> tuple[list[Call], dict[str, Any]]:
             "steps": [{"caption": f"{k + 1}단계", "actions": st["actions"]} for k, st in enumerate(p["steps"])],
         }
         rule = c.req(MANAGER, "POST", f"/teams/{tid}/plays:check", json=body).json()["roles"]
-        r, took = c.ai(MANAGER, "POST", f"/teams/{tid}/plays:ai-roles", json=body)
+        r, took = c.ai(MANAGER, "POST", f"/teams/{tid}/plays:ai-roles", json={**body, "roles": rule})
         calls.append(_check_d(p["key"], r, took, p["roles"], rule))
 
     meta = {"base": base, "team": DEMO_TEAM, "events": [e["event_date"] for e in past], "members_logged_in": len(member_of)}

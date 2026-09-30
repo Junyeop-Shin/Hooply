@@ -1,4 +1,4 @@
-"""팀이 직접 만든 전술 · AI 역할 태깅 · 전술 댓글 (docs/07 FR-57 ~ FR-60, 8.3절).
+"""팀이 직접 만든 전술 · AI 역할 설명 · 전술 댓글 (docs/07 FR-57 ~ FR-60, 8.3절).
 
 - GET    /teams/{team_id}/plays                               팀 전술 목록 (팀원)
 - POST   /teams/{team_id}/plays                               만들기 (팀원, v1.7)

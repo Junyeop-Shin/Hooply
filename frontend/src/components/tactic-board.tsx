@@ -46,7 +46,7 @@ function useReducedMotion() {
   return reduced
 }
 
-export function TacticBoard({
+export const TacticBoard = memo(function TacticBoard({
   play, tone = 'neutral', names, onSlotTap,
 }: {
   play: Play
@@ -218,7 +218,7 @@ export function TacticBoard({
       </p>
     </div>
   )
-}
+})
 
 function Icon({ d }: { d: string }) {
   return (
