@@ -193,3 +193,44 @@ def test_three_team_flow_api(client, club):
     # 전술 추천도 세 팀 모두
     rec = client.get(f"{API}/events/{eid}/tactics/recommend", headers=m).json()
     assert [x["squad_no"] for x in rec["squads"]] == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# 2팀인데 묶음 뒤 18명이 넘으면 — 막지 않고 지역 탐색 (사용자 결정 2026-09-30)
+# ---------------------------------------------------------------------------
+
+
+def _all_halves(n_nodes, size):
+    for rest in itertools.combinations(range(1, n_nodes), size - 1):
+        team0 = {0, *rest}
+        yield tuple(0 if x in team0 else 1 for x in range(n_nodes))
+
+
+@pytest.mark.parametrize("seed", [21, 22, 23, 24])
+def test_two_team_local_search_matches_exhaustive_on_16(seed):
+    roster = _roster(16, seed)
+    ids = [r.id for r in roster]
+    prep = a.prepare(roster, AssignmentRunRequest(team_count=2))
+    pref, recent = _pairs(ids, 16, seed)
+    parts = list(_all_halves(len(prep.supernodes), 8))
+    st = a._node_stats(prep, pref, recent)
+    prep.skill_sd = a._skill_sd(prep)
+    tm = a._terms_matrix(prep, st, np.asarray(parts, dtype=int), len(recent))
+    found, _ = a.search_partitions(prep, pref, recent, ALL)
+    for strategy in ALL:
+        w = a.STRATEGY_WEIGHTS[strategy]
+        assert min(sc.total(w) for sc in found) == pytest.approx(float(a._totals(tm, w).min()), abs=1e-9), strategy
+
+
+def test_two_teams_over_18_are_not_blocked():
+    roster = _roster(24, 9)
+    ids = [r.id for r in roster]
+    body = AssignmentRunRequest(team_count=2, constraints=ConstraintSet(lock_groups=[ids[:2]], separate_groups=[[ids[2], ids[3]]]))
+    prep = a.prepare(roster, body)
+    assert len(prep.supernodes) > a.MAX_SUPERNODES and not prep.violations
+    assert a.first_partition(prep) is not None
+    t0 = time.perf_counter()
+    found, _ = a.search_partitions(prep, *_pairs(ids, 24, 9), ALL)
+    assert time.perf_counter() - t0 < 5
+    for sc in found:
+        assert sorted(_squads_ok(prep, sc.partition)) == [12, 12]

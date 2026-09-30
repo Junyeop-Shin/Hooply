@@ -2,6 +2,7 @@
  * S-12 배정 실행 · S-13 배정 결과(매니저) · S-14 배정 결과(플레이어) — F5 · F6 · F7 · F15.
  *
  * 3팀(v1.7): 참석이 15명을 넘으면 "3팀으로 나누기" 체크 → 블랙 · 화이트 · 레드 세 칸. 결과에서는 한 명을 고른 뒤 옮길 팀을 고른다.
+ *   18명이 넘는데 2팀이면 3팀을 권하는 안내만 붙인다 — 2팀도 그대로 짤 수 있다.
  * S-12: 대기 칸(참석자 칩) + 블랙/화이트(/레드) 팀 칸. 칩을 길게(여기서는 탭) 다중 선택 → 같은 팀으로 묶기 / 갈라놓기 /
  *       블랙·화이트에 사전 배치. 제약을 바꿀 때마다 프리플라이트(validate)로 실행 버튼을 잠근다 (FR-20).
  *       게스트의 "묶기 제안"은 배지로 보이고 승인하면 묶음이 된다 (guest-feature-spec 6절).
@@ -21,7 +22,7 @@ import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
 import { AiExplainCard } from '../components/ai-cards'
 import { SquadCard, rosterKey, type Marks } from '../components/adopted'
-import { THREE_TEAM_FROM, squadName, squadStyle } from '../lib/squads'
+import { THREE_TEAM_FROM, THREE_TEAM_SUGGEST_FROM, squadName, squadStyle } from '../lib/squads'
 import { josa } from '../lib/josa'
 import { useDebounced } from '../lib/typewriter'
 
@@ -141,6 +142,11 @@ export function AssignPage() {
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold text-ink">3팀으로 나누기</span>
               <span className="block text-xs text-muted">참석 {attendees.length}명을 {splitText(attendees.length, 3)}명씩 블랙 · 화이트 · 레드로 나눠요. 경기 기록은 쿼터마다 뛴 두 팀을 골라요.</span>
+              {teams === 2 && attendees.length >= THREE_TEAM_SUGGEST_FROM && (
+                <span className="mt-1.5 block text-xs font-semibold text-brand-ink">
+                  2팀이면 한 팀이 {splitText(attendees.length, 2)}명이라 많이 쉬어요. 3팀으로 나눠 보는 건 어때요?
+                </span>
+              )}
             </span>
           </label>
         )}

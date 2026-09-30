@@ -75,11 +75,12 @@ from app.schemas.common import SquadView
 from app.services.player_service import PLAYER_LOAD, to_card
 
 SQUAD_NAMES = list(DEFAULT_SQUAD_NAMES)  # 13.1절 Q6 기본값 — 1 블랙 · 2 화이트 · 3 레드
-MAX_SUPERNODES = 18  # 완전 탐색 상한 (2^18 ≈ 26만, 약 0.6초). 초과 시 안내 — 실측 22개는 10초라 내렸다
+MAX_SUPERNODES = 18  # 2팀 완전 탐색 상한 (2^18 ≈ 26만, 약 0.6초 — 실측 22개는 10초). 넘으면 막지 않고 지역 탐색으로 푼다
 HARD_PENALTY = 10.0
 MIN_SQUAD = 5  # 팀마다 코트에 설 5명은 있어야 한다 (배정 · 수동 수정 모두)
 MAX_TEAMS = 3
 LS_RESTARTS = 6  # 3팀 지역 탐색: 전략마다 새로 출발하는 횟수
+LS_RESTARTS_2 = 12  # 2팀(18명 초과)은 이웃이 맞바꾸기뿐이라 국소 최적에 잘 빠진다 — 두 배로 (16명 60건 모두 완전 탐색 최적, 24명 0.13초)
 LS_PATIENCE = 8  # 흔들기가 이만큼 연달아 나아지지 않으면 멈춘다 (시간 대부분이 헛도는 흔들기였다)
 LS_KICKS = 25  # 국소 최적에 빠지면 두 번 무작위로 맞바꿔 흔든 뒤 다시 내려가 보는 횟수 (더 나으면 옮겨 간다)
 LS_SEED = 20260929  # 같은 입력이면 같은 결과가 나오도록 고정
@@ -284,8 +285,6 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
         if a in pins and b in pins and pins[a] == pins[b]:
             v.append(ConstraintViolation(code="SEPARATE_INFEASIBLE", message="갈라놓기로 지정한 두 사람이 같은 팀에 배치됐어요.", player_ids=supernodes[a] + supernodes[b]))
 
-    if t == 2 and len(supernodes) > MAX_SUPERNODES:  # 완전 탐색 상한 — 3팀은 지역 탐색이라 상한이 없다
-        v.append(ConstraintViolation(code="VALIDATION_ERROR", message=f"참석 인원이 너무 많아요 (묶음 후 {len(supernodes)}개). {MAX_SUPERNODES}개 이하로 줄여 주세요."))
 
     # 경고 (차단 아님)
     handlers = sum(1 for r in roster if r.can_handle)
@@ -730,7 +729,7 @@ def _neighbors(prep: Prepared, part: np.ndarray, mi: _MoveIndex, sep: np.ndarray
 
 
 def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strategies: list[Strategy]) -> tuple[list[Scored], int]:
-    """3팀 지역 탐색. 전략마다 LS_RESTARTS 번 새로 출발해, 이웃 전부를 한 번에 채점하고 가장 좋은 이웃으로 옮기기를
+    """지역 탐색 — 3팀, 그리고 묶음 뒤 사람이 MAX_SUPERNODES 를 넘는 2팀. 전략마다 LS_RESTARTS 번 새로 출발해, 이웃 전부를 한 번에 채점하고 가장 좋은 이웃으로 옮기기를
     더 나아지지 않을 때까지 한다. 찾은 국소 최적해들(서로 다른 편성)을 돌려준다 — 후보안 3개가 서로 달라야 하므로.
     반환: (채점한 국소 최적해, 채점한 분할 수)."""
     if not prep.skill_sd:
@@ -762,7 +761,7 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
 
     for strategy in strategies:
         w = STRATEGY_WEIGHTS[strategy]
-        for _ in range(LS_RESTARTS):
+        for _ in range(LS_RESTARTS_2 if prep.team_count == 2 else LS_RESTARTS):
             start = _good_start(prep, rng, sep_of, ideal_spread)
             if start is None:
                 break
@@ -796,8 +795,8 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
 
 
 def first_partition(prep: Prepared) -> tuple[int, ...] | None:
-    """조건을 지키는 편성이 하나라도 있는가 — 2팀은 완전 탐색의 첫 해, 3팀은 탐욕 초기해를 여러 번 시도."""
-    if prep.team_count == 2:
+    """조건을 지키는 편성이 하나라도 있는가 — 완전 탐색하는 2팀은 그 첫 해, 그 밖은 탐욕 초기해를 여러 번 시도."""
+    if prep.team_count == 2 and len(prep.supernodes) <= MAX_SUPERNODES:
         return next(enumerate_partitions(prep), None)
     ideal = _squad_sizes(sum(len(x) for x in prep.supernodes), prep.team_count)
     c = _good_start(prep, random.Random(LS_SEED), _sep_of(prep), max(ideal) - min(ideal), tries=60)
@@ -958,10 +957,10 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
     ids = [r.id for r in roster]
     pref_pairs = _load_pref_pairs(db, ids)
     recent = _load_recent_pairs(db, event)
-    if body.team_count == 2:
+    if body.team_count == 2 and len(prep.supernodes) <= MAX_SUPERNODES:
         scored = score_partitions(prep, list(enumerate_partitions(prep)), pref_pairs, recent)
         search, evaluated = "exhaustive", len(scored)
-    else:
+    else:  # 3팀, 또는 18명(묶음 뒤)이 넘는 2팀 — 완전 탐색은 너무 오래 걸린다
         scored, evaluated = search_partitions(prep, pref_pairs, recent, body.strategies)
         search = "local_search"
         _warn_uneven(prep, _squad_sizes(len(roster), body.team_count))

@@ -29,3 +29,6 @@ export const squadStyle = (no: number) => SQUAD_STYLE[squadTone(no)]
 
 /** 3팀으로 나누기를 물어보는 참석 인원 — 15명이 넘으면 (16명부터) */
 export const THREE_TEAM_FROM = 16
+
+/** 2팀으로 짜도 되지만 3팀을 권하는 참석 인원 — 18명이 넘으면. 2팀도 막지 않는다(한 팀 10명 가까이 되면 대부분 벤치) */
+export const THREE_TEAM_SUGGEST_FROM = 19
