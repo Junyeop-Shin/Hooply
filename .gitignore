@@ -36,3 +36,7 @@ logs/
 # --- 테스트 산출물 ---
 frontend/test-results/
 frontend/playwright-report/
+
+# --- 생성물 (python3 docs/badges/badge_art.py 로 다시 만든다) ---
+docs/badges/svg/
+docs/badges/preview.html
