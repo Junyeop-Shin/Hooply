@@ -399,7 +399,7 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
     from app.models import ManagerRanking, ManagerRankingEntry, Quarter, SkillRatingHistory
     from app.models.enums import Side
     from app.schemas.peer import MarginPoint, QuarterRecord, RankInfo, RatingChange
-    from app.services.player_service import skill_grade_of, to_card
+    from app.services.player_service import grade_of, to_card
 
     prof = player.profile
     # 병합된 게스트 행까지 포함 (기록은 회원 쪽으로 합산)
@@ -458,8 +458,7 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
         player=to_card(player, include_grade=True), events_attended=attended, quarters_played=len(records),
         position_distribution=dict(positions), margin_trend=trend, recent_quarters=records[:200],
     )
-    skill_now = prof.skill_overall if prof and prof.skill_overall is not None else (prof.prior_overall if prof else None)
-    stats.skill_grade = skill_grade_of(skill_now)  # 등급은 본인에게도 보여 준다
+    stats.skill_grade = grade_of(player)  # 등급은 본인에게도 보여 준다
     if not detailed:
         return stats
 

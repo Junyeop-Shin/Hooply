@@ -51,7 +51,7 @@ def test_hot_endpoints_stay_within_query_budget(client, club, sql_count, monkeyp
         ("GET", f"/teams/{tid}/players"): 10,
         ("GET", f"/events/{eid}"): 7,  # 일정 하나: 집계 5개 + 내 상태를 UNION ALL 로 한 번에
         ("GET", f"/events/{eid}/attendances"): 10,  # 이 회차에 없는 지난 게스트는 읽지 않는다
-        ("GET", f"/players/{next(iter(club['pid'].values()))}/stats"): 13,  # 세부 능력 팀 내 위치 계산 1개 포함
+        ("GET", f"/players/{next(iter(club['pid'].values()))}/stats"): 14,  # 세부 능력 팀 내 위치 계산 1개 · 등급(팀 내 분위수)용 팀 분포 1개 포함
         ("GET", f"/events/{eid}/assignment/adopted"): 10,  # 선수 프로필 · 계정은 조인으로 (PLAYER_LOAD)
         ("GET", f"/assignments/runs/{run['id']}"): 11,
         # 실행·저장 포함 (2026-09 30 → 18). 후보안을 한 번에 저장하고, 지난 실행은 DB 연쇄 삭제로(자식 행을 읽지 않음),

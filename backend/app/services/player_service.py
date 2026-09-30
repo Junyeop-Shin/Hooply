@@ -23,12 +23,14 @@
 매니저가 경기 후 그 일정의 쿼터를 한 번에 저장할 때 실력을 다시 계산하기 때문이다 (9.2절 표시 정책).
 """
 
+from bisect import bisect_left, bisect_right
 from decimal import Decimal
 
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy import event, select
+from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
-from app.models import Player
-from app.models.enums import PlayerKind, Position
+from app.models import Player, PlayerProfile
+from app.models.enums import PlayerKind, PlayerStatus, Position
 from app.schemas.common import PlayerCard, PlayerCardDetailed, SkillGrade
 
 # 선수 카드(to_card)를 만들 때 함께 읽는 관계 — 프로필 · 계정은 1:1 · N:1 이라 조인으로(쿼리 하나), 포지션은 1:N 이라 따로.
@@ -36,34 +38,67 @@ from app.schemas.common import PlayerCard, PlayerCardDetailed, SkillGrade
 PLAYER_LOAD = (joinedload(Player.profile), selectinload(Player.positions), joinedload(Player.user))
 
 
-def skill_grade_of(skill: Decimal | None) -> SkillGrade | None:
-    """실력 수치(쿼터당 득실 기여, 점)를 5등급으로 변환한다 (FR-28).
+# 등급 = 같은 팀 활동 회원 안에서의 위치(분위수). 상위 10% A · 다음 20% B · 가운데 40% C · 다음 20% D · 하위 10% E
+GRADE_CUTS: tuple[tuple[float, SkillGrade], ...] = ((0.9, SkillGrade.A), (0.7, SkillGrade.B), (0.3, SkillGrade.C), (0.1, SkillGrade.D))
+GRADE_MIN_POOL = 5  # 비교할 회원이 이보다 적으면 분위수를 낼 수 없어 절대 구간을 쓴다
+_POOL_KEY = "team_skill_pool"  # Session.info 에 팀별 실력 분포를 요청 동안 담아 둔다
 
-    현재 경계값은 **임시 절대 구간**이다:
-        A ≥ +2 · B ≥ +1 · C ≥ −1 · D ≥ −2 · E < −2
-    9.2절에서 개인 실력 표준편차를 약 2점으로 가정하므로, 대략 "±1σ 안이 C, 그 밖이
-    B/D, ±2σ 밖이 A/E"에 해당하도록 잡은 값이다.
 
-    이 절대 구간은 **클럽 내 분위수로 교체할 예정**이다. 설계 전체가 "절대 실력이 아니라
-    동호회 내 상대 순위"를 다루기 때문(8.1절)이고, 실력이 전반적으로 높은 클럽에서는
-    모두가 A, 낮은 클럽에서는 모두가 E가 되는 문제를 피하기 위해서다. 그때는 이 함수가
-    팀의 실력 분포(예: 상위 10% → A)를 인자로 받는 형태로 바뀔 것이다.
+def effective_skill(player: Player) -> Decimal | None:
+    """등급에 쓰는 값: 경기 기록으로 갱신된 실측값(`skill_overall`), 없으면 사전값(`prior_overall`)."""
+    prof = player.profile
+    if prof is None:
+        return None
+    return prof.skill_overall if prof.skill_overall is not None else prof.prior_overall
 
-    입력: `Decimal` 또는 None (프로필이 없거나 사전값·실측값이 아직 없는 경우).
-    출력: `SkillGrade` 또는 None. None은 UI에서 "데이터 부족" 배지로 표시된다
-    (5.4절 "신규·게스트 데이터 부족").
+
+def absolute_grade(skill: Decimal | float) -> SkillGrade:
+    """절대 구간 (쿼터당 득실 기여, 점): A ≥ +2 · B ≥ +1 · C ≥ −1 · D ≥ −2 · E. 개인 실력 SD 약 2점 가정(9.2절).
+    팀 회원이 `GRADE_MIN_POOL` 보다 적을 때만 쓴다."""
+    v = float(skill)
+    return SkillGrade.A if v >= 2 else SkillGrade.B if v >= 1 else SkillGrade.C if v >= -1 else SkillGrade.D if v >= -2 else SkillGrade.E
+
+
+def _team_pool(db: Session, team_id: int) -> list[float]:
+    """팀의 활동 회원(게스트 제외) 실력 값, 오름차순. 요청 안에서는 한 번만 읽고, DB 에 쓰면(flush) 다시 읽는다."""
+    cache = db.info.setdefault(_POOL_KEY, {})
+    if team_id not in cache:
+        rows = db.execute(
+            select(PlayerProfile.skill_overall, PlayerProfile.prior_overall)
+            .join(Player, Player.id == PlayerProfile.player_id)
+            .where(Player.team_id == team_id, Player.kind == PlayerKind.MEMBER, Player.status == PlayerStatus.ACTIVE)
+        ).all()
+        vals = sorted(float(s if s is not None else p) for s, p in rows if s is not None or p is not None)
+        db.info.setdefault(_POOL_KEY, {})[team_id] = vals  # 조회가 자동 flush 로 캐시를 비웠을 수 있어 다시 꺼낸다
+        return vals
+    return cache[team_id]
+
+
+@event.listens_for(Session, "after_flush")
+def _drop_pool(session: Session, _ctx: object) -> None:
+    session.info.pop(_POOL_KEY, None)  # 실력 · 소속이 바뀌었을 수 있다
+
+
+def grade_of(player: Player) -> SkillGrade | None:
+    """선수의 5등급 (FR-28). **같은 팀 활동 회원 안에서의 위치**로 매긴다 — 설계 전체가 절대 실력이 아니라
+    동호회 안의 상대 순위를 다루기 때문이다(8.1절). 게스트는 비교 대상에 넣지 않고(한 번 오고 안 오는 게스트가
+    분포를 흐리지 않게) 회원들과 비교해 등급만 매긴다.
+
+    위치 p = (나보다 낮은 회원 수 + 같은 회원 수 × 0.5) / 회원 수 → p ≥ 0.9 A · 0.7 B · 0.3 C · 0.1 D · 그 아래 E.
+    회원 10명이면 1 · 2 · 4 · 2 · 1 명. 값이 모두 같으면(설문 전) 모두 C.
+    값이 없으면 None("데이터 부족"), 회원이 5명보다 적으면 절대 구간. 등급은 일정 단위로 바뀐다(경기 기록 저장 때 재계산).
     """
+    skill = effective_skill(player)
     if skill is None:
         return None
-    if skill >= 2:
-        return SkillGrade.A
-    if skill >= 1:
-        return SkillGrade.B
-    if skill >= -1:
-        return SkillGrade.C
-    if skill >= -2:
-        return SkillGrade.D
-    return SkillGrade.E
+    db = object_session(player)
+    pool = _team_pool(db, player.team_id) if db is not None else []
+    if len(pool) < GRADE_MIN_POOL:
+        return absolute_grade(skill)
+    v = float(skill)
+    below, upto = bisect_left(pool, v), bisect_right(pool, v)
+    p = (below + 0.5 * (upto - below)) / len(pool)
+    return next((g for cut, g in GRADE_CUTS if p >= cut), SkillGrade.E)
 
 
 def _positions(player: Player) -> tuple[list[Position], Position | None]:
@@ -92,7 +127,7 @@ def to_card(player: Player, *, include_grade: bool = False) -> PlayerCard:
     2. 없으면 `prior_overall` — 설문·매니저 정렬·게스트 등급에서 온 사전값 (8.4절).
     3. 둘 다 없으면 None → `skill_grade=None`.
     즉 데이터가 쌓이기 전에는 사전값 기준 등급이 보이고, 경기 기록이 붙으면 실측 기준으로
-    자연스럽게 넘어간다.
+    자연스럽게 넘어간다. 그 값을 같은 팀 회원들과 비교한 위치가 등급이다(`grade_of`).
 
     `skill_confidence`(0~1)는 숫자이지만 "실력"이 아니라 "얼마나 믿을 만한가"이므로
     플레이어에게도 보여 준다. 0.3 미만이면 UI가 "데이터 부족" 배지를 붙인다.
@@ -103,9 +138,6 @@ def to_card(player: Player, *, include_grade: bool = False) -> PlayerCard:
     """
     playable, primary = _positions(player)
     profile = player.profile
-    skill = profile.skill_overall if profile and profile.skill_overall is not None else (
-        profile.prior_overall if profile else None
-    )
     return PlayerCard(
         id=player.id,
         user_id=player.user_id,
@@ -114,7 +146,7 @@ def to_card(player: Player, *, include_grade: bool = False) -> PlayerCard:
         role=player.role,
         profile_image_url=player.user.profile_image_url if player.user else None,
         height_cm=player.height_cm if player.kind == PlayerKind.GUEST else (player.user.height_cm if player.user else None),
-        skill_grade=skill_grade_of(skill) if include_grade else None,  # 등급은 매니저/ADMIN 에게만 (사용자 결정)
+        skill_grade=grade_of(player) if include_grade else None,  # 등급은 매니저/ADMIN 에게만 (사용자 결정)
         primary_position=primary,
         playable_positions=playable,
         skill_confidence=profile.skill_confidence if profile else None,

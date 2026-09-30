@@ -6,6 +6,10 @@ import { queryClient } from './queryClient'
 import './index.css'
 import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { reloadForNewVersion } from './lib/stale-chunk'
+
+// 미리 불러오기(modulepreload · CSS)가 예전 파일 이름으로 실패할 때도 새 버전을 받는다 (lazy 화면은 App.tsx 에서)
+window.addEventListener('vite:preloadError', (e) => { if (reloadForNewVersion()) e.preventDefault() })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -11,9 +11,17 @@ import { Spinner } from './components/ui'
 import { KakaoCallbackPage, LoginPage, SignupPage } from './pages/auth'
 import { HomePage } from './pages/home'
 import { TutorialSpotlight } from './components/tutorial'
+import { isChunkLoadError, reloadForNewVersion } from './lib/stale-chunk'
 
+// 배포 전에 열어 둔 탭이 예전 조각 파일을 부르면 실패한다 → 한 번 새로고침해 새 버전을 받는다(새로고침하는 동안은 Spinner)
 const page = <T extends Record<string, unknown>, K extends keyof T>(load: () => Promise<T>, name: K) =>
-  lazy(() => load().then((m) => ({ default: m[name] as React.ComponentType })))
+  lazy(() => load().then(
+    (m) => ({ default: m[name] as React.ComponentType }),
+    (e: unknown) => {
+      if (isChunkLoadError(e) && reloadForNewVersion()) return new Promise<never>(() => {})
+      throw e
+    },
+  ))
 
 const ForgotPasswordPage = page(() => import('./pages/password'), 'ForgotPasswordPage')
 const ResetPasswordPage = page(() => import('./pages/password'), 'ResetPasswordPage')

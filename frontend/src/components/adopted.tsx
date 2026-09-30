@@ -10,6 +10,7 @@ import { teamsApi } from '../api/teams'
 import type { EventView, PlayerCard, SquadView } from '../api/types'
 import { SHARE_DONE, shareImage } from '../lib/kakao'
 import { fmtEvent } from '../lib/format'
+import { isChunkLoadError } from '../lib/stale-chunk'
 import { squadStyle } from '../lib/squads'
 import { AiExplainCard, AiMessageCard } from './ai-cards'
 import { FirstTimeTip } from './tutorial'
@@ -81,7 +82,7 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
       return shareImage(img.file, { title: `${team.data?.name ?? '팀 배정'} · ${fmtEvent(e)}`, description: `팀 배정 결과예요. ${v.squads.map((s) => `${s.squad_name} ${s.members.length}명`).join(' · ')}`, url: `${location.origin}/events/${id}`, width: img.width, height: img.height })
     },
     onSuccess: (r) => setShareMsg(SHARE_DONE[r]),
-    onError: (err) => setShareMsg(err instanceof Error ? err.message : '공유하지 못했어요.'),
+    onError: (err) => setShareMsg(isChunkLoadError(err) ? '새 버전이 나왔어요. 새로고침한 뒤 다시 눌러 주세요.' : err instanceof Error ? err.message : '공유하지 못했어요.'),
   })
   if (view.isLoading) return <Spinner />
   if (!view.data) return null

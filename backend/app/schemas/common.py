@@ -65,9 +65,9 @@ class ItemList[T](BaseModel):
 class SkillGrade(StrEnum):
     """플레이어에게는 수치 대신 5등급만 노출한다 (FR-28).
 
-    A 가 가장 높다. 수치 → 등급 변환은 `app/services/player_service.py:skill_grade_of` 에 있으며,
-    지금은 절대 구간(+2 이상 A, +1 이상 B, −1 이상 C, −2 이상 D, 그 아래 E)이고 나중에 클럽 내
-    분위수로 바꿀지 검토 중이다. 등급은 일정 단위로 바뀐다 — 경기 기록을 저장할 때 실력을 다시 계산하므로 (9.2절 표시 정책).
+    A 가 가장 높다. 변환은 `app/services/player_service.py:grade_of` — **같은 팀 활동 회원 안에서의 위치**
+    (상위 10% A · 20% B · 40% C · 20% D · 하위 10% E, 회원 5명 미만이면 절대 구간). 등급은 일정 단위로 바뀐다
+    — 경기 기록을 저장할 때 실력을 다시 계산하므로 (9.2절 표시 정책).
     """
 
     A = "A"
