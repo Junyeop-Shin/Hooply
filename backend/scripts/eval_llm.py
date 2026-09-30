@@ -1,4 +1,4 @@
-"""AI 설명 검증 (docs/07 FR-54) — 과거 확정 배정에 체인 A · B · C 를 돌려 결과를 docs/eval_result.md 에 쓴다.
+"""AI 설명 검증 (docs/07 FR-54) — 과거 확정 배정에 체인 A · B · C 를, 프리셋 전술에 체인 D 를 돌려 결과를 docs/eval_result.md 에 쓴다.
 
 배포된 서버를 **API 로** 부른다. 키는 서버에만 있으므로 로컬에 키를 둘 필요가 없고, 운영과 똑같은 경로(가드레일 · 캐시 ·
 재시도 · 예비 모델)를 그대로 잰다.
@@ -15,11 +15,15 @@
 자동 점검 (AI 결과만)
   가명(P숫자)이 남지 않았는가 · 그날 명단에 없는 이름이 없는가 · 팀원용에 등급·점수·순위가 없는가 ·
   전술 설명이 추천 순서를 지켰는가 · 필수 칸이 비지 않았는가
+체인 D (역할 태깅)
+  프리셋 22개를 "동작만 그린 팀 전술" 처럼 보낸다 — 이름 · 한 줄 설명은 보내지 않고, 단계 설명은 "N단계" 로 바꾼다
+  (프리셋 설명에는 "슈터가 …" 같은 답이 들어 있다). 사람이 붙인 역할과 자리별로 맞춰 AI · 규칙 추출의 일치율을 비교한다
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import statistics
 import time
@@ -39,7 +43,7 @@ MEMBERS = [f"m{i:02d}@demo.com" for i in range(1, 21)]
 PASSWORD = "demo1234"
 ALIAS_LEFT = re.compile(r"(?<![A-Za-z])P\d+(?!\d)")
 LEAK = re.compile(r"등급|점수|순위|실력이\s*(?:높|낮)")
-PACE = 6.5  # 같은 사용자의 새 호출 사이 간격(초) — 서버의 사용자당 분당 10회 제한 아래로
+PACE = float(os.environ.get("EVAL_PACE", "6.5"))  # 같은 사용자의 새 호출 사이 간격(초) — 서버의 사용자당 분당 10회 제한 아래로
 
 
 @dataclass
@@ -64,6 +68,11 @@ class Client:
 
     def login(self, email: str) -> bool:
         r = self.http.post(f"{self.base}/auth/login", json={"email": email, "password": PASSWORD})
+        for _ in range(3):  # 로그인은 IP 당 분당 10회 제한 — 팀원 20명을 로그인하다 걸리면 창이 비길 기다린다
+            if r.status_code != 429:
+                break
+            time.sleep(61)
+            r = self.http.post(f"{self.base}/auth/login", json={"email": email, "password": PASSWORD})
         if r.status_code != 200:
             return False
         self.tokens[email] = r.json()["access_token"]
@@ -145,6 +154,17 @@ def run(base: str, n_events: int) -> tuple[list[Call], dict[str, Any]]:
             r, took = c.ai(MANAGER, "POST", f"/events/{ev['id']}/tactics/ai-recommend", params={"squad_no": sq["squad_no"]})
             calls.append(_check_c(label, r, took, [it["play_key"] for it in sq["items"]], roster, everyone))
 
+    # D — 프리셋마다 역할 태깅 (사람이 붙인 역할이 정답)
+    for p in c.req(MANAGER, "GET", "/tactics/presets").json()["items"]:
+        body = {
+            "start": p["start"], "ball": p["ball"], "situation": p["situation"],
+            "opp_defense": p["opp_defense"], "screen_call": p["screen_call"],
+            "steps": [{"caption": f"{k + 1}단계", "actions": st["actions"]} for k, st in enumerate(p["steps"])],
+        }
+        rule = c.req(MANAGER, "POST", f"/teams/{tid}/plays:check", json=body).json()["roles"]
+        r, took = c.ai(MANAGER, "POST", f"/teams/{tid}/plays:ai-roles", json=body)
+        calls.append(_check_d(p["key"], r, took, p["roles"], rule))
+
     meta = {"base": base, "team": DEMO_TEAM, "events": [e["event_date"] for e in past], "members_logged_in": len(member_of)}
     return calls, meta
 
@@ -198,11 +218,74 @@ def _check_c(event, r, took, order, roster, everyone) -> Call:
     return call
 
 
+def _check_d(key, r, took, human, rule) -> Call:
+    call = _base("D", key, r, took)
+    if call.ok:
+        b = call.sample
+        b.update(human=human, rule=rule, name=key)
+        if not call.fallback:
+            if len(b["roles"]) != 5 or any(not w.strip() for w in b["reasons"]):
+                call.problems.append("자리 · 이유가 빔")
+            if any(ALIAS_LEFT.search(w) for w in b["reasons"]):
+                call.problems.append("가명이 남음")
+    return call
+
+
+def _agree(a: list[str], b: list[str]) -> int:
+    return sum(x == y for x, y in zip(a, b, strict=True))
+
+
+ROLE_SHORT = {"ball_handler": "핸들러", "screener_roll": "롤", "screener_pop": "팝", "shooter": "슈터",
+              "cutter": "커터", "post": "포스트", "spacer": "스페이서"}
+
+
+def _pct(k: int, n: int) -> str:
+    return f"{k}/{n} ({100 * k / n:.0f}%)" if n else "—"
+
+
+def _roles_cell(roles: list[str], human: list[str]) -> str:
+    """사람이 붙인 역할과 다른 자리는 굵게."""
+    return " · ".join(ROLE_SHORT.get(r, r) if r == h else f"**{ROLE_SHORT.get(r, r)}**" for r, h in zip(roles, human, strict=True))
+
+
+def _d_section(calls: list[Call]) -> list[str]:
+    ds = [c for c in calls if c.chain == "D" and c.ok]
+    if not ds:
+        return []
+    ai = [c for c in ds if not c.fallback]
+    n_all, n_ai = 5 * len(ds), 5 * len(ai)
+    rule_all = sum(_agree(c.sample["rule"], c.sample["human"]) for c in ds)
+    rule_ai = sum(_agree(c.sample["rule"], c.sample["human"]) for c in ai)
+    ai_ok = sum(_agree(c.sample["roles"], c.sample["human"]) for c in ai)
+    fixed = broke = 0  # AI 가 규칙과 다르게 붙인 자리 중 사람과 맞게 고친 것 · 틀리게 바꾼 것
+    for c in ai:
+        for a, ru, h in zip(c.sample["roles"], c.sample["rule"], c.sample["human"], strict=True):
+            if a != ru:
+                fixed += a == h
+                broke += ru == h
+    out = ["## 체인 D — 역할 일치율 (사람이 붙인 프리셋 역할 기준)", "",
+           "| 비교 | 규칙 추출 | AI 태깅 |", "| --- | ---: | ---: |",
+           f"| AI 결과가 나온 전술 {len(ai)}개 ({n_ai}자리) | {_pct(rule_ai, n_ai)} | {_pct(ai_ok, n_ai)} |",
+           f"| 전체 {len(ds)}개 ({n_all}자리, 폴백은 규칙 그대로) | {_pct(rule_all, n_all)} | {_pct(ai_ok + rule_all - rule_ai, n_all)} |",
+           "",
+           f"- AI 가 규칙과 다르게 붙인 자리: 사람과 맞게 고친 것 {fixed} · 맞던 것을 틀리게 바꾼 것 {broke}",
+           ("- 사람이 붙인 역할에는 \"킥아웃을 기다리는 코너\" 처럼 동작에 드러나지 않는 의도가 섞여 있어 100% 가 목표는 아니다. "
+            "매니저는 편집기에서 언제든 고칠 수 있다 (FR-58)"),
+           "",
+           "| 전술 | 사람 | 규칙 | AI |", "| --- | --- | --- | --- |"]
+    for c in ds:
+        h = c.sample["human"]
+        ai_cell = "(폴백)" if c.fallback else _roles_cell(c.sample["roles"], h)
+        out.append(f"| {c.event} | {' · '.join(ROLE_SHORT.get(r, r) for r in h)} | {_roles_cell(c.sample['rule'], h)} | {ai_cell} |")
+    out += ["", "굵은 글씨 = 사람이 붙인 역할과 다른 자리", ""]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 보고서
 # ---------------------------------------------------------------------------
 
-CHAIN_NAME = {"A": "A · 매니저용 배정 설명", "B": "B · 팀원용 AI 한마디", "C": "C · 전술 추천 설명"}
+CHAIN_NAME = {"A": "A · 매니저용 배정 설명", "B": "B · 팀원용 AI 한마디", "C": "C · 전술 추천 설명", "D": "D · 역할 태깅"}
 
 
 def _sample_md(call: Call) -> list[str]:
@@ -212,6 +295,8 @@ def _sample_md(call: Call) -> list[str]:
         lines += [f"- 부족: {x}" for x in b["gaps"]] + ([f"- 주의: {b['watch_point']}"] if b["watch_point"] else [])
     elif call.chain == "B":
         lines = [f"- 왜 이 포지션: {b['why_position']}", f"- 기대 역할: {b['role']}"] + ([f"- 호흡: {b['partner']}"] if b["partner"] else [])
+    elif call.chain == "D":
+        lines = [f"- {i + 1}번 {r}: {w}" for i, (r, w) in enumerate(zip(b["roles"], b["reasons"], strict=True))]
     else:
         lines = [f"- AI 코치: {b['one_liner']}"]
         for it in b["items"]:
@@ -228,8 +313,8 @@ def report(calls: list[Call], meta: dict[str, Any]) -> str:
         f"- 실행: {now} · 대상 서버: `{meta['base']}` · 스크립트: `backend/scripts/eval_llm.py`",
         (f"- **표본 출처: 데모 팀 \"{meta['team']}\" 지난 확정 배정 {len(meta['events'])}건 ({', '.join(meta['events'])}) · 실제 동호회 팀 0건** — "
          "실제 팀원 데이터는 평가 목적으로 외부 모델에 보내지 않는다"),
-        (f"- 호출 합계 {len(calls)}건 (A {sum(c.chain == 'A' for c in calls)} · B {sum(c.chain == 'B' for c in calls)} · C {sum(c.chain == 'C' for c in calls)}). "
-         "B 는 팀마다 팀원 한 명으로, C 는 팀마다 대인 수비 보기로 부른다"),
+        (f"- 호출 합계 {len(calls)}건 (" + " · ".join(f"{ch} {sum(c.chain == ch for c in calls)}" for ch in "ABCD") + "). "
+         "B 는 팀마다 팀원 한 명으로, C 는 팀마다 부르고, D 는 프리셋 전술마다 부른다"),
         "- \"저장된 결과\"는 앞서 같은 입력으로 실제로 부른 결과를 다시 쓴 것이다 (응답 시간은 새 호출만 센다)",
         "",
         "## 체인별 요약",
@@ -237,7 +322,7 @@ def report(calls: list[Call], meta: dict[str, Any]) -> str:
         "| 체인 | 호출 | 새 호출 / 저장된 결과 | AI 결과(검증 통과) | 폴백 | 폴백 사유 | 새 호출 응답 시간 평균 · 최대 | 자동 점검 문제 |",
         "| --- | ---: | ---: | ---: | ---: | --- | ---: | ---: |",
     ]
-    for ch in "ABC":
+    for ch in "ABCD":
         cs = [c for c in calls if c.chain == ch]
         if not cs:
             continue
@@ -252,10 +337,11 @@ def report(calls: list[Call], meta: dict[str, Any]) -> str:
     problems = [c for c in calls if c.problems]
     out += ["", "## 자동 점검", ""]
     out += [("- 가명이 남지 않았는가 · 그날 명단에 없는 사람을 말하지 않았는가 · 팀원용에 등급·점수·순위가 없는가 · "
-             "전술 설명이 추천 순서를 지켰는가 · 필수 칸이 비지 않았는가 (AI 결과만 점검)"), ""]
+             "전술 설명이 추천 순서를 지켰는가 · 필수 칸이 비지 않았는가 · 역할 태깅의 자리와 이유가 다 찼는가 (AI 결과만 점검)"), ""]
     out += [f"- {c.event} {c.chain}: {', '.join(c.problems)}" for c in problems] or ["- 문제 없음"]
-    out += ["", "## 예시 (체인별 첫 AI 결과)", ""]
-    for ch in "ABC":
+    out += ["", *_d_section(calls)]
+    out += ["## 예시 (체인별 첫 AI 결과)", ""]
+    for ch in "ABCD":
         first = next((c for c in calls if c.chain == ch and not c.fallback), None)
         if first:
             out += [f"### {CHAIN_NAME[ch]} — {first.event}", "", *_sample_md(first), ""]
@@ -263,7 +349,9 @@ def report(calls: list[Call], meta: dict[str, Any]) -> str:
             ("- 판단(활약 · 조합 · 부족한 역할 · 포지션 이유 · 추천 전술과 자리)은 서버 규칙이 하고 AI 는 문장만 쓰므로, "
              "이 평가는 **문장이 규칙의 판단을 벗어나지 않는가**를 본다. 판단 자체의 정확도는 실제 배정이 쌓인 뒤 따로 본다 (명세 O4)."),
             "- 폴백은 오류가 아니다 — 가드레일이 걸러냈거나 공급자가 붐빌 때 기존 규칙 설명을 보여 준 것이다.",
-            "- 무료 등급 Gemini 라 응답 시간과 과부하(503)는 시간대에 따라 달라진다.", ""]
+            "- 무료 등급 Gemini 라 응답 시간과 과부하(503)는 시간대에 따라 달라진다.",
+            ("- 체인 D 는 A · B · C 와 달리 AI 가 판단(역할 고르기)까지 한다. 일치율이 규칙 추출과 비슷하면 AI 가 더하는 것이 없다는 뜻이다 — "
+             "그때는 규칙 역할을 그대로 쓰고 AI 는 이유 문장만 쓰는 쪽을 검토한다 (명세 O11)."), ""]
     return "\n".join(out)
 
 

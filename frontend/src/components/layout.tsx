@@ -40,7 +40,7 @@ export function TopBar({
   return (
     <header
       className={`sticky top-0 z-10 flex h-14 items-center gap-2 px-3 ${
-        dark ? 'bg-bar text-bar-ink' : 'border-b border-line bg-surface/90 text-ink backdrop-blur'
+        dark ? 'bg-bar text-bar-ink' : 'border-b border-line bg-surface text-ink'
       }`}
     >
       {back ? (
@@ -64,10 +64,11 @@ export function Content({ children, className = '' }: { children: ReactNode; cla
   return <main className={`flex-1 space-y-4 px-4 py-4 ${className}`}>{children}</main>
 }
 
-/** 화면 하단 고정 액션 영역 (5.1절 한 손 조작) */
+/** 화면 하단 고정 액션 영역 (5.1절 한 손 조작). 헤더와 같이 배경은 불투명 — iOS Safari(WebKit)에서 반투명 배경은
+ * 아래 글자가 그대로 비쳐, 비활성(반투명) 버튼 위로 겹쳐 보였다 (docs/07 O7) */
 export function BottomAction({ children }: { children: ReactNode }) {
   return (
-    <div className="safe-bottom sticky bottom-0 border-t border-line bg-surface/95 px-4 pt-3 backdrop-blur">
+    <div className="safe-bottom sticky bottom-0 border-t border-line bg-surface px-4 pt-3">
       {children}
     </div>
   )
