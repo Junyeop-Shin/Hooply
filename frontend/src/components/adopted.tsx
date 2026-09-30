@@ -128,7 +128,7 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
           {v.squads.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`팀 ${s.squad_name}`} narrow={v.squads.length === 3} />)}
         </div>
       )}
-      {!isManager && <p className="px-1 text-center text-xs text-faint">실력 수치는 표시하지 않아요. 등급은 8쿼터마다 갱신돼요.</p>}
+      {!isManager && <p className="px-1 text-center text-xs text-faint">실력 수치는 표시하지 않아요. 등급은 경기 기록이 저장될 때마다 갱신돼요.</p>}
     </section>
   )
 }
