@@ -7,7 +7,9 @@ import { useState } from 'react'
 import { squadName, squadStyle } from '../lib/squads'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
+import { invalidateEvent } from '../lib/invalidate'
+import { confirm } from '../store/feedback'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
 import { REASON_TAGS, reasonLabel, type ReasonTag, type VoteCandidate, type VoteIn } from '../api/types'
@@ -33,8 +35,9 @@ export function VotePage() {
 
   const submit = useMutation({
     mutationFn: (votes: VoteIn[]) => peerApi.submit(id, votes),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['events'] }); qc.invalidateQueries({ queryKey: ['stats'] }) },
-    onError: (e) => setMsg(e instanceof ApiError ? e.message : '제출하지 못했어요.'),
+    // 이 일정(내 제출 여부 · 응답 수) · 팀 일정 목록(투표 배너) · 받은 표가 들어가는 기록
+    onSuccess: () => { invalidateEvent(qc, id, ev.data?.team_id); qc.invalidateQueries({ queryKey: ['stats'] }); qc.invalidateQueries({ queryKey: ['me', 'badges'] }) },
+    onError: (e) => setMsg(errorMessage(e, '제출하지 못했어요.')),
   })
 
   const back = `/events/${id}`
@@ -49,7 +52,7 @@ export function VotePage() {
         <TopBar title="경기 후 투표" back={back} />
         <Content>
           <EmptyState
-            title={notOpen ? '일정이 끝나면 투표할 수 있어요' : (err instanceof ApiError ? err.message : '투표 명단을 불러오지 못했어요.')}
+            title={notOpen ? '일정이 끝나면 투표할 수 있어요' : errorMessage(err, '투표 명단을 불러오지 못했어요.')}
             desc={notOpen && ev.data ? `${fmtEvent(ev.data)} 종료 후 자동으로 열려요.` : undefined}
             action={<Button variant="ghost" onClick={() => nav(back)}>일정으로 돌아가기</Button>}
           />
@@ -166,7 +169,7 @@ export function VotePage() {
                           const sel = reasons[c.player.id] === r.tag
                           return (
                             <button key={r.tag} onClick={() => pickReason(g, c.player.id, sel ? null : r.tag)}
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sel ? 'border-court-500 bg-court-500 text-white' : 'border-line bg-surface text-muted'}`}>
+                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sel ? 'border-brand bg-brand text-on-brand' : 'border-line bg-surface text-muted'}`}>
                               {reasonLabel(r.tag, c.is_same_team)}
                             </button>
                           )
@@ -182,7 +185,7 @@ export function VotePage() {
         ))}
       </Content>
       <BottomAction>
-        <Button full loading={submit.isPending} onClick={() => (votes.length > 0 || confirm('아무도 선택하지 않고 제출할까요? 나중에 다시 할 수 없어요.')) && submit.mutate(votes)}>
+        <Button full loading={submit.isPending} onClick={async () => { if (votes.length > 0 || (await confirm({ title: '아무도 선택하지 않고 제출할까요?', body: '나중에 다시 할 수 없어요.', confirmLabel: '제출' }))) submit.mutate(votes) }}>
           {votes.length === 0 ? '선택 없이 제출' : `${votes.length}명 제출`}
         </Button>
       </BottomAction>
@@ -209,7 +212,7 @@ function CandidateRow({ c, on, disabled, onClick }: { c: VoteCandidate; on: bool
         <p className="truncate text-xs text-muted">{p.primary_position ?? p.playable_positions[0] ?? '포지션 미입력'}</p>
       </div>
       <SquadBadge c={c} />
-      <span className={`flex size-6 items-center justify-center rounded-full text-xs font-bold ${on ? 'bg-court-500 text-white' : 'border border-line-strong text-transparent'}`}>✓</span>
+      <span className={`flex size-6 items-center justify-center rounded-full text-xs font-bold ${on ? 'bg-brand text-on-brand' : 'border border-line-strong text-transparent'}`}>✓</span>
     </button>
   )
 }

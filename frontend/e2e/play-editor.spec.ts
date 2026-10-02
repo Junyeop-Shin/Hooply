@@ -14,10 +14,10 @@ async function slot(page: Page, n: number) {
 }
 
 test('매니저가 픽앤롤을 그려 저장하고, 역할을 붙이고, 댓글을 단 뒤 지운다', async ({ page }) => {
-  page.on('dialog', (d) => d.accept())
+  page.on('dialog', (d) => d.accept())  // 저장하지 않은 그림이 있을 때 브라우저가 묻는 beforeunload 만 남았다
   await login(page)
   await page.getByRole('button', { name: '일요 코트메이트 팀 열기' }).click()
-  await page.getByRole('button', { name: '전술', exact: true }).click()
+  await page.getByRole('tab', { name: '전술', exact: true }).click()
   await page.getByRole('link', { name: '+ 새 전술 만들기' }).click()
 
   await page.getByLabel('전술 이름').fill('E2E 픽앤롤')
@@ -77,5 +77,6 @@ test('매니저가 픽앤롤을 그려 저장하고, 역할을 붙이고, 댓글
   await page.getByRole('link', { name: '고치기' }).click()
   await expect(page.getByLabel('전술 이름')).toHaveValue('E2E 픽앤롤')
   await page.getByRole('button', { name: '전술 지우기' }).click()
+  await page.getByRole('dialog', { name: '이 전술을 지울까요?' }).getByRole('button', { name: '지우기' }).click()
   await expect(page.getByRole('heading', { name: '일요 코트메이트' })).toBeVisible()
 })

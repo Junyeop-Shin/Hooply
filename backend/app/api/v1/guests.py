@@ -123,7 +123,7 @@ def update_player(db: DB, user: CurrentUser, player_id: int, body: PlayerUpdate)
     """게스트의 표시 이름·실력 등급·선호/가능 포지션을 수정한다.
 
     - **권한:** 등록자 본인 또는 팀 매니저 또는 ADMIN (스펙 FR-10a).
-    - **처리:** 보낸 필드만 바꾼다. `skill_grade`를 보내면 `prior_overall`을 재환산하고
+    - **처리:** 보낸 필드만 바꾼다 (`height_cm: null` 을 명시하면 키를 지우고, 필드를 빼면 그대로 둔다). `skill_grade`를 보내면 `prior_overall`을 재환산하고
       `skill_rating_history(source=MANAGER_ADJUST)`를 남긴다. S-12에서 게스트 칩을 탭해 등급을 즉시
       고치는 흐름이 이 API를 쓴다.
     - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_NOT_OWNER`, `400 VALIDATION_ERROR` — 게스트가 아님.
@@ -137,7 +137,7 @@ def update_player(db: DB, user: CurrentUser, player_id: int, body: PlayerUpdate)
     guest_service.update_guest(
         db, guest, user, display_name=body.display_name, skill_grade=body.skill_grade,
         preferred_position=body.preferred_position, playable_positions=body.playable_positions,
-        grade_given="skill_grade" in fields, height_cm=body.height_cm,
+        grade_given="skill_grade" in fields, height_cm=body.height_cm, height_given="height_cm" in fields,
     )
     db.commit()
     db.refresh(guest)

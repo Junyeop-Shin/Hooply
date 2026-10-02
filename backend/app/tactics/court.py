@@ -28,12 +28,6 @@ def to_meters(x: float, y: float) -> tuple[float, float]:
     return x * COURT_W, y * COURT_H
 
 
-def rim_distance(x: float, y: float) -> float:
-    """림 중심까지 거리 (m)."""
-    mx, my = to_meters(x, y)
-    return math.hypot(mx - RIM_X, my - RIM_Y)
-
-
 def is_three(x: float, y: float) -> bool:
     """3점 라인 밖(라인 위 포함)인가.
 

@@ -14,7 +14,7 @@ test('플레이어에게는 남의 실력 등급이 보이지 않고 내 등급�
   })
   await login(page, PLAYER)
   await page.goto('/teams/1')
-  await page.getByRole('button', { name: /팀원 \d+/ }).click()
+  await page.getByRole('tab', { name: /팀원 \d+/ }).click()
   await page.waitForTimeout(800)
   await page.goto('/teams/1/leaderboard')
   await page.waitForTimeout(800)

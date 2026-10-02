@@ -4,7 +4,8 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ApiError } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
+import { confirm, toast } from '../store/feedback'
 import { tacticCommentsApi } from '../api/tactics'
 import { Alert, Button, SectionTitle, Spinner } from './ui'
 
@@ -21,10 +22,12 @@ export function TacticComments({ teamId, playKey }: { teamId: number; playKey: s
   const add = useMutation({
     mutationFn: () => tacticCommentsApi.add(teamId, playKey, text),
     onSuccess: () => { setText(''); qc.invalidateQueries({ queryKey: key }) },
+    meta: { inlineError: true },  // 입력칸 아래 Alert
   })
   const remove = useMutation({
     mutationFn: (id: number) => tacticCommentsApi.remove(teamId, id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast('댓글을 지웠어요.') },
+    onError: (e) => toast(errorMessage(e, '댓글을 지우지 못했어요.'), 'error'),
   })
   if (list.error instanceof ApiError && list.error.status === 403) return null // 팀원이 아니면 숨긴다
   const items = list.data?.items ?? []
@@ -41,8 +44,9 @@ export function TacticComments({ teamId, playKey }: { teamId: number; playKey: s
                 <span className="text-faint">{when(c.created_at)}</span>
                 {c.can_delete && (
                   <button
-                    type="button" onClick={() => remove.mutate(c.id)} disabled={remove.isPending}
-                    className="ml-auto min-h-8 px-2 text-xs text-muted active:text-danger-ink" aria-label={`${c.author_name}의 댓글 지우기`}
+                    type="button" disabled={remove.isPending}
+                    onClick={async () => { if (await confirm({ title: '댓글을 지울까요?', body: c.body.length > 60 ? `${c.body.slice(0, 60)}…` : c.body, confirmLabel: '지우기', danger: true })) remove.mutate(c.id) }}
+                    className="-my-2 ml-auto min-h-11 px-2 text-xs text-muted active:text-danger-ink" aria-label={`${c.author_name}의 댓글 지우기`}
                   >
                     지우기
                   </button>
@@ -62,7 +66,7 @@ export function TacticComments({ teamId, playKey }: { teamId: number; playKey: s
             />
             <Button type="submit" loading={add.isPending} disabled={!text.trim()} className="shrink-0">남기기</Button>
           </form>
-          {add.isError && <Alert>{add.error instanceof ApiError ? add.error.message : '댓글을 남기지 못했어요.'}</Alert>}
+          {add.isError && <Alert>{errorMessage(add.error, '댓글을 남기지 못했어요.')}</Alert>}
         </div>
       )}
     </section>

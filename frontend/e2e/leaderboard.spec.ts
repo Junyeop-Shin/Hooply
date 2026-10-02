@@ -5,7 +5,7 @@ import { login } from './helpers'
 test('리더보드: 달을 고르면 기여 점수가 그 달 값으로 바뀐다', async ({ page }) => {
   await login(page)
   await page.getByRole('button', { name: '일요 코트메이트 팀 열기' }).click()
-  await page.getByRole('button', { name: '기록', exact: true }).click()
+  await page.getByRole('tab', { name: '기록', exact: true }).click()
   await page.getByRole('button', { name: /^리더보드 더 보기/ }).click()
   await expect(page.getByRole('heading', { name: '리더보드' })).toBeVisible()
 

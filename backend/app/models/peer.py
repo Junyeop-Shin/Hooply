@@ -44,11 +44,13 @@ class PostGameSurvey(Base):
     __table_args__ = (
         # 한 회차에 한 응답자는 한 번만 제출
         UniqueConstraint("event_id", "respondent_player_id", name="uq_post_game_surveys_respondent"),
+        Index("ix_post_game_surveys_respondent", "respondent_player_id"),
     )
 
     id: Mapped[BigPK]
-    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
-    respondent_player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False, index=True)  # 회원만 (서비스 검증)
+    # event_id 조회는 uq_post_game_surveys_respondent(event_id 가 맨 앞)가 맡는다 — 단독 인덱스는 0025 에서 지웠다
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    respondent_player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False)  # 회원만 (서비스 검증)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)  # 제출 시각(앱 설정)
 
     # 최대 8행: (잘한 사람 / 또 뛰고 싶은 사람) × (같은 팀 2명 / 상대 팀 2명)
@@ -101,9 +103,11 @@ class ChemistryScore(Base):
         UniqueConstraint("player_a_id", "player_b_id", name="uq_chemistry_scores_pair"),
         # (A,B) 와 (B,A) 가 따로 생기지 않도록 항상 작은 id 를 a 에 둔다. a = b (자기 자신)도 차단
         CheckConstraint("player_a_id < player_b_id", name="ck_chemistry_scores_ordered_pair"),
-        # 6.4절: 한 선수가 a 쪽이든 b 쪽이든 빠르게 찾기 위한 양방향 인덱스
-        Index("ix_chemistry_scores_a", "player_a_id"),
+        # 6.4절: 한 선수가 a 쪽이든 b 쪽이든 빠르게 찾기 위한 양방향 인덱스. a 쪽은 uq_chemistry_scores_pair(a 가 맨 앞)가
+        # 맡으므로 b 쪽만 따로 둔다 (ix_chemistry_scores_a 는 0025 에서 지웠다)
         Index("ix_chemistry_scores_b", "player_b_id"),
+        # 선호 점수는 0~1 비율 (peer_service._directional_pref 양방향 평균)
+        CheckConstraint("pref_score IS NULL OR pref_score BETWEEN 0 AND 1", name="ck_chemistry_scores_pref_range"),
     )
 
     id: Mapped[BigPK]

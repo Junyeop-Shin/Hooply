@@ -32,7 +32,8 @@ def test_admin_endpoints(client, signup, club):
     assert raw["player"]["id"] == pid and raw["profile"] is not None and len(raw["survey_answers"]) > 0
     before = raw["profile"]["skill_overall"] or raw["profile"]["prior_overall"]
     r = client.patch(f"{API}/admin/players/{pid}/rating", json={"skill_overall": 3.5, "reason": "테스트 보정"}, headers=admin)
-    assert r.status_code == 200 and r.json()["skill_overall"] == "3.5" and r.json()["prior_overall"] == "3.5"
+    # 사전값은 그대로 두고 보정은 admin_adjust 로 따로 둔다 (설문 · 정렬 재계산에 지워지지 않게)
+    assert r.status_code == 200 and r.json()["skill_overall"] == "3.5" and r.json()["prior_overall"] == raw["profile"]["prior_overall"]
     raw2 = client.get(f"{API}/admin/players/{pid}/raw", headers=admin).json()
     assert raw2["rating_history"][-1]["source"] == "ADMIN_ADJUST" and raw2["rating_history"][-1]["reason"] == "테스트 보정"
     logs = client.get(f"{API}/admin/audit-logs", headers=admin).json()

@@ -7,7 +7,7 @@ n × 32 × 5 다. 10명이어도 1,600번이고, 전술 22개 × 두 팀이어�
 적합도 = 앉힌 5명의 역할 점수 평균 × 100 (0~100).
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from app.tactics.play import Defense, Play, Role
@@ -98,13 +98,3 @@ def fit_play(play: Play, roster: Sequence[PlayerRoles]) -> PlayFit:
 def allowed_defenses(zone: bool) -> frozenset[Defense]:
     """상대 수비 토글 "맨투맨 수비 · 지역 수비" → 후보로 삼을 전술의 대상 수비."""
     return frozenset({"zone", "any"}) if zone else frozenset({"man", "any"})
-
-
-def rank_plays(
-    plays: Iterable[Play], roster: Sequence[PlayerRoles], *, zone: bool = False, top: int = 3,
-) -> list[PlayFit]:
-    """대상 수비가 맞는 하프코트 전술만 적합도 높은 순으로 `top` 개. 같으면 프리셋 목록 순서. 인바운드는 빼고."""
-    ok = allowed_defenses(zone)
-    fits = [fit_play(p, roster) for p in plays if p.defense in ok and p.situation == "half_court"]
-    fits.sort(key=lambda f: -f.fit)  # 안정 정렬이라 동점은 목록 순서 유지
-    return fits[:top]

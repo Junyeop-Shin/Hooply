@@ -43,10 +43,17 @@ from app.schemas.tactic import (
     TacticRecommendation,
 )
 from app.services import survey_service
-from app.services.assignment_service import _players_of, adopted_candidate
+from app.services.assignment_service import adopted_candidate, players_of
 from app.tactics.matching import SLOTS, allowed_defenses, fit_play
 from app.tactics.play import Play, render_counter
-from app.tactics.presets import PRESET_LIST, PRESETS_VERSION, TEAM_KEY_PREFIX, get_play, play_key
+from app.tactics.presets import (
+    PRESET_LIST,
+    PRESETS_VERSION,
+    TEAM_KEY_PREFIX,
+    get_play,
+    play_key,
+    team_play_id,
+)
 from app.tactics.roles import PlayerRoles, compute_role_scores, role_input_from_features
 
 TOP_N = 3
@@ -111,7 +118,7 @@ def _order(players: dict[int, Player], ids: list[int]) -> list[int]:
 
 def role_scores_for(db: Session, event: Event, players: dict[int, Player]) -> dict[int, PlayerRoles]:
     """확정 배정에 든 사람 전원의 역할 점수. 설문은 회원만, 키·포지션은 게스트도 자기 값."""
-    features = {p.id: f for p, f in survey_service._members_with_features(db, event.team_id, list(players))}
+    features = {p.id: f for p, f in survey_service.members_with_features(db, event.team_id, list(players))}
     inputs = [
         role_input_from_features(
             pid, features.get(pid),
@@ -124,12 +131,12 @@ def role_scores_for(db: Session, event: Event, players: dict[int, Player]) -> di
     return compute_role_scores(inputs)
 
 
-def _context(db: Session, event: Event) -> _Ctx | None:
+def context(db: Session, event: Event) -> _Ctx | None:
     cand = adopted_candidate(db, event)
     if cand is None:
         return None
     raw = {sq.squad_no: [s.player_id for s in sq.slots] for sq in cand.squads}
-    players = _players_of(db, [pid for ids in raw.values() for pid in ids])
+    players = players_of(db, [pid for ids in raw.values() for pid in ids])
     saved: dict[tuple[int, str], list[int | None]] = {}
     for r in db.scalars(select(EventPlayAssignment).where(EventPlayAssignment.event_id == event.id)).all():
         saved.setdefault((r.squad_no, r.play_key), [None] * SLOTS)[r.slot - 1] = r.player_id
@@ -146,7 +153,7 @@ def _context(db: Session, event: Event) -> _Ctx | None:
     )
 
 
-def _require_attendee(db: Session, event: Event, me: Player, ctx: _Ctx | None) -> None:
+def require_attendee(db: Session, event: Event, me: Player, ctx: _Ctx | None) -> None:
     if _is_manager(me):
         return
     if ctx is not None and ctx.squad_of(me.id) is not None:
@@ -216,8 +223,8 @@ def ranked_lineups(ctx: _Ctx, squad_no: int, *, zone: bool, manager: bool) -> li
 
 
 def recommend(db: Session, event: Event, me: Player, *, squad_no: int | None, zone: bool) -> TacticRecommendation:
-    ctx = _context(db, event)
-    _require_attendee(db, event, me, ctx)
+    ctx = context(db, event)
+    require_attendee(db, event, me, ctx)
     if ctx is None:
         raise errors.NotAdoptedYet()
     manager = _is_manager(me)
@@ -239,8 +246,8 @@ def play_view(db: Session, event: Event, key: str, me: Player) -> EventPlayView:
     play = find_play(db, event.team_id, key)
     if play is None:
         raise errors.NotFound("없는 전술이에요.")
-    ctx = _context(db, event)
-    _require_attendee(db, event, me, ctx)
+    ctx = context(db, event)
+    require_attendee(db, event, me, ctx)
     manager = _is_manager(me)
     squads: list[SquadBoard] = []
     if ctx is not None:
@@ -287,7 +294,7 @@ def save_slots(db: Session, event: Event, key: str, body: SlotsIn, by: User, me:
     ))
     for s in body.slots:
         db.add(EventPlayAssignment(
-            event_id=event.id, squad_no=body.squad_no, play_key=key_, slot=s.slot, player_id=s.player_id, assigned_by=by.id,
+            event_id=event.id, squad_no=body.squad_no, play_key=key_, team_play_id=team_play_id(key_), slot=s.slot, player_id=s.player_id, assigned_by=by.id,
         ))
     db.commit()
     return play_view(db, event, key_, me)

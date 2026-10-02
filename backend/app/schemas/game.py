@@ -24,6 +24,9 @@ from app.models.enums import Position, Side
 DEFAULT_DURATION_MIN = 8
 MIN_DURATION_MIN = 1
 MAX_DURATION_MIN = 10
+# 팀당 쿼터 득점 상한. 99점 × 10 / 1분 = 990 이라 normalized_margin NUMERIC(5,2) (최대 999.99) 를 넘지 않는다.
+# DB 는 넉넉한 하드 상한 200 을 따로 둔다 (ck_quarters_score_range)
+MAX_QUARTER_SCORE = 99
 
 
 class LineupIn(BaseModel):
@@ -42,8 +45,8 @@ class QuarterIn(BaseModel):
     """
 
     quarter_no: int = Field(ge=1, le=30, description="1부터. 회차마다 개수가 다를 수 있다 (하루 최대 30쿼터)")
-    black_score: int = Field(ge=0, le=200, description="첫째 칸(BLACK · home) 팀 득점")
-    white_score: int = Field(ge=0, le=200, description="둘째 칸(WHITE · away) 팀 득점")
+    black_score: int = Field(ge=0, le=MAX_QUARTER_SCORE, description=f"첫째 칸(BLACK · home) 팀 득점. 0~{MAX_QUARTER_SCORE}")
+    white_score: int = Field(ge=0, le=MAX_QUARTER_SCORE, description=f"둘째 칸(WHITE · away) 팀 득점. 0~{MAX_QUARTER_SCORE}")
     home_squad_no: int = Field(default=1, ge=1, le=3, description="첫째 칸에 선 팀 번호. 2팀이면 1(블랙), 3팀이면 그 쿼터 대진")
     away_squad_no: int = Field(default=2, ge=1, le=3, description="둘째 칸에 선 팀 번호. home 과 달라야 한다")
     duration_min: int = Field(default=DEFAULT_DURATION_MIN, ge=MIN_DURATION_MIN, le=MAX_DURATION_MIN, description="쿼터 길이(분). 기본 8분, 1~10분. 마진을 10분 기준으로 정규화하는 데 쓴다")
@@ -56,8 +59,8 @@ class QuarterUpdate(BaseModel):
     `lineups` 는 부분 수정이 아니라 통째로 교체다 (보내면 10명 전부).
     """
 
-    black_score: int | None = Field(default=None, ge=0, le=200)
-    white_score: int | None = Field(default=None, ge=0, le=200)
+    black_score: int | None = Field(default=None, ge=0, le=MAX_QUARTER_SCORE)
+    white_score: int | None = Field(default=None, ge=0, le=MAX_QUARTER_SCORE)
     home_squad_no: int | None = Field(default=None, ge=1, le=3)
     away_squad_no: int | None = Field(default=None, ge=1, le=3)
     duration_min: int | None = Field(default=None, ge=MIN_DURATION_MIN, le=MAX_DURATION_MIN)

@@ -159,6 +159,7 @@ function EventBoard({ play, view, eventId, editPath }: { play: Play; view: Event
       setDraft(null)
       setNotice(slotsIn.length ? '저장했어요. 그날 참석자에게 이 배치로 보여요.' : '추천 배치로 되돌렸어요.')
     },
+    meta: { inlineError: true },
   })
 
   const assign = (slot: number, pid: number) => {

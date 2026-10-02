@@ -13,9 +13,14 @@
 13.2절 1항(첫 2회 모임 데이터 미반영).
 """
 
+import os
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 기본 서명 키. 로컬 · 테스트에서만 쓸 수 있다 (운영 같은 환경이면 시작을 거부한다 — Settings._refuse_default_secret)
+DEFAULT_JWT_SECRET = "change-me"
 
 
 class Settings(BaseSettings):
@@ -39,7 +44,7 @@ class Settings(BaseSettings):
     # --- JWT (7.1절 · security.py) ---
     # 토큰 서명 키. 이 값이 새면 누구나 토큰을 위조할 수 있으므로 운영에서는 반드시
     # 길고 무작위한 값으로 교체한다. 바꾸면 기존에 발급된 토큰은 전부 무효가 된다.
-    jwt_secret_key: str = "change-me"
+    jwt_secret_key: str = DEFAULT_JWT_SECRET
     # 서명 알고리즘. HS256 = 대칭키(HMAC). 서버 한 대가 발급·검증을 모두 하므로 충분하다.
     jwt_algorithm: str = "HS256"
     # access 토큰 수명(분). API 호출마다 Authorization 헤더로 보내는 짧은 토큰.
@@ -75,6 +80,8 @@ class Settings(BaseSettings):
     docs_enabled: bool = True  # 운영에서는 False 로 두면 /docs, /openapi.json 이 닫힌다
     rate_limit_enabled: bool = True  # 로그인·가입·비밀번호 경로 요청 제한 (core/ratelimit.py). 테스트에서는 끈다
     admin_cookie_secure: bool = False  # HTTPS 배포에서는 True (SQLAdmin 세션 쿠키 https_only + same_site=lax)
+    # 배포 환경 이름. "production" 이면 운영으로 본다. 비워 둬도 Render(환경 변수 RENDER) · HTTPS 쿠키 · /docs 닫힘이면 운영으로 본다
+    app_env: str = ""
 
     # --- AI 설명 (docs/07 D1·D2) --- LangChain 으로 부른다. 키가 없거나 꺼져 있으면 모든 AI 카드가 규칙 문장(폴백)을 보여 준다
     llm_enabled: bool = True
@@ -99,6 +106,23 @@ class Settings(BaseSettings):
     # 월간 코트 마진 랭킹에 오르려면 그 달 팀이 뛴 전체 쿼터의 이 비율 이상 출전해야 한다 (기록 탭).
     # 절대 횟수 대신 비율로 두어 한 달에 2회 모인 달과 5회 모인 달의 기준이 자동으로 달라진다.
     margin_rank_min_share: float = 0.30
+
+    @property
+    def is_production_like(self) -> bool:
+        """운영처럼 다뤄야 하는 환경인가. Render 는 모든 서비스에 RENDER=true 를 넣는다. 로컬 · CI 는 기본값이라 False."""
+        return (
+            self.app_env.strip().lower() in ("production", "prod")
+            or bool(os.environ.get("RENDER"))
+            or self.admin_cookie_secure
+            or not self.docs_enabled
+        )
+
+    @model_validator(mode="after")
+    def _refuse_default_secret(self) -> "Settings":
+        # 기본 키로 서명하면 누구나 토큰을 위조할 수 있다. 운영에서 JWT_SECRET_KEY 를 빠뜨리면 조용히 뜨지 않고 여기서 멈춘다
+        if self.is_production_like and self.jwt_secret_key.strip() in ("", DEFAULT_JWT_SECRET):
+            raise ValueError("운영 환경에서는 JWT_SECRET_KEY 를 기본값(change-me)이 아닌 길고 무작위한 값으로 설정해야 합니다.")
+        return self
 
 
 @lru_cache

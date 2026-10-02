@@ -46,6 +46,7 @@ from app.models import (
     Event,
     EventAttendance,
     Player,
+    Quarter,
     User,
 )
 from app.models.enums import (
@@ -75,7 +76,7 @@ from app.schemas.common import SquadView
 from app.services.player_service import PLAYER_LOAD, to_card
 
 SQUAD_NAMES = list(DEFAULT_SQUAD_NAMES)  # 13.1절 Q6 기본값 — 1 블랙 · 2 화이트 · 3 레드
-MAX_SUPERNODES = 18  # 2팀 완전 탐색 상한 (2^18 ≈ 26만, 약 0.6초 — 실측 22개는 10초). 넘으면 막지 않고 지역 탐색으로 푼다
+MAX_SUPERNODES = 18  # 2팀 완전 탐색 상한. 팀 인원을 고르게 맞추는 분할만 세므로 18개면 약 2만 개, 실측 0.09초 (2026-10, 행렬 채점). 넘으면 막지 않고 지역 탐색으로 푼다
 HARD_PENALTY = 10.0
 MIN_SQUAD = 5  # 팀마다 코트에 설 5명은 있어야 한다 (배정 · 수동 수정 모두)
 MAX_TEAMS = 3
@@ -949,6 +950,8 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
     """
     if event.status == EventStatus.CANCELED:
         raise errors.ValidationError("취소된 일정은 배정할 수 없어요.")
+    _lock_event(db, event.id)  # 같은 일정의 실행 · 확정이 겹치지 않게 (지난 실행 정리와 확정이 서로를 지우지 않게)
+    ensure_unlocked(db, event.id)
     roster = build_roster(db, event)
     prep = prepare(roster, body)
     vr = _validate_prepared(prep)
@@ -1062,7 +1065,7 @@ def _load_run(db: Session, run_id: int) -> AssignmentRun:
     return r
 
 
-def _players_of(db: Session, ids: list[int]) -> dict[int, Player]:
+def players_of(db: Session, ids: list[int]) -> dict[int, Player]:
     return {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(ids)).options(*PLAYER_LOAD)).all()}
 
 
@@ -1075,7 +1078,7 @@ def squad_views(db: Session, cand: AssignmentCandidate, *, mask: bool, players: 
     """`players` 를 주면 참가자 조회를 건너뛴다 — 한 실행의 후보안 3개는 같은 사람들이라 한 번만 읽으면 된다."""
     ids = [s.player_id for sq in cand.squads for s in sq.slots]
     if players is None:
-        players = _players_of(db, ids)
+        players = players_of(db, ids)
     out = []
     for sq in sorted(cand.squads, key=lambda x: x.squad_no):
         rows = [players[s.player_id] for s in sq.slots if s.player_id in players]
@@ -1116,7 +1119,7 @@ def candidate_view(db: Session, cand: AssignmentCandidate, *, mask: bool = False
 
 def run_view(db: Session, run_row: AssignmentRun, warnings: list[str] | None = None) -> AssignmentRunView:
     ids = list({s.player_id for c in run_row.candidates for sq in c.squads for s in sq.slots})
-    players = getattr(run_row, "_roster_players", None) or (_players_of(db, ids) if ids else {})
+    players = getattr(run_row, "_roster_players", None) or (players_of(db, ids) if ids else {})
     return AssignmentRunView(
         id=run_row.id, event_id=run_row.event_id, team_count=run_row.team_count, created_at=run_row.created_at,
         constraints=constraints_of(run_row), candidates=[candidate_view(db, c, players=players) for c in run_row.candidates],
@@ -1140,6 +1143,7 @@ def last_constraints(db: Session, event: Event) -> ConstraintSet:
         .where(Event.team_id == event.team_id, Event.id != event.id, Event.event_date <= event.event_date)
         .options(selectinload(AssignmentRun.constraints))
         .order_by(Event.event_date.desc(), AssignmentRun.created_at.desc())
+        .limit(1)  # 없으면 지난 run 전부와 그 제약까지 읽어 온다
     )
     if prev is None:
         raise errors.NotFound("지난 일정의 팀 배정 기록이 없어요.")
@@ -1150,7 +1154,7 @@ def get_run(db: Session, run_id: int) -> AssignmentRun:
     return _load_run(db, run_id)
 
 
-def _load_candidate(db: Session, candidate_id: int) -> AssignmentCandidate:
+def load_candidate(db: Session, candidate_id: int) -> AssignmentCandidate:
     # populate_existing: 슬롯의 squad_id 를 바꾼 뒤에도 식별 맵의 stale 컬렉션이 아니라 DB 상태를 다시 읽는다
     c = db.get(
         AssignmentCandidate, candidate_id,
@@ -1175,15 +1179,40 @@ def _lock_groups_of(cand: AssignmentCandidate) -> dict[int, set[int]]:
     return {pid: members for members in groups.values() for pid in members}
 
 
+def edit(
+    db: Session, cand: AssignmentCandidate, *, swaps: list[SwapPair] = (), moves: list[MovePlayer] = (), exchanges: list[Exchange] = (),
+) -> AssignmentCandidate:
+    """`PATCH /assignments/candidates/{id}` 한 번의 수정 — 맞교체 → 옮기기 → 그룹 교환 순으로 적용하고 **한 번만** 저장한다.
+
+    어느 단계에서든 검증에 걸리면 아무것도 저장하지 않는다 (예전에는 swaps 를 저장한 뒤 moves 에서 422 가 나면 반만 바뀌었다).
+    """
+    if cand.is_adopted:
+        raise errors.AlreadyAdopted("확정된 후보안은 수정할 수 없어요. 재배정을 실행해 주세요.")
+    ensure_unlocked(db, cand.run.event_id)
+    if swaps:
+        _apply_exchanges(cand, [Exchange(a_player_ids=[sw.player_id_a], b_player_ids=[sw.player_id_b]) for sw in swaps])
+    if moves:
+        _apply_exchanges(cand, _moves_to_exchanges(cand, moves))  # 앞 단계에서 바뀐 소속을 기준으로 검사한다
+    if exchanges:
+        _apply_exchanges(cand, list(exchanges))
+    _reload_slots(db, cand)
+    _recompute_candidate(db, cand)
+    db.commit()
+    return load_candidate(db, cand.id)
+
+
 def exchange(db: Session, cand: AssignmentCandidate, exchanges: list[Exchange]) -> AssignmentCandidate:
-    """그룹 단위 교환: a 쪽은 상대 팀으로, b 쪽은 a 팀으로. 한쪽이 비면 일방 이동.
+    """그룹 단위 교환만 하는 수정 (`edit` 의 한 경우)."""
+    return edit(db, cand, exchanges=exchanges)
+
+
+def _apply_exchanges(cand: AssignmentCandidate, exchanges: list[Exchange]) -> None:
+    """그룹 단위 교환: a 쪽은 상대 팀으로, b 쪽은 a 팀으로. 한쪽이 비면 일방 이동. 메모리의 슬롯만 바꾼다 (flush 안 함).
 
     - 묶음(LOCK)에 속한 사람이 있으면 묶음 전체를 자동으로 포함한다 (묶음은 통째로만 움직인다).
     - 갈라놓기(SEPARATE)는 교환 뒤에도 서로 다른 팀이어야 한다 (짝을 반대편에 함께 넣으면 통과).
     - 사전 배치(PIN)는 옮길 수 없다. 각 팀에 최소 5명은 남아야 한다.
     """
-    if cand.is_adopted:
-        raise errors.AlreadyAdopted("확정된 후보안은 수정할 수 없어요. 재배정을 실행해 주세요.")
     pinned = {c.player_id for c in cand.run.constraints if c.type == ConstraintType.PIN}
     lock_of = _lock_groups_of(cand)
     sep = _separate_group_of(cand)
@@ -1245,19 +1274,19 @@ def exchange(db: Session, cand: AssignmentCandidate, exchanges: list[Exchange]) 
         for pid in a | b:
             slot_of[pid].squad_id = new_sq[pid]
             slot_of[pid].is_manual_override = True
-    _reload_slots(db, cand)
-    _recompute_candidate(db, cand)
-    db.commit()
-    return _load_candidate(db, cand.id)
 
 
 def swap(db: Session, cand: AssignmentCandidate, swaps: list[SwapPair]) -> AssignmentCandidate:
     """두 선수 맞교체 — Exchange 1:1 로 위임 (묶음은 자동 확장)."""
-    return exchange(db, cand, [Exchange(a_player_ids=[sw.player_id_a], b_player_ids=[sw.player_id_b]) for sw in swaps])
+    return edit(db, cand, swaps=swaps)
 
 
 def move(db: Session, cand: AssignmentCandidate, moves: list[MovePlayer]) -> AssignmentCandidate:
     """한 명(또는 묶음)을 지정한 팀으로 일방 이동 — Exchange 한쪽 비움으로 위임."""
+    return edit(db, cand, moves=moves)
+
+
+def _moves_to_exchanges(cand: AssignmentCandidate, moves: list[MovePlayer]) -> list[Exchange]:
     squads = {sq.squad_no: sq for sq in cand.squads}
     slot_of = {s.player_id: s for sq in cand.squads for s in sq.slots}
     exs = []
@@ -1269,7 +1298,7 @@ def move(db: Session, cand: AssignmentCandidate, moves: list[MovePlayer]) -> Ass
         if slot.squad_id == target.id:
             raise errors.InvalidSwap("이미 그 팀에 있어요.")
         exs.append(Exchange(a_player_ids=[mv.player_id], b_player_ids=[], to_squad_no=mv.to_squad_no))
-    return exchange(db, cand, exs)
+    return exs
 
 
 def _reload_slots(db: Session, cand: AssignmentCandidate) -> None:
@@ -1284,6 +1313,7 @@ def reset_manual(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
     """수동 수정을 모두 되돌려 알고리즘이 낸 원래 편성으로 복원한다."""
     if cand.is_adopted:
         raise errors.AlreadyAdopted("확정한 배정안은 고칠 수 없어요.")
+    ensure_unlocked(db, cand.run.event_id)
     original = cand.metrics.get("original_squads") or {}
     if not original:
         raise errors.ValidationError("처음 배정 결과가 남아 있지 않아 되돌릴 수 없어요.")
@@ -1297,7 +1327,7 @@ def reset_manual(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
     _reload_slots(db, cand)
     _recompute_candidate(db, cand, manual=False)
     db.commit()
-    return _load_candidate(db, cand.id)
+    return load_candidate(db, cand.id)
 
 
 def _recompute_candidate(db: Session, cand: AssignmentCandidate, *, manual: bool = True) -> None:
@@ -1305,7 +1335,7 @@ def _recompute_candidate(db: Session, cand: AssignmentCandidate, *, manual: bool
     사람이 1팀 점수에 섞이거나 빠지지 않게 (재배정은 따로 한다)."""
     event = db.get(Event, cand.run.event_id)
     ids = [s.player_id for sq in cand.squads for s in sq.slots]
-    roster = _roster_from(sorted(_players_of(db, ids).values(), key=lambda p: p.display_name))
+    roster = _roster_from(sorted(players_of(db, ids).values(), key=lambda p: p.display_name))
     rmap = {r.id: r for r in roster}
     squads: list[list[RosterPlayer]] = []
     for sq in sorted(cand.squads, key=lambda x: x.squad_no):
@@ -1340,7 +1370,21 @@ def adopt(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
     같은 결정의 비교 대상이고, 결과 화면이 확정 뒤에도 세 안을 그대로 보여 준다. 남은 run 의
     `roster_snapshot`·제약 덕분에 실력값이 바뀐 뒤에도 "그때 왜 이렇게 나눴는가" 를 설명할 수 있다.
     확정 전에는 지우지 않으므로, 재배정을 돌려 보는 동안에도 플레이어에게는 직전 확정안이 계속 보인다.
+
+    동시성: 일정 행을 `SELECT … FOR UPDATE` 로 잠근 뒤 후보안을 다시 읽는다. 같은 실행의 두 안을 동시에 확정하면 뒤에 온
+    쪽은 앞 쪽이 끝난 뒤의 상태를 보고 409 ALREADY_ADOPTED, 다른 실행의 안을 동시에 확정해도 서로를 지우다 교착되지 않는다
+    (앞 쪽이 지운 실행의 안이면 409).
     """
+    event_id = cand.run.event_id
+    _lock_event(db, event_id)
+    ensure_unlocked(db, event_id)
+    fresh = db.get(
+        AssignmentCandidate, cand.id,
+        options=[selectinload(AssignmentCandidate.run).selectinload(AssignmentRun.candidates)], populate_existing=True,
+    )
+    if fresh is None:  # 다른 실행의 안이 먼저 확정되면서 이 실행이 지워졌다
+        raise errors.AlreadyAdopted("다른 배정안이 먼저 확정됐어요. 화면을 새로고침해 주세요.")
+    cand = fresh
     run_row = cand.run
     already = [c for c in run_row.candidates if c.is_adopted and c.id != cand.id]
     if already:
@@ -1352,7 +1396,18 @@ def adopt(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
     db.flush()
     _prune_history(db, run_row)
     db.commit()
-    return _load_candidate(db, cand.id)
+    return load_candidate(db, cand.id)
+
+
+def _lock_event(db: Session, event_id: int) -> None:
+    """일정 행을 트랜잭션 끝까지 잠근다 (SELECT … FOR UPDATE). 배정 실행 · 확정이 같은 일정에서 겹치지 않게."""
+    db.execute(select(Event.id).where(Event.id == event_id).with_for_update())
+
+
+def ensure_unlocked(db: Session, event_id: int) -> None:
+    """쿼터 기록이 있는 일정은 팀을 다시 짜거나 확정을 바꿀 수 없다 — 기록(누가 어느 팀으로 뛰었나)이 그 편성을 근거로 한다."""
+    if db.scalar(select(Quarter.id).where(Quarter.event_id == event_id).limit(1)) is not None:
+        raise errors.AssignmentLocked()
 
 
 def _prune_history(db: Session, run_row: AssignmentRun) -> None:

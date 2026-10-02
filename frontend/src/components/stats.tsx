@@ -4,6 +4,7 @@
  */
 import { useState, type ReactNode } from 'react'
 import type { MarginPoint, QuarterRecord } from '../api/types'
+import { squadName, squadStyle } from '../lib/squads'
 import { Card } from './ui'
 
 /** 회차별 평균 마진 막대 (0 기준 좌우). 실력 지표가 아니라 그 회차의 결과라는 점을 라벨로 명시 */
@@ -43,9 +44,9 @@ export function Paged<T>({ items, render, unit = '개' }: { items: T[]; render: 
     <Card className="divide-y divide-line p-0">
       {pages > 1 && (
         <div className="flex items-center justify-between px-4 py-2 text-xs">
-          <button disabled={cur === 0} onClick={() => setPage(cur - 1)} className="rounded-lg px-2 py-1 font-semibold text-ink-2 disabled:opacity-30">‹ 최근</button>
+          <button disabled={cur === 0} onClick={() => setPage(cur - 1)} className="-my-2 min-h-11 rounded-lg px-2 font-semibold text-ink-2 disabled:opacity-30">‹ 최근</button>
           <span className="text-muted">{cur * PAGE + 1}–{Math.min(items.length, (cur + 1) * PAGE)} / {items.length}{unit}</span>
-          <button disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)} className="rounded-lg px-2 py-1 font-semibold text-ink-2 disabled:opacity-30">이전 ›</button>
+          <button disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)} className="-my-2 min-h-11 rounded-lg px-2 font-semibold text-ink-2 disabled:opacity-30">이전 ›</button>
         </div>
       )}
       {items.slice(cur * PAGE, cur * PAGE + PAGE).map((it, i) => render(it, cur * PAGE + i))}
@@ -53,7 +54,10 @@ export function Paged<T>({ items, render, unit = '개' }: { items: T[]; render: 
   )
 }
 
-/** 쿼터 기록 목록 — 10개씩 페이지 이동. 이긴 쿼터는 오렌지, 진 쿼터는 로즈 배지 */
+/** 내가 뛴 팀 번호 — 서버가 squad_no 를 주지 않으면(예전 응답) 칸으로 */
+const squadOf = (r: Pick<QuarterRecord, 'side' | 'squad_no'>) => r.squad_no ?? (r.side === 'BLACK' ? 1 : 2)
+
+/** 쿼터 기록 목록 — 10개씩 페이지 이동. 이긴 쿼터는 초록, 진 쿼터는 로즈 배지 */
 export function QuarterList({ records }: { records: QuarterRecord[] }) {
   if (records.length === 0) return null
   return (
@@ -63,9 +67,11 @@ export function QuarterList({ records }: { records: QuarterRecord[] }) {
           <div key={`${r.event_id}-${r.quarter_no}`} className="flex items-center gap-3 px-4 py-2 text-xs">
             <span className="w-12 shrink-0 text-muted">{r.event_date.slice(5).replace('-', '/')}</span>
             <span className="w-10 shrink-0 font-semibold text-ink">{r.quarter_no}쿼터</span>
-            <span className={`inline-flex w-12 shrink-0 items-center justify-center rounded-full py-0.5 text-[10px] font-semibold ${r.side === 'BLACK' ? 'bg-team-black text-team-black-ink' : 'border border-line-strong text-ink'}`}>{r.side === 'BLACK' ? '블랙' : '화이트'}</span>
+            {/* 칸(side)이 아니라 내가 뛴 팀 — 3팀인 날 레드가 블랙 · 화이트 칸에 설 수 있다 */}
+            <span className={`inline-flex w-12 shrink-0 items-center justify-center rounded-full border py-0.5 text-[10px] font-semibold ${squadStyle(squadOf(r)).card}`}>{squadName(squadOf(r))}</span>
             <span className="flex-1 text-muted">{r.my_score} : {r.their_score}{r.position ? ` · ${r.position}` : ''}</span>
-            <span className={`inline-flex w-12 shrink-0 items-center justify-center rounded-full py-0.5 text-[11px] font-bold ${win ? 'bg-emerald-500 text-white' : r.raw_margin < 0 ? 'bg-rose-500 text-white' : 'bg-line text-muted'}`}>{r.raw_margin > 0 ? '+' : ''}{r.raw_margin}</span>
+            {/* 작은 흰 글자라 짙은 색 — emerald-700 5.48:1 · rose-700 6.29:1 */}
+            <span className={`inline-flex w-12 shrink-0 items-center justify-center rounded-full py-0.5 text-[11px] font-bold ${win ? 'bg-emerald-700 text-white' : r.raw_margin < 0 ? 'bg-rose-700 text-white' : 'bg-line text-muted'}`}>{r.raw_margin > 0 ? '+' : ''}{r.raw_margin}</span>
           </div>
         )
       }} />

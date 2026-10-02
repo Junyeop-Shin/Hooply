@@ -403,7 +403,7 @@ def main() -> None:
             invite_guests(ev, GUESTS_BY_WEEK.get(weeks_ago, []))
             r, _ = assignment_service.run(db, ev, manager, AssignmentRunRequest(team_count=2, constraints=constraints_of(weeks_ago)))
             # 회차마다 채택하는 전략을 바꿔 둔다 (실력 우선 / 친화도 우선 / 종합)
-            cand = assignment_service._load_candidate(db, r.candidates[weeks_ago % len(r.candidates)].id)
+            cand = assignment_service.load_candidate(db, r.candidates[weeks_ago % len(r.candidates)].id)
             assignment_service.adopt(db, cand)
             db.commit()
             adopted = assignment_service.adopted_candidate(db, ev)

@@ -13,7 +13,7 @@ export const squadTone = (no: number): SquadTone => (no === 1 ? 'black' : no ===
 export const SQUAD_STYLE: Record<SquadTone, { card: string; sub: string; dot: string; picked: string; soft: string }> = {
   black: {
     card: 'border-team-black bg-team-black text-team-black-ink [color-scheme:dark]',
-    sub: 'text-team-black-sub', dot: 'bg-team-black', picked: 'bg-court-500 text-white', soft: 'bg-white/15',
+    sub: 'text-team-black-sub', dot: 'bg-team-black', picked: 'bg-court-700 text-white', soft: 'bg-white/15',
   },
   white: {
     card: 'border-line-strong bg-team-white text-team-white-ink [color-scheme:light]',

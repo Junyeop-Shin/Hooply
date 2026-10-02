@@ -46,6 +46,8 @@ jobs:
       - run: pip install -r requirements.txt ruff pytest
       - run: ruff check app tests scripts
       - run: alembic upgrade head
+      # 모델과 마이그레이션이 어긋나면(인덱스 이름 · 컬럼 · 제약) 실패한다 — 새 리비전을 빠뜨린 변경을 잡는다
+      - run: alembic check
       - run: pytest -q -p no:warnings
 
   frontend:

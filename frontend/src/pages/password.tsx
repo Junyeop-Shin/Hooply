@@ -4,7 +4,7 @@
  */
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
 import { authApi } from '../api/auth'
 import { Alert, Button, Field } from '../components/ui'
 import { Screen, TopBar } from '../components/layout'
@@ -17,7 +17,7 @@ export function ForgotPasswordPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null); setLoading(true)
-    try { await authApi.forgotPassword(email.trim()); setSent(true) } catch (err) { setError(err instanceof ApiError ? err.message : '요청을 보내지 못했어요.') } finally { setLoading(false) }
+    try { await authApi.forgotPassword(email.trim()); setSent(true) } catch (err) { setError(errorMessage(err, '요청을 보내지 못했어요.')) } finally { setLoading(false) }
   }
   return (
     <Screen className="px-6">
@@ -59,7 +59,7 @@ export function ResetPasswordPage() {
     } catch (err) {
       // 문구가 아니라 코드로 판단한다 — 안내 문구를 고쳐도 분기가 조용히 깨지지 않게
       setExpired(err instanceof ApiError && err.code === 'TOKEN_INVALID_OR_EXPIRED')
-      setError(err instanceof ApiError ? err.message : '비밀번호를 바꾸지 못했어요.')
+      setError(errorMessage(err, '비밀번호를 바꾸지 못했어요.'))
     } finally { setLoading(false) }
   }
   if (!token) {

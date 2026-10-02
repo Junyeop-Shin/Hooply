@@ -5,10 +5,12 @@
  *   ghost                = 취소·뒤로 등 눈에 띄지 않아야 하는 액션
  * 터치 영역은 최소 44px (설계서 5.1절).
  */
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
+import { useModal } from './use-modal'
 import { API_ORIGIN } from '../api/client'
 import type { ApprovalStatus, SkillGrade, TeamRole, TeamStatus } from '../api/types'
+import { ROTATE_MS, SLOW_AFTER_MS, WAIT_SUBLINE, pickWaitMessage } from '../lib/wait-messages'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
@@ -200,18 +202,20 @@ export function EmptyState({ title, desc, action }: { title: string; desc?: stri
 export function Sheet({ label, title, onClose, tall = true, children }: {
   label: string; title: ReactNode; onClose: () => void; tall?: boolean; children: ReactNode
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const panel = useRef<HTMLDivElement>(null)
+  useModal(panel, onClose)
   return (
-    <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/40" onClick={onClose} role="dialog" aria-modal="true" aria-label={label}>
-      <div className={cx('safe-bottom w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl bg-surface p-5', tall ? 'max-h-[90vh]' : 'max-h-[80vh]')} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40" onClick={onClose}>
+      <div
+        ref={panel} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}
+        className={cx('safe-bottom w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl bg-surface p-5 outline-none', tall ? 'max-h-[90vh]' : 'max-h-[80vh]')}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
         <div className="flex items-start justify-between">
           <h3 className="text-lg font-bold text-ink">{title}</h3>
-          <button type="button" onClick={onClose} aria-label="닫기" className="-mr-1 -mt-1 flex size-9 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
+          {/* 보이는 ×는 작게, 누르는 칸은 44px */}
+          <button type="button" onClick={onClose} aria-label="닫기" className="-mr-2.5 -mt-2.5 flex size-11 shrink-0 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
         </div>
         {children}
       </div>
@@ -219,10 +223,48 @@ export function Sheet({ label, title, onClose, tall = true, children }: {
   )
 }
 
+/** 5초가 넘게 돌면 서버가 깨는 중일 수 있다 — 농구 문구를 무작위로 띄우고 6초마다 바꾼다 (lib/wait-messages) */
+function useSlowMessage(): string | null {
+  const [msg, setMsg] = useState<string | null>(null)
+  useEffect(() => {
+    let rotate: number | undefined
+    const start = window.setTimeout(() => {
+      setMsg(pickWaitMessage())
+      rotate = window.setInterval(() => setMsg((m) => pickWaitMessage(m)), ROTATE_MS)
+    }, SLOW_AFTER_MS)
+    return () => { window.clearTimeout(start); if (rotate !== undefined) window.clearInterval(rotate) }
+  }, [])
+  return msg
+}
+
 export function Spinner() {
+  const slow = useSlowMessage()
   return (
-    <div className="flex justify-center py-12">
-      <span className="size-7 animate-spin rounded-full border-[3px] border-brand-line border-t-brand" />
+    <div className="flex flex-col items-center gap-3 py-12">
+      <span className="size-7 animate-spin rounded-full border-[3px] border-brand-line border-t-brand" aria-hidden={slow ? true : undefined} />
+      {slow && (
+        <div role="status" aria-live="polite" className="text-center">
+          <p className="text-sm font-semibold text-ink-2">{slow}</p>
+          <p className="mt-0.5 text-xs text-muted">{WAIT_SUBLINE}</p>
+        </div>
+      )}
     </div>
+  )
+}
+
+/** 불러오지 못했을 때 — 빈 화면("일정이 없어요")으로 오해하지 않게 오류와 다시 시도 버튼을 보여 준다 */
+export function LoadError({ message = '불러오지 못했어요.', onRetry, retrying }: { message?: string; onRetry: () => void; retrying?: boolean }) {
+  return (
+    <Alert>
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0 flex-1">{message}</span>
+        <button
+          type="button" onClick={onRetry} disabled={retrying}
+          className="-my-2 -mr-1.5 min-h-11 shrink-0 rounded-lg px-3 text-sm font-semibold underline underline-offset-2 disabled:opacity-50"
+        >
+          {retrying ? '다시 불러오는 중…' : '다시 시도'}
+        </button>
+      </div>
+    </Alert>
   )
 }

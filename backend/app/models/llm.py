@@ -8,7 +8,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,14 +17,16 @@ from app.db.base import Base, BigPK
 
 class LlmResult(Base):
     __tablename__ = "llm_results"
+    __table_args__ = (UniqueConstraint("cache_key", name="uq_llm_results_cache_key"),)
 
     id: Mapped[BigPK]
     chain: Mapped[str] = mapped_column(String(10), nullable=False)  # A 배정 설명(매니저) · B 팀원 안내 · C 전술 추천
-    cache_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)  # sha256 hex
+    cache_key: Mapped[str] = mapped_column(String(64), nullable=False)  # sha256 hex
     output: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)  # 실명으로 복원한 결과 (폴백이면 폴백 내용)
-    fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # timeout · error · unknown_alias · unknown_number · leak · schema (성공이면 NULL)
     fail_reason: Mapped[str | None] = mapped_column(String(40))
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     model: Mapped[str | None] = mapped_column(String(60))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # 보관 기간(60일) 청소용 인덱스 (0025, llm_guard.cleanup_old_results)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)

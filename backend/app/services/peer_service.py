@@ -18,10 +18,13 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors
 from app.core.config import get_settings
+from app.db.session import lock_team_stats
 from app.models import (
     AssignmentCandidate,
     AssignmentRun,
@@ -201,7 +204,11 @@ def submit(db: Session, event: Event, me: Player, body: PostGameSurveyIn) -> Pos
     for v in body.votes:
         survey.votes.append(PostGameVote(target_player_id=v.target_player_id, vote_type=v.vote_type, target_side=side_of(v.target_player_id), reason_tag=v.reason_tag))
     db.add(survey)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:  # 같은 사람이 두 기기에서 동시에 제출 — 먼저 온 쪽만 남는다
+        db.rollback()
+        raise errors.AlreadySubmitted("이미 이 회차 투표를 제출했어요.") from None
     recompute_team_chemistry(db, event.team_id)
     db.commit()
     return survey
@@ -225,7 +232,11 @@ def recompute_team_chemistry(db: Session, team_id: int) -> int:
     스펙 4.1절: 두 사람이 함께 참석한 회차를 최신순으로 나열해 k번째(0부터) 회차에서 지목했으면 0.9^k 를 더하고,
     함께 참석한 회차 수로 나눠 0~1 로 클립. 양방향(a→b, b→a) 평균이 pref_score, 둘 다 한 번이라도 지목했으면 mutual.
     BEST_PERFORMER 는 여기에 들어가지 않는다 (표시 전용, 4.2절). flush 까지.
+
+    같은 팀의 두 투표가 동시에 들어와도 새 페어 행을 둘 다 INSERT 하지 않게 팀 잠금(lock_team_stats)을 먼저 걸고,
+    새 행은 `INSERT … ON CONFLICT DO UPDATE` 로 넣는다.
     """
+    lock_team_stats(db, team_id)
     events = db.execute(
         select(Event.id, Event.event_date).where(Event.team_id == team_id, Event.status != EventStatus.CANCELED).order_by(Event.event_date.desc(), Event.id.desc())
     ).all()
@@ -253,19 +264,29 @@ def recompute_team_chemistry(db: Session, team_id: int) -> int:
         select(ChemistryScore).where(ChemistryScore.player_a_id.in_(team_players), ChemistryScore.player_b_id.in_(team_players))
     ).all()}
     kept = set()
+    new_rows: list[dict] = []
     for a, b in pairs:
         common = [eid for eid in event_ids if a in attend[eid] and b in attend[eid]]  # 최신순
         together = len(common)
         p_ab = _directional_pref(common, voted.get((a, b), set()))
         p_ba = _directional_pref(common, voted.get((b, a), set()))
+        values = {
+            "together_events": together, "pref_score": Decimal(str(round((p_ab + p_ba) / 2, 2))),
+            "pref_mutual": bool(voted.get((a, b))) and bool(voted.get((b, a))),
+        }
         row = existing.get((a, b))
         if row is None:
-            row = ChemistryScore(player_a_id=a, player_b_id=b)
-            db.add(row)
-        row.together_events = together
-        row.pref_score = Decimal(str(round((p_ab + p_ba) / 2, 2)))
-        row.pref_mutual = bool(voted.get((a, b))) and bool(voted.get((b, a)))
+            new_rows.append({"player_a_id": a, "player_b_id": b, **values})
+        else:
+            for k, v in values.items():
+                setattr(row, k, v)
         kept.add((a, b))
+    if new_rows:
+        stmt = pg_insert(ChemistryScore).values(new_rows)
+        db.execute(stmt.on_conflict_do_update(
+            constraint="uq_chemistry_scores_pair",
+            set_={k: stmt.excluded[k] for k in ("together_events", "pref_score", "pref_mutual")},
+        ))
     # 투표가 모두 사라진 페어의 pref 는 비운다 (synergy 필드는 그대로)
     for key, row in existing.items():
         if key not in kept and (row.pref_score is not None or row.pref_mutual):
@@ -426,6 +447,7 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
         records.append(
             QuarterRecord(
                 event_id=ev.id, event_date=ev.event_date.isoformat(), quarter_no=q.quarter_no, side=str(lu.side),
+                squad_no=q.home_squad_no if lu.side == Side.BLACK else q.away_squad_no,
                 my_score=my, their_score=their, black_score=q.black_score, white_score=q.white_score,
                 raw_margin=lu.raw_margin, normalized_margin=lu.normalized_margin, position=str(lu.position) if lu.position else None,
             )
@@ -473,7 +495,10 @@ def player_stats(db: Session, player: Player, *, detailed: bool) -> PlayerStats:
             "defense": prof.skill_defense, "rebound_post": prof.skill_rebound_post, "stamina": prof.skill_stamina,
         }
         stats.skill_axes_rank = _axis_ranks(db, player, stats.skill_axes)
-    active = db.scalar(select(ManagerRanking).where(ManagerRanking.team_id == player.team_id, ManagerRanking.is_active.is_(True)))
+    active = db.scalar(
+        select(ManagerRanking).where(ManagerRanking.team_id == player.team_id, ManagerRanking.is_active.is_(True))
+        .order_by(ManagerRanking.created_at.desc(), ManagerRanking.id.desc()).limit(1)
+    )
     if active:
         entries = db.scalars(select(ManagerRankingEntry).where(ManagerRankingEntry.ranking_id == active.id)).all()
         mine = next((e for e in entries if e.player_id == player.id), None)

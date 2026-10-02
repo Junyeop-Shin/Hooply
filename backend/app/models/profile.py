@@ -84,6 +84,9 @@ class PlayerProfile(Base):
     avg_margin_per_quarter: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))  # 표시용 파생값
     # 피어 투표(BEST_PERFORMER) 를 함께 뛴 인원수로 정규화한 점수. 실력 반영 가중치 상한 0.3 (10장)
     peer_vote_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
+    # 관리자 보정 (0025). 재계산은 prior_overall + admin_adjust 에서 출발하므로 설문 · 정렬 · 쿼터를 다시 계산해도
+    # 보정이 사라지거나 두 번 더해지지 않는다. 설문 · 정렬 재계산(prior)은 이 값을 건드리지 않는다
+    admin_adjust: Mapped[Decimal] = mapped_column(Numeric(4, 1), default=Decimal(0), server_default="0", nullable=False)
     # 팀 가입 후 답하는 "이 동호회에서 내 실력 위치" (구 설문 E3). NULL 이면 미응답 → prior 의 self_rank 성분 제외
     self_rank_level: Mapped[SelfRankLevel | None] = mapped_column(db_enum(SelfRankLevel, 5))
     updated_at: Mapped[datetime] = mapped_column(
@@ -104,13 +107,14 @@ class PlayerPosition(Base):
     __tablename__ = "player_positions"
     __table_args__ = (
         # 한 참가자에게 같은 포지션 행이 두 개 생기지 않도록
+        # player_id 로 좁히는 조회도 이 유니크 인덱스가 맡는다 (단독 인덱스는 0025 에서 지웠다)
         UniqueConstraint("player_id", "position", name="uq_player_positions_player_position"),
         # 자기평가 1~5 등급 범위. NULL 은 미응답
         CheckConstraint("self_rating IS NULL OR self_rating BETWEEN 1 AND 5", name="ck_player_positions_self_rating"),
     )
 
     id: Mapped[BigPK]
-    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False, index=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
     position: Mapped[Position] = mapped_column(db_enum(Position, 2), nullable=False)  # PG/SG/SF/PF/C
     can_play: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)  # 수행 가능
     preference_rank: Mapped[int | None] = mapped_column(SmallInteger)  # 1 = 가장 선호. NULL = 선호 순위 없음

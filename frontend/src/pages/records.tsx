@@ -7,6 +7,7 @@ import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { errorMessage as errMsg } from '../api/client'
+import { invalidateEvent } from '../lib/invalidate'
 import { eventsApi } from '../api/events'
 import { teamsApi } from '../api/teams'
 import { localISODate, type PlayerCard } from '../api/types'
@@ -26,7 +27,7 @@ export function PastRecordPage() {
 
   const create = useMutation({
     mutationFn: () => eventsApi.create(id, { title: f.title || '지난 일정', event_date: f.event_date, start_time: f.start_time || undefined, end_time: f.end_time || undefined, venue: f.venue || undefined }),
-    onSuccess: (ev) => { qc.invalidateQueries({ queryKey: ['events'] }); setEventId(ev.id) },
+    onSuccess: (ev) => { invalidateEvent(qc, ev.id, ev.team_id); setEventId(ev.id) },
     onError: (e) => setMsg(errMsg(e, '일정을 만들지 못했어요.')),
   })
 
@@ -62,7 +63,7 @@ function AttendeeStep({ teamId, eventId, onDone }: { teamId: number; eventId: nu
   const [guestName, setGuestName] = useState('')
   const [guestHeight, setGuestHeight] = useState('')
   const [similar, setSimilar] = useState<PlayerCard[] | null>(null)
-  const refresh = () => qc.invalidateQueries({ queryKey: ['events', eventId] })
+  const refresh = () => invalidateEvent(qc, eventId, teamId)
 
   const attending = new Set(att.data?.items.filter((a) => a.status === 'ATTEND').map((a) => a.player.id) ?? [])
   const toggle = useMutation({
@@ -75,7 +76,11 @@ function AttendeeStep({ teamId, eventId, onDone }: { teamId: number; eventId: nu
     onSuccess: (r) => { if (r.kind === 'similar') setSimilar(r.similar); else { setSimilar(null); setGuestName(''); setGuestHeight(''); refresh() } },
     onError: (e) => setMsg(errMsg(e, '게스트를 추가하지 못했어요.')),
   })
-  const removeGuest = useMutation({ mutationFn: (pid: number) => eventsApi.removeGuest(eventId, pid), onSuccess: refresh })
+  const removeGuest = useMutation({
+    mutationFn: (pid: number) => eventsApi.removeGuest(eventId, pid),
+    onSuccess: refresh,
+    onError: (e) => setMsg(errMsg(e, '게스트를 빼지 못했어요.')),
+  })
 
   const members = players.data?.items.filter((p) => p.kind === 'MEMBER') ?? []
   const guests = att.data?.items.filter((a) => a.player.kind === 'GUEST' && a.status === 'ATTEND') ?? []
@@ -111,9 +116,9 @@ function AttendeeStep({ teamId, eventId, onDone }: { teamId: number; eventId: nu
             {guests.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {guests.map((g) => (
-                  <span key={g.player.id} className="inline-flex items-center gap-1 rounded-full bg-sunken px-2.5 py-1 text-xs font-semibold text-ink">
+                  <span key={g.player.id} className="inline-flex items-center rounded-full bg-sunken pl-2.5 text-xs font-semibold text-ink">
                     {g.player.display_name}
-                    <button className="text-faint" onClick={() => removeGuest.mutate(g.player.id)} aria-label="빼기">×</button>
+                    <button className="-my-2 flex min-h-11 min-w-9 items-center justify-center text-faint" onClick={() => removeGuest.mutate(g.player.id)} disabled={removeGuest.isPending} aria-label={`${g.player.display_name} 빼기`}>×</button>
                   </span>
                 ))}
               </div>

@@ -4,14 +4,15 @@ DB 없이 돌아가는 순수 계산만 검사한다. 프리셋 14개의 재생 
 """
 
 import itertools
+import math
 import random
 
 import pytest
 from pydantic import ValidationError
 
-from app.tactics.court import is_paint, is_three, rim_distance, zone_of
-from app.tactics.matching import best_lineup, fit_play, rank_plays
-from app.tactics.play import ROLES, Play, holders, playability_errors
+from app.tactics.court import RIM_X, RIM_Y, is_paint, is_three, to_meters, zone_of
+from app.tactics.matching import allowed_defenses, best_lineup, fit_play
+from app.tactics.play import ROLES, Play, playability_errors
 from app.tactics.roles import (
     NO_SURVEY,
     NO_SURVEY_GUEST,
@@ -39,14 +40,19 @@ def test_zone_boundaries(x, y, zone):
     assert zone_of(x, y) == zone
 
 
+def _rim_distance(x: float, y: float) -> float:
+    mx, my = to_meters(x, y)
+    return math.hypot(mx - RIM_X, my - RIM_Y)
+
+
 def test_top_of_key_distance():
-    assert rim_distance(0.5, 0.60) == pytest.approx(6.825, abs=1e-3)
+    assert _rim_distance(0.5, 0.60) == pytest.approx(6.825, abs=1e-3)
 
 
 def test_corner_inside_line_near_baseline_is_not_three():
     # 좌우 6.58m · 베이스라인 위: 림까지 거리는 6.75m 를 넘지만 코너 직선 안쪽이라 2점
     x = (7.5 - 6.58) / 15
-    assert rim_distance(x, 0.0) > 6.75
+    assert _rim_distance(x, 0.0) > 6.75
     assert not is_three(x, 0.0)
 
 
@@ -92,7 +98,6 @@ def _pnr(**over) -> dict:
 def test_valid_play_passes_and_ball_follows_passes():
     play = Play.model_validate(_pnr())
     assert playability_errors(play) == []
-    assert holders(play) == [1, 1, 1, 5, None]
 
 
 def test_pass_from_slot_without_ball_is_rejected():
@@ -305,15 +310,9 @@ def test_no_alternates_when_exactly_five():
     assert all(s.alt_player_id is None for s in fit.slots)
 
 
-def test_rank_filters_by_defense_and_sorts():
-    man = Play.model_validate(_pnr())
-    zone = Play.model_validate(_pnr(key="zone_test", defense="zone", roles=["post"] * 5))
-    anyd = Play.model_validate(_pnr(key="any_test", defense="any", roles=["spacer"] * 5))
-    roster = _random_roster(8, 3)
-    assert {f.play.key for f in rank_plays([man, zone, anyd], roster, zone=False)} == {"test_pnr", "any_test"}
-    assert {f.play.key for f in rank_plays([man, zone, anyd], roster, zone=True)} == {"zone_test", "any_test"}
-    ranked = rank_plays([man, zone, anyd], roster, zone=False)
-    assert ranked[0].fit >= ranked[1].fit
+def test_allowed_defenses_toggle():
+    assert allowed_defenses(False) == {"man", "any"}
+    assert allowed_defenses(True) == {"zone", "any"}
 
 
 def test_sixteen_evaluations_are_fast():
@@ -323,17 +322,9 @@ def test_sixteen_evaluations_are_fast():
     rosters = [_random_roster(10, 1), _random_roster(10, 2)]
     t = time.perf_counter()
     for r in rosters:
-        rank_plays(plays, r, top=8)
+        for p in plays:
+            fit_play(p, r)
     assert time.perf_counter() - t < 0.1
-
-
-def test_inbound_plays_are_not_ranked():
-    """인바운드는 상황 전용 — 오늘 추천 순위에 넣지 않는다."""
-    half = Play.model_validate(_pnr(key="half"))
-    raw = _pnr(key="inb", defense="any", situation="inbound")
-    raw["start"][0] = {"x": 0.62, "y": -0.05}  # 공을 넣는 사람은 베이스라인 뒤
-    inb = Play.model_validate(raw)
-    assert [f.play.key for f in rank_plays([inb, half], _random_roster(8, 1), top=5)] == ["half"]
 
 
 def test_render_counter_names_and_particles():

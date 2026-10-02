@@ -1,6 +1,9 @@
 import { api } from './client'
 import type { TeamMembershipView, TokenPair, UserDetail } from './types'
 
+// 내 정보 · 내 팀은 바꾸는 쪽이 늘 invalidate 하므로 화면을 옮길 때마다 다시 받지 않는다 (5분)
+export const ME_STALE = 5 * 60_000
+
 export const KAKAO_CALLBACK = () => `${window.location.origin}/auth/kakao/callback`
 
 export interface SignupInput {
@@ -18,7 +21,9 @@ export const authApi = {
     api<TokenPair>('/auth/login', { method: 'POST', body: { email, password }, auth: false }),
   forgotPassword: (email: string) => api<{ accepted: boolean }>('/auth/password/forgot', { method: 'POST', body: { email }, auth: false }),
   resetPassword: (token: string, new_password: string) => api<{ ok: boolean }>('/auth/password/reset', { method: 'POST', body: { token, new_password }, auth: false }),
-  changePassword: (current_password: string, new_password: string) => api<void>('/me/password', { method: 'POST', body: { current_password, new_password } }),
+  /** 비밀번호 변경. 서버가 다른 기기 로그인을 끊고 이 기기용 새 토큰(TokenPair)을 준다 — 바뀌는 동안은 204(본문 없음)도 받는다 */
+  changePassword: (current_password: string, new_password: string) =>
+    api<TokenPair | undefined>('/me/password', { method: 'POST', body: { current_password, new_password } }),
   deleteMe: () => api<void>('/me', { method: 'DELETE' }),
   me: () => api<UserDetail>('/me'),
   setAvatar: (data_url: string) => api<UserDetail>('/me/avatar', { method: 'POST', body: { data_url } }),

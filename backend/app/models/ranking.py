@@ -12,7 +12,15 @@
 설문값만 쓰다가 다음 정렬 때 편입된다.
 """
 
-from sqlalchemy import Boolean, ForeignKey, SmallInteger, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    SmallInteger,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, BigPK, CreatedAtMixin
@@ -25,11 +33,13 @@ class ManagerRanking(CreatedAtMixin, Base):
     """
 
     __tablename__ = "manager_rankings"
+    # 팀마다 활성 버전은 하나뿐 (0025). 새 정렬을 저장하면 이전 버전을 먼저 끈다 (ranking_service.create)
+    __table_args__ = (Index("uq_manager_rankings_active", "team_id", unique=True, postgresql_where=text("is_active")),)
 
     id: Mapped[BigPK]
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
     ranked_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)  # 정렬을 수행한 매니저
-    # false 면 무효화된 버전 (되돌리기). DB 는 활성 버전 수를 제한하지 않으며, 최신 활성본을 쓴다
+    # false 면 무효화된 버전 (되돌리기). 팀마다 활성 버전은 하나 (uq_manager_rankings_active)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
 
     # rank_no 오름차순(상위 → 하위)으로 정렬되어 로드된다
@@ -51,6 +61,7 @@ class ManagerRankingEntry(Base):
         UniqueConstraint("ranking_id", "player_id", name="uq_ranking_entries_player"),
         # 한 버전 안에서 같은 순위가 두 명에게 붙지 않도록 (동점 없음, 완전 서열)
         UniqueConstraint("ranking_id", "rank_no", name="uq_ranking_entries_rank_no"),
+        CheckConstraint("rank_no >= 1", name="ck_ranking_entries_rank_no"),
     )
 
     id: Mapped[BigPK]

@@ -398,6 +398,14 @@ def play_key(play: Play) -> str:
     return f"{PLAY_KEY_PREFIX}{play.key}"
 
 
+def team_play_id(key: str) -> int | None:
+    """"team:12" → 12 (team_plays.id). 프리셋 키나 형식이 어긋나면 None — 댓글 · 별표 · 자리 배치의 team_play_id FK 값."""
+    if not key.startswith(TEAM_KEY_PREFIX):
+        return None
+    raw = key.removeprefix(TEAM_KEY_PREFIX)
+    return int(raw) if raw.isdigit() else None
+
+
 def get_play(key: str) -> Play | None:
     """"preset:high_pnr" 또는 "high_pnr" → Play. 없으면 None."""
     return PRESETS.get(key.removeprefix(PLAY_KEY_PREFIX))

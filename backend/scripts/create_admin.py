@@ -26,7 +26,7 @@ def main() -> None:
     if len(sys.argv) < 3:
         print("사용법: python -m scripts.create_admin <email> <password> [name]")
         sys.exit(1)
-    email, password = sys.argv[1].strip(), sys.argv[2]
+    email, password = auth_service.normalize_email(sys.argv[1]), sys.argv[2]
     name = sys.argv[3] if len(sys.argv) > 3 else "관리자"
     with SessionLocal() as db:
         user = db.scalar(select(User).where(User.email == email))

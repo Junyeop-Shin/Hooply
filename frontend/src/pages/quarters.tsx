@@ -16,19 +16,26 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { errorMessageWithDetails as errMsg } from '../api/client'
+import { errorMessage, errorMessageWithDetails as errMsg } from '../api/client'
+import { confirm } from '../store/feedback'
 import { assignmentsApi } from '../api/assignments'
 import { eventsApi } from '../api/events'
 import { quartersApi } from '../api/quarters'
 import { teamsApi } from '../api/teams'
 import type { PlayerCard, QuarterIn, Side, SquadTally } from '../api/types'
 import { squadName, squadStyle } from '../lib/squads'
-import { Alert, Badge, Button, Card, Spinner } from '../components/ui'
+import { MAX_SCORE, isPristineQuarter, lineupSig } from '../lib/quarter-draft'
+import { invalidateEvent } from '../lib/invalidate'
+import { Alert, Badge, Button, Card, LoadError, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
 
 /** 쿼터 입력. black/white 는 두 칸(첫째 · 둘째)의 득점·출전이고, 그 칸에 선 팀이 home/away (2팀이면 늘 1 · 2) */
-type Draft = { quarter_no: number; black_score: number; white_score: number; duration_min: number; black: number[]; white: number[]; home: number; away: number }
+type Draft = {
+  quarter_no: number; black_score: number; white_score: number; duration_min: number; black: number[]; white: number[]; home: number; away: number
+  /** 이 화면에서 새로 만든 쿼터의 처음 명단 — 점수도 명단도 그대로면 지울 때 묻지 않는다. 서버에서 받은 쿼터는 없음 */
+  seed?: string
+}
 type SideKey = 'black' | 'white'
 /** 확정 배정 밖에서 매니저가 팀 명단에 넣은 사람 (그날 늦게 온 회원·게스트·팀을 옮긴 사람). 팀 번호 → player_id */
 type Extra = Record<number, number[]>
@@ -41,6 +48,7 @@ const MAX_DURATION = 10
 const DURATIONS = Array.from({ length: MAX_DURATION - MIN_DURATION + 1 }, (_, k) => MIN_DURATION + k)
 
 const draftKey = (eventId: number) => `quarters-draft-${eventId}`
+
 const emptyExtra: Extra = {}
 const uniq = (ids: number[]) => [...new Set(ids)]
 const stub = (id: number, name: string): PlayerCard => ({
@@ -108,7 +116,8 @@ export function QuartersPage() {
 
   // 초기값: 이 서버 기록을 고치던 로컬 임시 저장 > 서버 기록 > (기록 없음) 로컬 임시 저장 > 빈 쿼터 1개 (배정 팀원 5명씩 미리 체크)
   useEffect(() => {
-    if (quarters || saved.isLoading || adopted.isLoading) return
+    // 서버 기록을 못 받았으면 초안을 만들지 않는다 — 빈 초안을 저장하면 전체 교체(PUT)라 서버 쿼터가 지워진다
+    if (quarters || !saved.isSuccess || adopted.isLoading) return
     const hasSaved = !!saved.data && saved.data.items.length > 0
     const fromServer: Draft[] = (saved.data?.items ?? []).map((q) => ({ quarter_no: q.quarter_no, black_score: q.black_score, white_score: q.white_score, duration_min: q.duration_min, home: q.home_squad_no ?? 1, away: q.away_squad_no ?? 2, black: q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.player_id), white: q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.player_id) }))
     try {
@@ -131,8 +140,8 @@ export function QuartersPage() {
     if (hasSaved) { setQuarters(fromServer); return }
     const b = hasAssignment ? (squadIds[1] ?? []).slice(0, 5) : []
     const w = hasAssignment ? (squadIds[2] ?? []).slice(0, 5) : []
-    setQuarters([{ quarter_no: 1, black_score: 0, white_score: 0, duration_min: DEFAULT_DURATION, black: b, white: w, home: 1, away: 2 }])
-  }, [quarters, saved.data, saved.isLoading, adopted.isLoading, hasAssignment, squadIds, id, serverBase])
+    setQuarters([{ quarter_no: 1, black_score: 0, white_score: 0, duration_min: DEFAULT_DURATION, black: b, white: w, home: 1, away: 2, seed: lineupSig({ black: b, white: w, home: 1, away: 2 }) }])
+  }, [quarters, saved.data, saved.isSuccess, adopted.isLoading, hasAssignment, squadIds, id, serverBase])
 
   // 임시 저장 — 누를 때마다 쓰지 않고 입력이 0.3초 멈추면 한 번. 바탕이 된 서버 기록(base)을 같이 적는다
   useEffect(() => {
@@ -154,14 +163,24 @@ export function QuartersPage() {
     },
     onSuccess: () => {
       try { localStorage.removeItem(draftKey(id)) } catch { /* ignore */ }
-      qc.invalidateQueries({ queryKey: ['events'] }); qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] })
+      // 이 일정(쿼터 · 상태 · 쿼터 수)과 팀 일정 목록 · 리더보드 기간, 실력이 바뀐 팀원 · 프로필 · 기록
+      invalidateEvent(qc, id, teamId)
+      qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] })
       goBack(`/events/${id}`)
     },
     onError: (e) => setMsg(errMsg(e, '저장하지 못했어요.')),
   })
 
-  if (ev.isLoading || att.isLoading || saved.isLoading || !quarters) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Spinner /></Screen>
-  if (!ev.data) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Content><Alert>일정을 불러오지 못했어요.</Alert></Content></Screen>
+  if (!ev.data && ev.isError) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Content><LoadError message={errorMessage(ev.error, '일정을 불러오지 못했어요.')} onRetry={() => ev.refetch()} retrying={ev.isFetching} /></Content></Screen>
+  if (!quarters && saved.isError) {
+    return (
+      <Screen>
+        <TopBar title="경기 기록" back={`/events/${id}`} />
+        <Content><LoadError message={errorMessage(saved.error, '저장된 쿼터 기록을 불러오지 못했어요. 불러온 뒤에 고칠 수 있어요.')} onRetry={() => saved.refetch()} retrying={saved.isFetching} /></Content>
+      </Screen>
+    )
+  }
+  if (ev.isLoading || att.isLoading || saved.isLoading || !quarters || !ev.data) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Spinner /></Screen>
   const total = quarters.reduce((a, q) => ({ black: a.black + q.black_score, white: a.white + q.white_score }), { black: 0, white: 0 })
   const invalid = quarters.filter((q) => q.black.length !== 5 || q.white.length !== 5)
   const update = (i: number, patch: Partial<Draft>) => setQuarters((qs) => qs!.map((q, j) => (j === i ? { ...q, ...patch } : q)))
@@ -173,7 +192,11 @@ export function QuartersPage() {
       if (other.includes(pid)) return q  // 같은 쿼터에 양 팀으로 동시에 뛸 수 없다
       return { ...q, [side]: list.includes(pid) ? list.filter((x) => x !== pid) : [...list, pid] }
     }))
-  const addQuarter = () => setQuarters((qs) => { const last = qs![qs!.length - 1]; return [...qs!, { quarter_no: (last?.quarter_no ?? 0) + 1, black_score: 0, white_score: 0, duration_min: last?.duration_min ?? DEFAULT_DURATION, black: last?.black ?? [], white: last?.white ?? [], home: last?.home ?? 1, away: last?.away ?? 2 }] })
+  const addQuarter = () => setQuarters((qs) => {
+    const last = qs![qs!.length - 1]
+    const lineup = { black: last?.black ?? [], white: last?.white ?? [], home: last?.home ?? 1, away: last?.away ?? 2 }
+    return [...qs!, { quarter_no: (last?.quarter_no ?? 0) + 1, black_score: 0, white_score: 0, duration_min: last?.duration_min ?? DEFAULT_DURATION, ...lineup, seed: lineupSig(lineup) }]
+  })
   /** 3팀 대진 바꾸기 — 한 칸의 팀을 바꾸면 그 칸 출전은 새 팀 앞 5명으로. 이미 다른 칸에 있는 팀을 고르면 두 칸을 맞바꾼다 */
   const setMatchup = (i: number, side: SideKey, sq: number) => setQuarters((qs) => qs!.map((q, j) => {
     if (j !== i) return q
@@ -184,7 +207,12 @@ export function QuartersPage() {
     const firstFive = (pool[sq] ?? []).map((p) => p.id).filter((pid) => !(side === 'black' ? q.white : q.black).includes(pid)).slice(0, 5)
     return side === 'black' ? { ...q, home: sq, black: firstFive } : { ...q, away: sq, white: firstFive }
   }))
-  const removeQuarter = (i: number) => setQuarters((qs) => qs!.filter((_, j) => j !== i).map((q, j) => ({ ...q, quarter_no: j + 1 })))
+  const removeQuarter = async (i: number) => {
+    const q = quarters[i]
+    // 점수나 명단을 넣은 쿼터는 한 번 묻는다 (저장 전이라도 손으로 넣은 것이 사라진다)
+    if (!isPristineQuarter(q) && !(await confirm({ title: `${q.quarter_no}쿼터를 지울까요?`, body: `${nameOfSquad(q.home)} ${q.black_score} : ${q.white_score} ${nameOfSquad(q.away)} · 출전 명단도 함께 빠져요. 저장해야 서버 기록에 반영돼요.`, confirmLabel: '지우기', danger: true }))) return
+    setQuarters((qs) => qs!.filter((_, j) => j !== i).map((qq, j) => ({ ...qq, quarter_no: j + 1 })))
+  }
   const addToSquad = (sq: number, pid: number) => setExtra((e) => ((e[sq] ?? []).includes(pid) ? e : { ...e, [sq]: [...(e[sq] ?? []), pid] }))
   const dropFromSquad = (sq: number, pid: number) => setExtra((e) => ({ ...e, [sq]: (e[sq] ?? []).filter((x) => x !== pid) }))
   /** 어떤 쿼터에도 그 팀으로 체크되지 않았고 확정 배정에도 없는 사람만 명단에서 뺄 수 있다 */
@@ -246,7 +274,7 @@ export function QuartersPage() {
                   </select>분
                 </label>
               </p>
-              {quarters.length > 1 && <button className="text-xs text-danger-ink" onClick={() => removeQuarter(i)}>삭제</button>}
+              {quarters.length > 1 && <button type="button" aria-label={`${q.quarter_no}쿼터 삭제`} className="-my-2 -mr-2 min-h-11 px-3 text-xs font-semibold text-danger-ink" onClick={() => removeQuarter(i)}>삭제</button>}
             </div>
             {three && (
               <div className="flex items-center gap-2 text-xs" aria-label={`${q.quarter_no}쿼터 대진`}>
@@ -278,8 +306,8 @@ export function QuartersPage() {
                   const on = list.includes(p.id)
                   const blocked = q[otherSide].includes(p.id)
                   return (
-                    <label key={p.id} className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm ${on ? st.picked : dim ? 'opacity-60' : ''} ${blocked ? 'opacity-30' : ''}`}>
-                      <input type="checkbox" checked={on} disabled={blocked} onChange={() => toggle(i, side, p.id)} className="accent-brand" />
+                    <label key={p.id} className={`flex min-h-10 min-w-0 items-center gap-2 rounded-lg px-1 py-1.5 text-sm ${on ? st.picked : dim ? 'opacity-60' : ''} ${blocked ? 'opacity-30' : ''}`}>
+                      <input type="checkbox" checked={on} disabled={blocked} onChange={() => toggle(i, side, p.id)} className="size-5 shrink-0 accent-brand" />
                       <span className="truncate">{p.display_name}</span>
                       {p.kind === 'GUEST' && <span className="text-[10px] opacity-60">G</span>}
                     </label>
@@ -321,7 +349,9 @@ export function QuartersPage() {
         <p className="px-1 text-[11px] text-faint">명단에 넣은 사람: {Object.values(extra).flat().length ? uniq(Object.values(extra).flat()).map(nameOf).join(' · ') : '없음'}</p>
       </Content>
       <BottomAction>
-        <Button full loading={save.isPending} disabled={invalid.length > 0 || quarters.length === 0} onClick={() => save.mutate()}>
+        {/* 서버 기록을 지금 받은 상태일 때만 저장한다 (불러오기에 실패한 채로 저장하면 서버 쿼터를 덮어쓴다) */}
+        {saved.isError && <div className="mb-2"><LoadError message="저장된 기록을 다시 확인하지 못했어요. 다시 불러온 뒤 저장할 수 있어요." onRetry={() => saved.refetch()} retrying={saved.isFetching} /></div>}
+        <Button full loading={save.isPending} disabled={invalid.length > 0 || quarters.length === 0 || !saved.isSuccess} onClick={() => save.mutate()}>
           {saved.data && saved.data.summary.quarter_count > 0 ? '기록 수정 저장' : '경기 후 한 번에 저장'} ({quarters.length}쿼터)
         </Button>
       </BottomAction>
@@ -427,17 +457,17 @@ function RosterEditor({
 function Stepper({ label, squadNo, value, onChange }: { label: string; squadNo: number; value: number; onChange: (v: number) => void }) {
   const dark = squadNo !== 2
   return (
-    <div className={`rounded-xl border p-2 ${squadStyle(squadNo).card}`}>
-      <p className="text-[11px] font-semibold opacity-70">{label}</p>
+    <div className={`rounded-xl border p-1.5 ${squadStyle(squadNo).card}`}>
+      <p className="px-0.5 text-[11px] font-semibold opacity-70">{label}</p>
       <div className="flex items-center justify-between">
-        <button type="button" aria-label={`${label} 1점 빼기`} onClick={() => onChange(Math.max(0, value - 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-white/10' : 'bg-stone-200'}`}>−</button>
+        <button type="button" aria-label={`${label} 1점 빼기`} onClick={() => onChange(Math.max(0, value - 1))} className={`size-11 shrink-0 rounded-lg text-lg font-bold ${dark ? 'bg-white/10' : 'bg-stone-200'}`}>−</button>
         <input
           type="text" inputMode="numeric" pattern="[0-9]*" value={value} aria-label={`${label} 득점`}
-          onChange={(e) => { const d = e.target.value.replace(/\D/g, '').slice(-2); onChange(d === '' ? 0 : Number(d)) }}  // 두 자리가 찬 뒤 더 치면 앞자리가 밀린다 (13 → 4 입력 → 34)
+          onChange={(e) => { const d = e.target.value.replace(/\D/g, '').slice(-2); onChange(d === '' ? 0 : Math.min(MAX_SCORE, Number(d))) }}  // 두 자리가 찬 뒤 더 치면 앞자리가 밀린다 (13 → 4 입력 → 34)
           onFocus={(e) => e.target.select()}
-          className="w-14 bg-transparent text-center text-2xl font-black tabular-nums outline-none"
+          className="w-10 min-w-0 flex-1 bg-transparent text-center text-2xl font-black tabular-nums outline-none"
         />
-        <button type="button" aria-label={`${label} 1점 더하기`} onClick={() => onChange(Math.min(99, value + 1))} className={`size-9 rounded-lg text-lg font-bold ${dark ? 'bg-court-500 text-white' : 'bg-court-100 text-court-700'}`}>+</button>
+        <button type="button" aria-label={`${label} 1점 더하기`} onClick={() => onChange(Math.min(MAX_SCORE, value + 1))} className={`size-11 shrink-0 rounded-lg text-lg font-bold ${dark ? 'bg-court-700 text-white' : 'bg-court-100 text-court-800'}`}>+</button>
       </div>
     </div>
   )

@@ -5,7 +5,7 @@ import { login } from './helpers'
 test('기록 탭: 세 섹션이 보이고 월간 랭킹은 접었다 펼 수 있다', async ({ page }) => {
   await login(page)
   await page.getByRole('button', { name: '일요 코트메이트 팀 열기' }).click()
-  await page.getByRole('button', { name: '기록', exact: true }).click()
+  await page.getByRole('tab', { name: '기록', exact: true }).click()
 
   await expect(page.getByRole('heading', { name: '내 추세' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '월간 코트 마진' })).toBeVisible()
@@ -20,7 +20,7 @@ test('기록 탭: 세 섹션이 보이고 월간 랭킹은 접었다 펼 수 있
   await page.getByRole('button', { name: '접기 ▴' }).click()
   await expect(period).toBeHidden()
   await page.reload()
-  await page.getByRole('button', { name: '기록', exact: true }).click()
+  await page.getByRole('tab', { name: '기록', exact: true }).click()
   await expect(page.getByLabel('달')).toBeHidden()
   await page.getByRole('button', { name: '펼치기 ▾' }).first().click()
   await expect(page.getByLabel('달')).toBeVisible()

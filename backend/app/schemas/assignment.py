@@ -17,12 +17,16 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.enums import Strategy
 from app.schemas.common import SquadView
+
+MAX_GROUPS = 30  # 묶기 · 갈라놓기 그룹 수 상한
+MAX_GROUP_SIZE = 30  # 그룹 하나의 인원 상한
+MAX_PINS = 60  # 사전 배치 인원 상한
 
 
 class PinConstraint(BaseModel):
@@ -48,9 +52,14 @@ class ConstraintSet(BaseModel):
     묶음이 깨지지 않는다 (FR-17). A-B, B-C 를 따로 묶으면 A-B-C 가 자동으로 한 그룹이 된다.
     """
 
-    lock_groups: list[list[int]] = Field(default=[], description="각 안쪽 배열이 '반드시 같은 팀' 그룹 (2명 이상)")
-    separate_groups: list[list[int]] = Field(default=[], description="각 안쪽 배열이 '반드시 다른 팀' 그룹")
-    pins: list[PinConstraint] = Field(default=[], description="특정 팀에 고정할 인원")
+    # 요청 크기 상한 — 한 회차 참석자는 많아야 수십 명이라 넉넉하다. 큰 본문으로 서버를 붙잡지 못하게
+    lock_groups: list[Annotated[list[int], Field(max_length=MAX_GROUP_SIZE)]] = Field(
+        default=[], max_length=MAX_GROUPS, description=f"각 안쪽 배열이 '반드시 같은 팀' 그룹 (2명 이상). 그룹 {MAX_GROUPS}개 · 그룹당 {MAX_GROUP_SIZE}명까지",
+    )
+    separate_groups: list[Annotated[list[int], Field(max_length=MAX_GROUP_SIZE)]] = Field(
+        default=[], max_length=MAX_GROUPS, description=f"각 안쪽 배열이 '반드시 다른 팀' 그룹. 그룹 {MAX_GROUPS}개 · 그룹당 {MAX_GROUP_SIZE}명까지",
+    )
+    pins: list[PinConstraint] = Field(default=[], max_length=MAX_PINS, description=f"특정 팀에 고정할 인원 ({MAX_PINS}명까지)")
 
 
 class AssignmentRunRequest(BaseModel):
@@ -66,10 +75,16 @@ class AssignmentRunRequest(BaseModel):
         description="팀 수 2 또는 3. 2팀은 완전 탐색으로 최적해를 보장하고, 3팀(참석 16명 이상, 21명이면 7·7·7)은 지역 탐색이다 (13.1절 Q4, 9.7절)",
     )
     strategies: list[Strategy] = Field(
-        default=[Strategy.SKILL, Strategy.CHEMISTRY, Strategy.BALANCED],
-        description="후보안을 만들 전략. 기본은 3종 전부 (실력 우선 / 친화도 우선 / 종합, 9.5절 가중치 표)",
+        default=[Strategy.SKILL, Strategy.CHEMISTRY, Strategy.BALANCED], min_length=1, max_length=3,
+        description="후보안을 만들 전략 (1~3개, 중복은 하나로). 기본은 3종 전부 (실력 우선 / 친화도 우선 / 종합, 9.5절 가중치 표)",
     )
     constraints: ConstraintSet = Field(default=ConstraintSet(), description="이 회차의 제약. 비우면 제약 없음")
+
+    @field_validator("strategies")
+    @classmethod
+    def _dedupe(cls, v: list[Strategy]) -> list[Strategy]:
+        """같은 전략을 두 번 보내면 하나로 (순서는 처음 나온 대로)."""
+        return list(dict.fromkeys(v))
 
 
 class ConstraintViolation(BaseModel):
@@ -162,8 +177,8 @@ class Exchange(BaseModel):
     갈라놓기(SEPARATE)는 교환 뒤에도 서로 다른 팀이어야 한다. 사전 배치(PIN)는 옮길 수 없다.
     """
 
-    a_player_ids: list[int] = Field(default=[], description="같은 팀에 있는 선수들 (상대 팀으로 이동)")
-    b_player_ids: list[int] = Field(default=[], description="다른 팀에 있는 선수들 (a 쪽 팀으로 이동)")
+    a_player_ids: list[int] = Field(default=[], max_length=MAX_GROUP_SIZE, description="같은 팀에 있는 선수들 (상대 팀으로 이동)")
+    b_player_ids: list[int] = Field(default=[], max_length=MAX_GROUP_SIZE, description="다른 팀에 있는 선수들 (a 쪽 팀으로 이동)")
     to_squad_no: int | None = Field(default=None, ge=1, description="한쪽만 보낼 때 옮길 팀 번호. 3팀이면 꼭 넣는다 (2팀은 상대 팀)")
 
 
@@ -172,11 +187,12 @@ class SwapRequest(BaseModel):
 
     교체 후 지표가 즉시 재계산되어 `CandidateView` 로 돌아온다. 같은 팀끼리, 후보안에 없는 선수,
     LOCK 그룹을 깨는 교체는 422 INVALID_SWAP. 교체된 슬롯은 `is_manual_override=true` 로 표시된다.
+    swaps → moves → exchanges 를 차례로 적용하고 한 번에 저장한다 — 어느 하나라도 422 면 아무것도 바뀌지 않는다.
     """
 
-    swaps: list[SwapPair] = Field(default=[], description="맞교체할 쌍 (Exchange 1:1 과 같음). 순서대로 적용")
-    moves: list[MovePlayer] = Field(default=[], description="일방 이동 (Exchange 한쪽 비움과 같음). swaps 뒤에 적용")
-    exchanges: list[Exchange] = Field(default=[], description="그룹 단위 교환. 묶음은 자동으로 통째로 움직인다")
+    swaps: list[SwapPair] = Field(default=[], max_length=MAX_GROUPS, description="맞교체할 쌍 (Exchange 1:1 과 같음). 순서대로 적용")
+    moves: list[MovePlayer] = Field(default=[], max_length=MAX_GROUPS, description="일방 이동 (Exchange 한쪽 비움과 같음). swaps 뒤에 적용")
+    exchanges: list[Exchange] = Field(default=[], max_length=MAX_GROUPS, description="그룹 단위 교환. 묶음은 자동으로 통째로 움직인다. moves 뒤에 적용")
 
 
 class AdoptedAssignment(BaseModel):

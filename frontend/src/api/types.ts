@@ -504,6 +504,8 @@ export interface QuarterRecord {
   event_date: string
   quarter_no: number
   side: 'BLACK' | 'WHITE'
+  /** 내가 뛴 팀 1 블랙 · 2 화이트 · 3 레드. 3팀인 날은 칸(side)과 팀이 다르다. 예전 응답이면 null → side 로 */
+  squad_no: number | null
   my_score: number
   their_score: number
   black_score: number

@@ -54,6 +54,7 @@ class AssignmentRun(CreatedAtMixin, Base):
     """
 
     __tablename__ = "assignment_runs"
+    __table_args__ = (CheckConstraint("team_count IN (2, 3)", name="ck_assignment_runs_team_count"),)
 
     id: Mapped[BigPK]
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -92,6 +93,7 @@ class AssignmentConstraint(Base):
             " OR (type = 'PIN' AND squad_no IS NOT NULL AND group_no IS NULL)",
             name="ck_assignment_constraints_shape",
         ),
+        CheckConstraint("squad_no IS NULL OR squad_no BETWEEN 1 AND 3", name="ck_assignment_constraints_squad_no"),
     )
 
     id: Mapped[BigPK]
@@ -151,7 +153,10 @@ class AssignmentSquad(Base):
 
     __tablename__ = "assignment_squads"
     # 한 후보안 안에서 팀 번호는 유일
-    __table_args__ = (UniqueConstraint("candidate_id", "squad_no", name="uq_assignment_squads_no"),)
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "squad_no", name="uq_assignment_squads_no"),
+        CheckConstraint("squad_no BETWEEN 1 AND 3", name="ck_assignment_squads_squad_no"),
+    )
 
     id: Mapped[BigPK]
     candidate_id: Mapped[int] = mapped_column(

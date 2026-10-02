@@ -147,17 +147,3 @@ def playability_errors(play: Play) -> list[str]:
                 next_holder = None
         holder = next_holder
     return errors
-
-
-def holders(play: Play) -> list[Slot | None]:
-    """단계마다 시작할 때 공을 가진 슬롯 (len = 단계 수 + 1, 마지막은 끝난 뒤). 검사를 통과한 전술에만 쓴다."""
-    out: list[Slot | None] = [play.ball]
-    for step in play.steps:
-        h = out[-1]
-        for a in step.actions:
-            if a.slot == h and a.type in ("pass", "handoff"):
-                h = a.target
-            elif a.slot == h and a.type == "shot":
-                h = None
-        out.append(h)
-    return out

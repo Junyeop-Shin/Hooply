@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { authApi } from '../api/auth'
+import { authApi, ME_STALE } from '../api/auth'
 import { tutorialApi } from '../api/tutorial'
 import { useIsLoggedIn } from '../store/auth'
 import { CONTACT_EMAIL, HELP_SECTIONS } from '../lib/help-content'
@@ -57,7 +57,7 @@ export function HelpPage() {
 
 /** 시작 안내를 거절했거나 닫았던 사람이 다시 켠다 (경로 선택부터) */
 function RestartTutorial() {
-  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me })
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me, staleTime: ME_STALE })
   const qc = useQueryClient()
   const nav = useNavigate()
   const restart = useMutation({

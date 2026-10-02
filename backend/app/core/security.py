@@ -6,7 +6,7 @@
 - JWT 발급            → auth_service (로그인·refresh 응답의 TokenPair)
 - JWT 검증            → app/api/deps.py `get_current_user` (access), auth_service (refresh)
 - 팀 코드 생성        → app/services/team_service.py (팀 생성·코드 재발급)
-- 재설정 토큰 생성    → 비밀번호 찾기 (예정)
+- 재설정 토큰 생성    → 비밀번호 찾기 (auth_service.forgot_password)
 
 --- 비밀번호: "암호화"가 아니라 "해시"다 (11.5절 질문 1) ---
 암호화는 키만 있으면 되돌릴 수 있지만, 해시는 원리적으로 되돌릴 수 없다. 로그인 검증에는
@@ -61,35 +61,44 @@ def verify_password(plain: str, hashed: str) -> bool:
     return _pwd.verify(plain, hashed)
 
 
-def _create_token(subject: int, token_type: str, expires: timedelta) -> str:
+def _create_token(subject: int, token_type: str, expires: timedelta, version: int = 0) -> str:
     """JWT 를 만든다. access / refresh 공통 구현.
 
     payload:
       sub  — user_id 를 문자열로 (JWT 표준상 sub 는 문자열)
       type — "access" | "refresh". 종류를 구분하는 우리만의 클레임
+      ver  — 토큰 세대 (`users.token_version`). 비밀번호를 바꾸면 올라가 예전 세대의 토큰이 모두 막힌다
       iat  — 발급 시각(UTC)
       exp  — 만료 시각(UTC). python-jose 가 decode 시 자동으로 검사한다
     """
     s = get_settings()
     now = datetime.now(UTC)
-    payload = {"sub": str(subject), "type": token_type, "iat": now, "exp": now + expires}
+    payload = {"sub": str(subject), "type": token_type, "ver": version, "iat": now, "exp": now + expires}
     if token_type == "refresh":
         payload["jti"] = str(uuid.uuid4())  # 폐기 목록(revoked_tokens)의 키. 로그아웃·회전 때 이 값을 기록한다
     return jwt.encode(payload, s.jwt_secret_key, algorithm=s.jwt_algorithm)
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, version: int = 0) -> str:
     """access 토큰 (기본 30분, `Settings.jwt_access_minutes`). `TokenPair.access_token`."""
-    return _create_token(user_id, "access", timedelta(minutes=get_settings().jwt_access_minutes))
+    return _create_token(user_id, "access", timedelta(minutes=get_settings().jwt_access_minutes), version)
 
 
-def create_refresh_token(user_id: int) -> str:
+def create_refresh_token(user_id: int, version: int = 0) -> str:
     """refresh 토큰 (기본 14일, `Settings.jwt_refresh_days`). `TokenPair.refresh_token`."""
-    return _create_token(user_id, "refresh", timedelta(days=get_settings().jwt_refresh_days))
+    return _create_token(user_id, "refresh", timedelta(days=get_settings().jwt_refresh_days), version)
 
 
-def decode_token(token: str, expected_type: str) -> int | None:
-    """유효하면 user_id, 아니면 None.
+def _version(payload: dict) -> int:
+    """`ver` 클레임. 이 클레임이 생기기 전에 발급된 토큰은 0 세대로 본다 (비밀번호를 바꾸기 전까지 그대로 쓰인다)."""
+    try:
+        return int(payload.get("ver", 0))
+    except (TypeError, ValueError):
+        return -1  # 어떤 계정의 세대와도 맞지 않게
+
+
+def decode_token(token: str, expected_type: str) -> tuple[int, int] | None:
+    """유효하면 (user_id, 토큰 세대), 아니면 None. 세대가 계정과 맞는지는 호출자(deps.get_current_user)가 본다.
 
     None 이 되는 경우: 서명 불일치(위조·키 변경), 만료, 형식 오류, `type` 클레임이 기대와 다름,
     `sub` 가 없거나 정수가 아님. 이유를 구분하지 않고 전부 None 으로 뭉개는 것은 의도다 —
@@ -109,13 +118,13 @@ def decode_token(token: str, expected_type: str) -> int | None:
     if payload.get("type") != expected_type:
         return None
     try:
-        return int(payload["sub"])
+        return int(payload["sub"]), _version(payload)
     except (KeyError, ValueError):
         return None
 
 
-def decode_refresh(token: str) -> tuple[int, str, datetime] | None:
-    """refresh 토큰 → (user_id, jti, 만료 시각). 서명·만료·type 이 어긋나거나 jti 가 없으면 None."""
+def decode_refresh(token: str) -> tuple[int, str, datetime, int] | None:
+    """refresh 토큰 → (user_id, jti, 만료 시각, 토큰 세대). 서명·만료·type 이 어긋나거나 jti 가 없으면 None."""
     s = get_settings()
     try:
         payload = jwt.decode(token, s.jwt_secret_key, algorithms=[s.jwt_algorithm])
@@ -124,7 +133,7 @@ def decode_refresh(token: str) -> tuple[int, str, datetime] | None:
     if payload.get("type") != "refresh" or not payload.get("jti"):
         return None
     try:
-        return int(payload["sub"]), str(payload["jti"]), datetime.fromtimestamp(int(payload["exp"]), tz=UTC)
+        return int(payload["sub"]), str(payload["jti"]), datetime.fromtimestamp(int(payload["exp"]), tz=UTC), _version(payload)
     except (KeyError, ValueError, TypeError):
         return None
 

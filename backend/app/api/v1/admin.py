@@ -41,7 +41,7 @@ from app.models.enums import RatingSource
 from app.schemas.admin import AdminUserRow, AuditLogView, PlayerRawData, RatingAdjust
 from app.schemas.common import ItemList, Page, PageMeta, PlayerCardDetailed
 from app.schemas.team import TeamDetail, UserSummary
-from app.services import player_service, team_service
+from app.services import player_service, rating_service, team_service
 
 router = APIRouter(prefix="/admin", tags=["관리자"])
 
@@ -110,16 +110,21 @@ def player_raw(db: DB, admin: AdminUser, player_id: int):
     )
 
 
+def _s(v: Decimal | None) -> str | None:
+    return str(v) if v is not None else None
+
+
 @router.patch("/players/{player_id}/rating", response_model=PlayerCardDetailed, responses=errors(_403="FORBIDDEN_ROLE"), summary="실력 지표 수동 보정")
 def adjust_rating(db: DB, admin: AdminUser, player_id: int, body: RatingAdjust):
     """참가자의 종합 실력값을 사유와 함께 직접 보정한다.
 
     - **권한:** ADMIN.
-    - **처리:** `player_profiles.skill_overall` 과 **사전값 `prior_overall`** 을 함께 `body.skill_overall` 로 바꾼다.
-      쿼터 저장 때마다 팀 전체를 사전값에서 다시 재생하므로(rating_service), 사전값을 같이 바꿔야 보정이 다음
-      재계산에서 사라지지 않는다. `skill_rating_history(source=ADMIN_ADJUST)` 와 `audit_logs` 에 누가·언제·왜 바꿨는지
-      남긴다.
-    - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`, `400 VALIDATION_ERROR` — 사유 누락.
+    - **처리:** 재계산의 출발점(사전값 + `player_profiles.admin_adjust`)을 옮겨 `skill_overall` 이 `body.skill_overall` 이
+      되게 한다. 사전값 `prior_overall` 은 건드리지 않는다 — 설문 · 정렬 재계산이 사전값을 다시 써도 오프셋은 남고,
+      쿼터를 다시 재생해도 출발점에 한 번만 더해진다(두 번 반영되지 않는다). 경기 기록이 쌓이면 다른 사전 정보처럼 실측에
+      묻혀 간다. `skill_rating_history(source=ADMIN_ADJUST)` 와 `audit_logs` 에 누가·언제·왜 바꿨는지 남긴다.
+    - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`, `400 VALIDATION_ERROR` — 사유 누락, 경기 기록과 너무 멀어
+      오프셋이 ±50점을 넘어야 하는 값.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 (`PATCH /admin/players/{player_id}/rating`), FR-32, 6.2절 `skill_rating_history` · `audit_logs`.
     """
@@ -127,18 +132,21 @@ def adjust_rating(db: DB, admin: AdminUser, player_id: int, body: RatingAdjust):
     if player is None or player.profile is None:
         raise E.NotFound("이 사람을 찾을 수 없어요.")
     prof = player.profile
-    before = {"skill_overall": str(prof.skill_overall) if prof.skill_overall is not None else None, "prior_overall": str(prof.prior_overall) if prof.prior_overall is not None else None}
-    after_v = Decimal(str(round(float(body.skill_overall), 1)))
+    before_skill = prof.skill_overall
+    before = {"skill_overall": _s(prof.skill_overall), "admin_adjust": _s(prof.admin_adjust)}
+    target = round(float(body.skill_overall), 1)
+    prof.admin_adjust = rating_service.admin_adjust_for(db, player, target)
+    db.flush()
+    rating_service.recompute_team(db, player.team_id)  # 경기 기록이 없으면 skill_overall = prior + admin_adjust
+    after_v = prof.skill_overall
     db.add(SkillRatingHistory(
-        player_id=player.id, source=RatingSource.ADMIN_ADJUST, before_value=prof.skill_overall, after_value=after_v,
-        delta=after_v - (prof.skill_overall or Decimal(0)), ref_type="admin_user", ref_id=admin.id, reason=body.reason,
+        player_id=player.id, source=RatingSource.ADMIN_ADJUST, before_value=before_skill, after_value=after_v,
+        delta=(after_v or Decimal(0)) - (before_skill or Decimal(0)), ref_type="admin_user", ref_id=admin.id, reason=body.reason,
     ))
-    prof.skill_overall = after_v
-    prof.prior_overall = after_v
     prof.updated_at = datetime.now(UTC)
     db.add(AuditLog(
         actor_user_id=admin.id, action="ADMIN_RATING_ADJUST", target_type="player", target_id=player.id,
-        before=before, after={"skill_overall": str(after_v), "prior_overall": str(after_v)}, reason=body.reason,
+        before=before, after={"skill_overall": _s(after_v), "admin_adjust": _s(prof.admin_adjust), "requested": str(target)}, reason=body.reason,
     ))
     db.commit()
     db.refresh(player)

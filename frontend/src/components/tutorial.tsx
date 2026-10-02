@@ -6,14 +6,15 @@
  * 단계 판정은 서버(GET /me/tutorial)가 실제 데이터로 한다. 문장은 lib/tutorial-content.ts.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { authApi } from '../api/auth'
+import { authApi, ME_STALE } from '../api/auth'
 import { tutorialApi } from '../api/tutorial'
 import type { TutorialUpdate, UserDetail } from '../api/types'
 import { FLOW, SPOTLIGHT, TIPS, type TipId } from '../lib/tutorial-content'
 import { Spotlight } from './spotlight'
 import { Button, Card, Spinner } from './ui'
+import { useModal } from './use-modal'
 
 function useTutorialUpdate() {
   const qc = useQueryClient()
@@ -35,12 +36,19 @@ function useTutorialUpdate() {
 
 /** 새 가입자에게 한 번 — "안내를 받을까요?" */
 export function TutorialPrompt({ me }: { me: UserDetail }) {
-  const upd = useTutorialUpdate()
   if (me.tutorial_state !== 'PENDING') return null
+  return <TutorialPromptDialog />
+}
+
+/** 포커스를 안에 가두고 뒤 화면 스크롤을 막는다. Esc 로 닫지는 않는다 — 닫기가 곧 "안내 거절"(영구)이라 두 버튼 중 하나를 고르게 한다 */
+function TutorialPromptDialog() {
+  const upd = useTutorialUpdate()
+  const panel = useRef<HTMLDivElement>(null)
+  useModal(panel)
   return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/40 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="tutorial-prompt-title">
-      <div className="safe-bottom w-full max-w-md rounded-t-3xl bg-surface p-6 sm:rounded-3xl">
-        <div className="mb-3 flex size-11 items-center justify-center rounded-2xl bg-court-500 text-lg font-black text-white" aria-hidden="true">H</div>
+    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/40 sm:items-center">
+      <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="tutorial-prompt-title" className="safe-bottom w-full max-w-md rounded-t-3xl bg-surface p-6 outline-none sm:rounded-3xl">
+        <div className="mb-3 flex size-11 items-center justify-center rounded-2xl bg-brand text-lg font-black text-on-brand" aria-hidden="true">H</div>
         <h2 id="tutorial-prompt-title" className="text-lg font-bold text-ink">처음이시죠?</h2>
         <p className="mt-1 text-sm leading-relaxed text-ink-2">팀에 들어가고 첫 경기를 준비하는 데 필요한 것만 차례로 안내해 드릴게요. 홈 맨 위에 할 일 목록이 생기고, 언제든 닫을 수 있어요.</p>
         <div className="mt-5 space-y-2">
@@ -70,7 +78,7 @@ export function TutorialCard({ me }: { me: UserDetail }) {
   if (!active) return null
   const v = q.data
   const close = (
-    <button type="button" onClick={() => upd.mutate({ state: 'CLOSED' })} aria-label="시작 안내 닫기" className="-mr-1.5 -mt-1.5 flex size-9 shrink-0 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
+    <button type="button" onClick={() => upd.mutate({ state: 'CLOSED' })} aria-label="시작 안내 닫기" className="-mr-2.5 -mt-2.5 flex size-11 shrink-0 items-center justify-center rounded-full text-xl text-faint active:bg-sunken">×</button>
   )
 
   // 경로 선택 — 팀 코드를 받았으면 팀원, 아니면 팀 만들기
@@ -131,7 +139,7 @@ export function TutorialCard({ me }: { me: UserDetail }) {
       <ol className="space-y-2">
         {v.steps.map((s, i) => (
           <li key={s.key} data-tutorial={`step-${s.key}`} className={`flex items-start gap-3 rounded-xl px-3 py-2.5 ${s.status === 'TODO' ? 'bg-brand-soft' : 'bg-surface-2'}`}>
-            <span className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.status === 'DONE' ? 'bg-court-500 text-white' : s.status === 'TODO' ? 'border-2 border-court-500 text-brand-ink' : 'border border-line-strong text-faint'}`}>
+            <span className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.status === 'DONE' ? 'bg-brand text-on-brand' : s.status === 'TODO' ? 'border-2 border-court-500 text-brand-ink' : 'border border-line-strong text-faint'}`}>
               {s.status === 'DONE' ? '✓' : i + 1}
             </span>
             <div className="min-w-0 flex-1">
@@ -141,7 +149,7 @@ export function TutorialCard({ me }: { me: UserDetail }) {
               {s.status !== 'DONE' && <p className="mt-0.5 text-xs text-muted">{s.hint}</p>}
             </div>
             {s.status === 'TODO' && s.link && (
-              <Link to={s.link} state={{ from: '/', tutorialFocus: s.key }} onClick={() => markSpot(s.key)} className="flex min-h-9 shrink-0 items-center rounded-lg bg-brand px-3 text-xs font-semibold text-on-brand">{s.action ?? '하기'}</Link>
+              <Link to={s.link} state={{ from: '/', tutorialFocus: s.key }} onClick={() => markSpot(s.key)} className="-my-1 flex min-h-11 shrink-0 items-center rounded-lg bg-brand px-3 text-xs font-semibold text-on-brand">{s.action ?? '하기'}</Link>
             )}
           </li>
         ))}
@@ -153,7 +161,7 @@ export function TutorialCard({ me }: { me: UserDetail }) {
 
 /** 기능을 처음 열었을 때 한 번 — 시작 안내를 받은 사람(ACTIVE·CLOSED·DONE)에게만 */
 export function FirstTimeTip({ id }: { id: TipId }) {
-  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me })
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me, staleTime: ME_STALE })
   const upd = useTutorialUpdate()
   const u = me.data
   if (!u || !['ACTIVE', 'CLOSED', 'DONE'].includes(u.tutorial_state) || u.tutorial_tips_seen.includes(id)) return null
@@ -178,7 +186,7 @@ export function FirstTimeTip({ id }: { id: TipId }) {
  */
 export function TutorialSpotlight() {
   const loc = useLocation()
-  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me })
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me, staleTime: ME_STALE })
   const [closedAt, setClosedAt] = useState<string | null>(null)
   const focus = (loc.state as { tutorialFocus?: string } | null)?.tutorialFocus
   const copy = focus ? SPOTLIGHT[focus] : undefined

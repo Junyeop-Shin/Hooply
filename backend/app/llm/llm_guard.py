@@ -22,17 +22,19 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -260,39 +262,131 @@ def _error_reason(e: Exception) -> str:
 
 
 def _store(db: Session, call: ChainCall, key: str, out: GuardOutcome, model: str) -> None:
+    """결과를 캐시에 쓴다. 이미 성공한 결과가 있으면 폴백으로 덮어쓰지 않는다 (동시에 부른 다른 요청이 먼저 성공했을 때)."""
     values = {
         "chain": call.chain, "cache_key": key, "output": out.output, "fallback": out.fallback,
         "fail_reason": out.fail_reason, "latency_ms": out.latency_ms, "model": model[:60],
         "created_at": datetime.now(UTC),
     }
     stmt = insert(LlmResult).values(**values)
-    stmt = stmt.on_conflict_do_update(index_elements=["cache_key"], set_={k: stmt.excluded[k] for k in values if k != "cache_key"})
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["cache_key"], set_={k: stmt.excluded[k] for k in values if k != "cache_key"},
+        where=LlmResult.__table__.c.fallback | ~stmt.excluded.fallback,  # 기존이 폴백이거나 이번이 성공일 때만 바꾼다
+    )
     db.execute(stmt)
     db.commit()
 
 
-def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
-    key = cache_key(call.chain, call.key_parts)
+# 같은 캐시 키의 동시 요청을 한 번의 모델 호출로 모은다 (single-flight). 키 → [잠금, 기다리는 수]
+_flights: dict[str, list] = {}
+_flights_lock = threading.Lock()
+
+
+@contextmanager
+def _single_flight(key: str, wait: float):
+    """같은 키의 다른 요청이 모델을 부르는 중이면 끝날 때까지(최대 `wait` 초) 기다린다. 들어오면 True, 시간 초과면 False."""
+    with _flights_lock:
+        entry = _flights.setdefault(key, [threading.Lock(), 0])
+        entry[1] += 1
+    got = entry[0].acquire(timeout=wait)
+    try:
+        yield got
+    finally:
+        if got:
+            entry[0].release()
+        with _flights_lock:
+            entry[1] -= 1
+            if entry[1] == 0:
+                _flights.pop(key, None)
+
+
+def _cached(db: Session, key: str) -> GuardOutcome | None:
     row = db.scalar(select(LlmResult).where(LlmResult.cache_key == key))
     window = TRANSIENT_RETRY_AFTER if row is not None and is_transient(row.fail_reason) else RETRY_AFTER
     if row is not None and (not row.fallback or datetime.now(UTC) - row.created_at < window):
         output = {k: v for k, v in row.output.items() if k != "_error"}
         return GuardOutcome(output=output, fallback=row.fallback, cached=True, fail_reason=row.fail_reason)
+    return None
+
+
+RETENTION = timedelta(days=60)  # llm_results 보관 기간. 지나면 지운다 (다시 필요하면 새로 부른다)
+CLEANUP_INTERVAL_SEC = 3600
+_last_cleanup = 0.0
+
+
+def cleanup_old_results(db: Session) -> int:
+    """만든 지 60일 넘은 캐시 행을 지운다. 반환: 지운 행 수."""
+    n = db.execute(delete(LlmResult).where(LlmResult.created_at < datetime.now(UTC) - RETENTION)).rowcount
+    db.commit()
+    return n
+
+
+def maybe_cleanup(db: Session) -> None:
+    """한 시간에 한 번만 (auth_service.maybe_cleanup_tokens 와 같은 방식 — 별도 스케줄러 없이)."""
+    global _last_cleanup
+    now = time.monotonic()
+    if now - _last_cleanup < CLEANUP_INTERVAL_SEC:
+        return
+    _last_cleanup = now
+    try:
+        cleanup_old_results(db)
+    except Exception:
+        db.rollback()
+        log.exception("llm_results 청소 실패")
+
+
+def _invoke(runner: Any, messages: Any, deadline_box: list[float], timeout: float) -> Any:
+    """풀의 작업자가 실제로 집어 든 순간부터 마감을 잰다 — 앞 작업에 밀려 큐에서 기다린 시간은 빼고."""
+    if not deadline_box:
+        deadline_box.append(time.monotonic() + timeout)
+    return runner.invoke(messages)
+
+
+def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
+    key = cache_key(call.chain, call.key_parts)
+    hit = _cached(db, key)
+    if hit is not None:
+        return hit
 
     runner = llm_model.structured(call.schema)
     if runner is None:  # 키 없음 · 꺼짐 — 기록하지 않는다 (키를 넣으면 바로 부르도록)
         return GuardOutcome(output=call.fallback, fallback=True, fail_reason="disabled")
 
-    ratelimit.check(f"llm:user:{user_id}", get_settings().llm_rate_per_minute, 60)  # 넘으면 429 RATE_LIMITED
+    timeout = get_settings().llm_timeout_seconds
+    db.commit()  # 모델을 (또는 같은 키의 다른 요청을) 기다리는 동안 DB 연결을 붙잡지 않는다. 결과는 _store 가 새 트랜잭션으로 쓴다
+    with _single_flight(key, wait=2 * timeout + RETRY_WAIT + 5) as got:
+        if not got:  # 앞 요청이 너무 오래 걸린다 — 기다리지 않고 규칙 문장으로
+            return GuardOutcome(output=call.fallback, fallback=True, fail_reason="timeout")
+        hit = _cached(db, key)  # 기다리는 동안 앞 요청이 저장했으면 그걸 쓴다 (모델은 한 번만 부른다)
+        if hit is not None:
+            db.commit()
+            return hit
+        ratelimit.check(f"llm:user:{user_id}", get_settings().llm_rate_per_minute, 60)  # 넘으면 429 RATE_LIMITED
+        db.commit()
+        maybe_cleanup(db)
+        return _call_model(db, call, key, runner, timeout)
+
+
+def _call_model(db: Session, call: ChainCall, key: str, runner: Any, timeout: float) -> GuardOutcome:
     t0 = time.monotonic()
-    deadline = t0 + get_settings().llm_timeout_seconds
+    deadline_box: list[float] = []  # 첫 작업자가 일을 집어 든 시각 + timeout. 재시도도 같은 마감을 쓴다
     reason: str | None = None
     detail: str | None = None
     data: dict[str, Any] | None = None
     used_model = llm_model.model_name()
     for attempt in range(2):  # 일시적 오류면 남은 시간 안에서 한 번 더 (두 번째는 예비 모델)
         try:
-            raw = _pool.submit(runner.invoke, call.messages).result(timeout=max(deadline - time.monotonic(), 0.01))
+            fut = _pool.submit(_invoke, runner, call.messages, deadline_box, timeout)
+            try:  # 큐에서 기다리는 시간은 따로 timeout 까지만 — 풀이 꽉 차 있으면 시작도 못 하고 폴백
+                raw = fut.result(timeout=max((deadline_box[0] if deadline_box else t0 + timeout) - time.monotonic(), 0.01))
+            except FutureTimeout:
+                if not deadline_box:
+                    fut.cancel()
+                    raise
+                remaining = deadline_box[0] - time.monotonic()  # 작업자가 늦게 집어 들었으면 그만큼 마감이 뒤로 간다
+                if remaining <= 0:
+                    raise
+                raw = fut.result(timeout=remaining)
             if isinstance(raw, dict) and "parsed" in raw:  # include_raw=True 응답
                 meta = getattr(raw.get("raw"), "response_metadata", None) or {}
                 version = meta.get("model_version") or meta.get("model_name")  # Gemini 는 model_name 에 실제 버전을 담는다
@@ -312,6 +406,7 @@ def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
             detail = str(e)[:300]
             # 보낸 입력은 가명뿐이라 공급자 오류 문구에 실명이 섞이지 않는다. 원인(모델 이름·키·한도)을 알 수 있게 앞부분을 남긴다
             log.warning("llm chain=%s attempt=%d error=%s %s", call.chain, attempt + 1, type(e).__name__, detail)
+            deadline = deadline_box[0] if deadline_box else t0 + timeout
             if attempt == 0 and is_transient(reason) and deadline - time.monotonic() > RETRY_WAIT + 2:
                 time.sleep(RETRY_WAIT)
                 runner = llm_model.structured(call.schema, fallback=True) or runner

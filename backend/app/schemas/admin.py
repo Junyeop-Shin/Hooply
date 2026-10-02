@@ -50,12 +50,12 @@ class PlayerRawData(BaseModel):
 class RatingAdjust(BaseModel):
     """실력 지표 수동 보정 — `PATCH /admin/players/{id}/rating`.
 
-    `player_profiles.skill_overall` 을 덮어쓰고 `skill_rating_history` 에 source=ADMIN_ADJUST 로
+    `player_profiles.admin_adjust`(재계산 출발점 오프셋)를 풀어 `skill_overall` 이 이 값이 되게 하고, `skill_rating_history` 에 source=ADMIN_ADJUST 로
     before/after/reason 을 남긴다. 그래서 사유는 필수다. `audit_logs` 에도 기록된다.
     """
 
-    skill_overall: Decimal = Field(description="새 종합 실력 값 (점/쿼터 단위, 9.2절)")
-    reason: str = Field(min_length=1, description="보정 사유. 이력에 그대로 남는다")
+    skill_overall: Decimal = Field(ge=-50, le=50, description="새 종합 실력 값 (점/쿼터 단위, 9.2절)")
+    reason: str = Field(min_length=1, max_length=500, description="보정 사유. 이력에 그대로 남는다")
 
 
 class AuditLogView(ORMModel):

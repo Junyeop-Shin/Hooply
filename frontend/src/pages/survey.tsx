@@ -12,10 +12,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { STATIC_QUERY } from '../queryClient'
 import { surveyApi } from '../api/survey'
-import { ApiError } from '../api/client'
+import { errorMessage, errorMessageWithDetails } from '../api/client'
 import { SELF_RANK_LABEL, type SelfRankLevel, type SurveyAnswerIn, type SurveyQuestion } from '../api/types'
 import { useMe } from './home'
-import { Alert, Button, Spinner } from '../components/ui'
+import { Alert, Button, LoadError, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 
 type Answer = { optionIds: number[]; numeric?: number }
@@ -23,12 +23,25 @@ type Answer = { optionIds: number[]; numeric?: number }
 const SECTION_NAME: Record<string, string> = { A: '기본', B: '공격', C: '수비', D: '포지션', E: '성향' }
 const AUTO_ADVANCE_MS = 260
 
+/** 답하던 설문을 이 탭에 보관 — 새로고침하거나 잠깐 다른 화면에 다녀와도 이어서 한다. 제출하면 지운다 */
+const surveyDraftKey = (templateId: number) => `survey-draft-${templateId}`
+type SurveyDraft = { step: number; answers: Record<number, Answer> }
+function readSurveyDraft(templateId: number, steps: number): SurveyDraft | null {
+  try {
+    const raw = sessionStorage.getItem(surveyDraftKey(templateId))
+    if (!raw) return null
+    const d = JSON.parse(raw) as SurveyDraft
+    if (typeof d.step !== 'number' || typeof d.answers !== 'object' || d.answers === null) return null
+    return { step: Math.min(Math.max(0, d.step), steps - 1), answers: d.answers }
+  } catch { return null }
+}
+
 export function SurveyPage() {
   const me = useMe()
   const tpl = useQuery({ queryKey: ['survey', 'template'], queryFn: surveyApi.template, ...STATIC_QUERY })
   if (me.data?.onboarding_completed) return <Navigate to="/" replace />
   if (me.isLoading || tpl.isLoading) return <Screen><TopBar title="실력 설문" /><Spinner /></Screen>
-  if (!tpl.data) return <Screen><TopBar title="실력 설문" back="/" /><Content><Alert>설문을 불러오지 못했어요.</Alert></Content></Screen>
+  if (!tpl.data) return <Screen><TopBar title="실력 설문" back="/" /><Content><LoadError message={errorMessage(tpl.error, '설문을 불러오지 못했어요.')} onRetry={() => tpl.refetch()} retrying={tpl.isFetching} /></Content></Screen>
   return <SurveyForm questions={tpl.data.questions} templateId={tpl.data.template_id} />
 }
 
@@ -49,8 +62,12 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
   const nav = useNavigate()
   const qc = useQueryClient()
   const steps = useMemo(() => groupSteps(questions), [questions])
-  const [step, setStep] = useState(0)
-  const [answers, setAnswers] = useState<Record<number, Answer>>({})
+  const [initial] = useState(() => readSurveyDraft(templateId, steps.length))
+  const [step, setStep] = useState(initial?.step ?? 0)
+  const [answers, setAnswers] = useState<Record<number, Answer>>(initial?.answers ?? {})
+  useEffect(() => {
+    try { sessionStorage.setItem(surveyDraftKey(templateId), JSON.stringify({ step, answers })) } catch { /* 저장소 없음 */ }
+  }, [templateId, step, answers])
   const [error, setError] = useState<string | null>(null)
   const timer = useRef<number | null>(null)
 
@@ -72,11 +89,12 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
       return surveyApi.submit(templateId, payload)
     },
     onSuccess: () => {
+      try { sessionStorage.removeItem(surveyDraftKey(templateId)) } catch { /* ignore */ }
       qc.invalidateQueries({ queryKey: ['me'] })
       qc.invalidateQueries({ queryKey: ['profile'] })
       nav('/', { replace: true })
     },
-    onError: (e) => setError(e instanceof ApiError ? `${e.message} ${e.details.map((d) => d.reason).join(' ')}` : '제출에 실패했어요.'),
+    onError: (e) => setError(errorMessageWithDetails(e, '제출에 실패했어요.')),
   })
 
   /** 답을 반영하고, 이 화면의 단일선택 문항이 모두 채워졌으면 잠깐 뒤 자동으로 다음 화면으로 */
@@ -144,7 +162,8 @@ function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; ans
                 key={o.id}
                 type="button"
                 onClick={() => toggle(o.id)}
-                className={`relative min-h-11 rounded-full border px-4 text-sm font-semibold ${on ? 'border-court-500 bg-court-500 text-white' : 'border-line-strong bg-surface text-ink'}`}
+                aria-pressed={on}
+                className={`relative min-h-11 rounded-full border px-4 text-sm font-semibold ${on ? 'border-brand bg-brand text-on-brand' : 'border-line-strong bg-surface text-ink'}`}
               >
                 {rank > 0 && <span className="absolute -left-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-navy-800 text-[11px] font-bold text-white">{rank}</span>}
                 {o.label}
@@ -171,9 +190,9 @@ function NumberStepper({ value, onChange }: { value?: number; onChange: (v: numb
   const v = value ?? 175
   return (
     <div className="flex items-center justify-center gap-4 rounded-2xl border border-line bg-surface py-4">
-      <button type="button" onClick={() => onChange(Math.max(120, v - 1))} className="size-12 rounded-xl bg-sunken text-2xl font-bold">−</button>
-      <input type="number" inputMode="numeric" value={value ?? ''} placeholder="175" onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} className="w-28 bg-transparent text-center text-4xl font-black text-ink outline-none" />
-      <button type="button" onClick={() => onChange(Math.min(250, v + 1))} className="size-12 rounded-xl bg-brand-soft text-2xl font-bold text-brand-ink">+</button>
+      <button type="button" aria-label="1 줄이기" onClick={() => onChange(Math.max(120, v - 1))} className="size-12 rounded-xl bg-sunken text-2xl font-bold">−</button>
+      <input type="number" inputMode="numeric" aria-label="값" value={value ?? ''} placeholder="175" onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} className="w-28 bg-transparent text-center text-4xl font-black text-ink outline-none" />
+      <button type="button" aria-label="1 늘리기" onClick={() => onChange(Math.min(250, v + 1))} className="size-12 rounded-xl bg-brand-soft text-2xl font-bold text-brand-ink">+</button>
     </div>
   )
 }
@@ -193,6 +212,7 @@ export function SelfRankPage() {
   const m = useMutation({
     mutationFn: (level: SelfRankLevel) => surveyApi.setSelfRank(id, level),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['team', id] }); goBack(`/teams/${id}`) },  // 프로필에서 왔으면 프로필로, 팀에서 왔으면 팀으로
+    meta: { inlineError: true },
   })
   const current = picked ?? mine?.self_rank_level ?? null
 
@@ -217,7 +237,7 @@ export function SelfRankPage() {
             </button>
           ))}
         </div>
-        {m.isError && <Alert>{m.error instanceof ApiError ? m.error.message : '저장하지 못했어요.'}</Alert>}
+        {m.isError && <Alert>{errorMessage(m.error, '저장하지 못했어요.')}</Alert>}
       </Content>
       <BottomAction>
         <Button variant="ghost" full onClick={() => nav(`/teams/${id}`)}>나중에 할게요</Button>

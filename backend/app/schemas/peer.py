@@ -91,7 +91,11 @@ class QuarterRecord(BaseModel):
     event_id: int
     event_date: str
     quarter_no: int
-    side: str = Field(description="BLACK / WHITE")
+    side: str = Field(description="BLACK / WHITE — 쿼터 기록의 첫째(home) · 둘째(away) 칸")
+    squad_no: int | None = Field(
+        default=None, ge=1, le=3,
+        description="그 쿼터에 내가 속한 팀 번호 (1 블랙 · 2 화이트 · 3 레드). 2팀이면 BLACK→1 · WHITE→2, 3팀이면 그 쿼터 대진(home/away_squad_no)",
+    )
     my_score: int
     their_score: int
     black_score: int

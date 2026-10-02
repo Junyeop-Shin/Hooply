@@ -138,10 +138,12 @@ async def _lifespan(app: FastAPI):
     # 시작할 때 만료 토큰을 한 번 치운다. 이후에는 토큰 경로에서 한 시간에 한 번 (auth_service.maybe_cleanup_tokens)
     try:
         from app.db.session import SessionLocal
+        from app.llm.llm_guard import cleanup_old_results
         from app.services.auth_service import cleanup_expired_tokens
 
         with SessionLocal() as db:
             logging.getLogger("hooply").info("만료 토큰 청소: %s", cleanup_expired_tokens(db))
+            logging.getLogger("hooply").info("오래된 AI 결과 청소: %s건", cleanup_old_results(db))
     except Exception:
         logging.getLogger("hooply").exception("시작 시 토큰 청소 실패")
     yield
@@ -165,7 +167,9 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        # 인증은 Authorization: Bearer 헤더라 쿠키를 다른 출처로 보낼 일이 없다 (SQLAdmin 세션 쿠키는 같은 출처 /admin 에서만 쓴다).
+        # credentials 를 열어 두면 허용 출처의 페이지가 쿠키를 실어 보낼 수 있으니 닫는다
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )

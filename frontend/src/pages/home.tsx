@@ -2,17 +2,18 @@
 import { useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { authApi } from '../api/auth'
+import { authApi, ME_STALE } from '../api/auth'
 import { eventsApi } from '../api/events'
 import { teamsApi } from '../api/teams'
 import { localISODate, type EventView } from '../api/types'
-import { Badge, Button, Card, EmptyState, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
+import { errorMessage } from '../api/client'
+import { Badge, Button, Card, EmptyState, LoadError, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
+import { confirm, toast } from '../store/feedback'
 import { TutorialCard, TutorialPrompt } from '../components/tutorial'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { fmtEvent } from '../lib/format'
+import { josa } from '../lib/josa'
 
-// 내 정보 · 내 팀은 바꾸는 쪽이 늘 invalidate 하므로 화면을 옮길 때마다 다시 받지 않는다 (5분)
-const ME_STALE = 5 * 60_000
 export function useMe() {
   return useQuery({ queryKey: ['me'], queryFn: authApi.me, staleTime: ME_STALE })
 }
@@ -31,7 +32,14 @@ function useUpcoming(teamIds: number[]) {
     .flatMap((r) => r.data?.items ?? [])
     .filter((e) => e.status !== 'CANCELED' && e.event_date >= today)
     .sort((a, b) => a.event_date.localeCompare(b.event_date) || (a.start_time ?? '').localeCompare(b.start_time ?? ''))
-  return { upcoming, isLoading: results.some((r) => r.isLoading) }
+  const failed = results.filter((r) => r.isError)
+  return {
+    upcoming, isLoading: results.some((r) => r.isLoading),
+    // 일부 팀만 실패해도 알린다 — "예정된 일정이 없어요" 로 오해하지 않게
+    error: failed[0]?.error ?? null,
+    retry: () => failed.forEach((r) => r.refetch()),
+    retrying: failed.some((r) => r.isFetching),
+  }
 }
 
 export function HomePage() {
@@ -46,13 +54,13 @@ export function HomePage() {
 
   return (
     <Screen>
-      <TopBar tone="navy" title={<span className="flex items-center gap-2"><span className="flex size-6 items-center justify-center rounded-md bg-court-500 text-[12px] font-black text-white">H</span><span className="tracking-[0.12em]">HOOPLY</span></span>} />
+      <TopBar tone="navy" title={<span className="flex items-center gap-2"><span className="flex size-6 items-center justify-center rounded-md bg-brand text-[12px] font-black text-on-brand">H</span><span className="tracking-[0.12em]">HOOPLY</span></span>} />
       <Content>
         <div className="rounded-2xl bg-navy-800 p-5 text-white">
           <p className="text-sm text-bar-sub">안녕하세요,</p>
           <p className="text-xl font-bold">{me.data ? `${me.data.nickname ?? me.data.name}님` : '…'}</p>
           {me.data && !me.data.onboarding_completed && me.data.tutorial_state !== 'ACTIVE' ? (  /* 시작 안내 중이면 체크리스트가 대신 안내한다 */
-            <Link to="/survey" className="mt-3 flex items-center justify-between rounded-xl bg-court-500 px-4 py-3 text-sm font-semibold">
+            <Link to="/survey" className="mt-3 flex items-center justify-between rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-on-brand">
               실력 설문을 아직 안 하셨어요 · 2분이면 끝나요 <span>→</span>
             </Link>
           ) : next ? (
@@ -61,7 +69,7 @@ export function HomePage() {
                 <p className="text-[11px] text-bar-sub">다음 일정 {dday(next.event_date)}{nameOf(next.team_id) ? ` · ${nameOf(next.team_id)}` : ''}</p>
                 <p className="truncate text-sm font-bold">{fmtEvent(next)}{next.venue ? ` · ${next.venue}` : ''}</p>
               </div>
-              <span className={`ml-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${next.my_attendance === 'ATTEND' ? 'bg-court-500' : next.my_attendance === 'ABSENT' ? 'bg-white/10 text-bar-sub' : 'bg-amber-400 text-ink'}`}>
+              <span className={`ml-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${next.my_attendance === 'ATTEND' ? 'bg-brand text-on-brand' : next.my_attendance === 'ABSENT' ? 'bg-white/10 text-bar-sub' : 'bg-amber-400 text-navy-900'}`}>
                 {next.my_attendance === 'ATTEND' ? '참석' : next.my_attendance === 'ABSENT' ? '불참' : '응답하기'}
               </span>
             </Link>
@@ -75,18 +83,22 @@ export function HomePage() {
 
         <section>
           <SectionTitle>다가오는 일정</SectionTitle>
-          {upcoming.isLoading ? <Spinner /> : upcoming.upcoming.length ? (
+          {upcoming.error && <div className="mb-2"><LoadError message={errorMessage(upcoming.error, '일정을 불러오지 못했어요.')} onRetry={upcoming.retry} retrying={upcoming.retrying} /></div>}
+          {upcoming.isLoading || teams.isLoading ? <Spinner /> : upcoming.upcoming.length ? (
             <div className="space-y-2">
               {upcoming.upcoming.map((e) => <EventRow key={e.id} e={e} teamName={nameOf(e.team_id)} />)}
             </div>
-          ) : (
+          ) : upcoming.error || teams.isError ? null : (
             <EmptyState title="예정된 일정이 없어요" desc={isManagerSomewhere ? '팀 상세에서 일정을 등록해 보세요.' : '매니저가 일정을 올리면 여기에 보여요.'} />
           )}
         </section>
 
         <section>
           <SectionTitle>내 팀</SectionTitle>
-          {teams.isLoading ? <Spinner /> : teamList.length ? (
+          {teams.isLoading ? <Spinner /> : teams.isError && !teams.data ? (
+            // 내 팀을 못 받았는데 "팀이 없어요 → 만들기" 를 보여 주면 이미 팀이 있는 사람이 팀을 또 만든다
+            <LoadError message={errorMessage(teams.error, '내 팀을 불러오지 못했어요.')} onRetry={() => teams.refetch()} retrying={teams.isFetching} />
+          ) : teamList.length ? (
             <div className="space-y-2">
               {teamList.map((t) => <TeamRow key={t.team_id} {...t} primary={teamList.length > 1 ? (me.data?.primary_team_id ?? teamList[0].team_id) === t.team_id : null} />)}
               <div className="grid grid-cols-2 gap-2 pt-1">
@@ -134,22 +146,28 @@ function TeamRow(t: { team_id: number; team_name: string; team_status: 'PENDING'
   const qc = useQueryClient()
   const setPrimary = useMutation({
     mutationFn: () => authApi.updateMe({ primary_team_id: t.team_id }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['me'] }); toast(`${t.team_name}${josa(t.team_name, '을')} 기본 팀으로 정했어요.`) },
+    onError: (e) => toast(errorMessage(e, '기본 팀을 바꾸지 못했어요.'), 'error'),
   })
+  // "기본 팀으로" 는 카드 밖에 둔다 — 카드 안에 두면 터치 영역(44px)이 카드 가운데를 덮어, 팀을 열려다 기본 팀이 바뀐다
   return (
-    <Card onClick={() => nav(`/teams/${t.team_id}`)} label={`${t.team_name} 팀 열기`} className="flex items-center gap-3">
-      <span className="flex size-11 items-center justify-center rounded-xl bg-brand-soft text-base font-black text-brand-ink">{t.team_name.slice(0, 1)}</span>
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 truncate font-bold text-ink">{t.team_name}{t.primary && <Badge tone="court">기본</Badge>}</p>
-        <p className="text-xs text-muted">
-          팀원 {t.member_count}명
-          {t.primary === false && (
-            <> · <button onClick={(e) => { e.stopPropagation(); setPrimary.mutate() }} disabled={setPrimary.isPending} className="text-xs text-muted underline underline-offset-2">기본 팀으로 설정하기</button></>
-          )}
-        </p>
-      </div>
-      <div className="flex flex-col items-end gap-1"><RoleBadge role={t.role} /><TeamStatusBadge status={t.team_status} approval={t.approval_status} /></div>
-    </Card>
+    <div>
+      <Card onClick={() => nav(`/teams/${t.team_id}`)} label={`${t.team_name} 팀 열기`} className="flex items-center gap-3">
+        <span className="flex size-11 items-center justify-center rounded-xl bg-brand-soft text-base font-black text-brand-ink">{t.team_name.slice(0, 1)}</span>
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 truncate font-bold text-ink">{t.team_name}{t.primary && <Badge tone="court">기본</Badge>}</p>
+          <p className="text-xs text-muted">팀원 {t.member_count}명</p>
+        </div>
+        <div className="flex flex-col items-end gap-1"><RoleBadge role={t.role} /><TeamStatusBadge status={t.team_status} approval={t.approval_status} /></div>
+      </Card>
+      {t.primary === false && (
+        <div className="-mb-2 flex justify-end">
+          <button type="button" onClick={() => setPrimary.mutate()} disabled={setPrimary.isPending} className="min-h-11 px-2 text-xs text-muted underline underline-offset-2 disabled:opacity-50">
+            {t.team_name} 기본 팀으로 설정하기
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -171,8 +189,9 @@ export function GuestClaimCards({ teamId }: { teamId?: number } = {}) {
     onMutate: ({ gid }) => setBusy(gid),
     onSuccess: (_, v) => {
       qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] }); qc.invalidateQueries({ queryKey: ['team'] })
-      if (v.accept) alert('기록을 가져왔어요. 프로필의 기록에서 확인할 수 있어요.')
+      toast(v.accept ? '기록을 가져왔어요. 프로필의 기록에서 확인할 수 있어요.' : '알겠어요. 다시 묻지 않을게요.')
     },
+    onError: (e) => toast(errorMessage(e, '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.'), 'error'),
     onSettled: () => setBusy(null),
   })
   const items = (q.data?.items ?? []).filter((c) => teamId === undefined || c.team_id === teamId)
@@ -189,7 +208,7 @@ export function GuestClaimCards({ teamId }: { teamId?: number } = {}) {
           <p className="mt-1 text-xs text-muted">맞으면 그 기록이 내 계정으로 합쳐져요. 아니면 다시 묻지 않아요.</p>
           <div className="mt-3 flex gap-2">
             <Button variant="ghost" className="min-h-10 shrink-0 whitespace-nowrap text-sm" disabled={busy === c.guest.id} onClick={() => decide.mutate({ gid: c.guest.id, accept: false })}>아니에요</Button>
-            <Button full className="min-h-10 text-sm" loading={busy === c.guest.id} onClick={() => confirm(`게스트 ${c.guest.display_name}의 기록을 내 계정으로 가져올까요?`) && decide.mutate({ gid: c.guest.id, accept: true })}>내 기록이에요</Button>
+            <Button full className="min-h-10 text-sm" loading={busy === c.guest.id} onClick={async () => { if (await confirm({ title: '내 기록으로 가져올까요?', body: `${c.team_name}의 게스트 ${c.guest.display_name} 기록(참석 ${c.events_attended}회 · 출전 ${c.quarters_played}쿼터)이 내 계정으로 합쳐져요.`, confirmLabel: '가져오기' })) decide.mutate({ gid: c.guest.id, accept: true }) }}>내 기록이에요</Button>
           </div>
         </Card>
       ))}

@@ -14,6 +14,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -141,12 +142,12 @@ def sync(db: Session, user: User) -> list[BadgeView]:
     """지표를 다시 세어 새로 충족한 배지를 저장하고, 전체 목록(획득·미획득 + 진행도)을 돌려준다."""
     c = counters(db, user)
     earned = {b.code: b.earned_at for b in db.scalars(select(UserBadge).where(UserBadge.user_id == user.id)).all()}
-    new = [UserBadge(user_id=user.id, code=b.code) for b in BADGES if b.code not in earned and c[b.metric] >= b.threshold]
+    new = [b.code for b in BADGES if b.code not in earned and c[b.metric] >= b.threshold]
     if new:
-        db.add_all(new)
+        # 기록 탭을 두 기기(또는 두 탭)에서 동시에 열어도 유니크 위반이 나지 않게 — 이미 있는 배지는 건너뛴다
+        db.execute(pg_insert(UserBadge).values([{"user_id": user.id, "code": code} for code in new]).on_conflict_do_nothing(constraint="uq_user_badges_code"))
         db.commit()
-        for row in new:
-            earned[row.code] = row.earned_at
+        earned.update(dict(db.execute(select(UserBadge.code, UserBadge.earned_at).where(UserBadge.user_id == user.id, UserBadge.code.in_(new))).all()))
     return [
         BadgeView(code=b.code, group=b.group, title=b.title, description=b.description, threshold=b.threshold, series=b.series, tier=b.tier,
                   progress=min(c[b.metric], b.threshold) if b.code in earned else c[b.metric], earned_at=earned.get(b.code))

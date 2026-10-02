@@ -32,7 +32,7 @@ def ai_explanation(db: DB, user: CurrentUser, candidate_id: int):
     - **오류:** `429 RATE_LIMITED` — 사용자당 분당 5번 넘게 새로 부름.
     - **상태:** `구현됨`.
     """
-    cand = assignment_service._load_candidate(db, candidate_id)
+    cand = assignment_service.load_candidate(db, candidate_id)
     event = db.get(Event, cand.run.event_id)
     if not guest_service.is_manager(db, user, event.team_id):
         raise E.ForbiddenRole()

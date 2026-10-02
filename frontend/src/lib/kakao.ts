@@ -2,6 +2,7 @@
  * 카카오 JavaScript SDK 로더 + 카카오톡 공유 (11.2절 "카카오톡 공유"). 키는 VITE_KAKAO_JS_KEY (공개용 키, 도메인으로 보호).
  * SDK 는 필요할 때 한 번만 <script> 로 불러온다. 키가 없거나 로드에 실패하면 OS 공유 시트 → 클립보드 순으로 대체한다.
  */
+import { toast } from '../store/feedback'
 
 declare global {
   interface Window {
@@ -101,4 +102,20 @@ export const SHARE_DONE: Record<ShareResult, string | null> = {
   clipboard: '복사했어요. 카카오톡에 붙여 넣어 주세요.',
   download: '이미지를 저장했어요. 카카오톡에 첨부해 주세요.',
   none: null,
+}
+
+/** 공유 결과를 어느 화면에서나 같은 방식(토스트)으로 알린다. 취소(none)는 조용히 */
+export function announceShare(r: ShareResult) {
+  const m = SHARE_DONE[r]
+  if (m) toast(m)
+}
+
+/** 클립보드 복사 — 성공 · 실패 모두 토스트로 */
+export async function copyText(text: string, done = '복사했어요.') {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast(done)
+  } catch {
+    toast('복사하지 못했어요. 길게 눌러 직접 복사해 주세요.', 'error')
+  }
 }

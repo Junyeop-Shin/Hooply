@@ -36,11 +36,30 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 def get_db() -> Generator[Session, None, None]:
     """요청 단위 세션을 제공하는 FastAPI 의존성.
 
-    commit/rollback 은 서비스 계층이 결정한다. 여기서는 예외가 나더라도 세션을 닫기만 하며,
-    닫히지 않은 트랜잭션은 close() 시점에 롤백된다.
+    commit/rollback 은 서비스 계층이 결정한다. 요청이 예외로 끝나면 여기서 롤백한다 — 검증 실패 뒤에
+    고치다 만 객체가 저장되지 않게, 그리고 유니크 위반(409 CONFLICT, core/errors.py) 뒤 세션이 깨진 채 남지 않게.
     """
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
+
+
+# pg_advisory_xact_lock 의 첫째 키(이름공간). 다른 용도의 잠금과 겹치지 않게 고정 숫자를 쓴다
+TEAM_STATS_LOCK = 7001
+
+
+def lock_team_stats(db: Session, team_id: int) -> None:
+    """팀 단위 지표 재계산(실력 재생 · 선호 조합)을 한 번에 하나씩만 하게 트랜잭션 잠금을 건다.
+
+    두 요청이 같은 팀을 동시에 다시 계산하면 서로의 미완성 결과 위에 덮어쓰거나, 같은 페어의 chemistry_scores 행을
+    둘 다 INSERT 해 유니크 위반(500)이 났다. 잠금은 트랜잭션이 끝날 때(commit/rollback) 풀리고, 같은 트랜잭션
+    안에서 여러 번 걸어도 된다 (재진입). 실력 · 선호를 한 키로 잠그므로 둘을 함께 부르는 경로도 교착이 생기지 않는다.
+    """
+    from sqlalchemy import text
+
+    db.execute(text("SELECT pg_advisory_xact_lock(:ns, :key)"), {"ns": TEAM_STATS_LOCK, "key": int(team_id) & 0x7FFFFFFF})

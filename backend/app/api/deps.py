@@ -55,16 +55,18 @@ def get_current_user(
     access 토큰(30분)의 서명·만료·`type=access`를 확인하고 `sub`의 user_id로 `users`를 조회한다.
     삭제된 계정(`deleted_at` 있음)은 유효한 토큰이라도 거부한다.
 
-    오류: `401 TOKEN_EXPIRED` — 헤더 없음, 만료, 위조, refresh 토큰을 잘못 보냄, 삭제된 계정.
+    오류: `401 TOKEN_EXPIRED` — 헤더 없음, 만료, 위조, refresh 토큰을 잘못 보냄, 삭제된 계정,
+    비밀번호를 바꾸기 전에 발급된 토큰(`users.token_version` 불일치).
     """
     if cred is None:
         raise errors.TokenExpired("로그인이 필요합니다.")
-    user_id = decode_token(cred.credentials, "access")
-    if user_id is None:
+    decoded = decode_token(cred.credentials, "access")
+    if decoded is None:
         raise errors.TokenExpired()
+    user_id, version = decoded
     user = db.get(User, user_id)
-    if user is None or user.deleted_at is not None:
-        raise errors.TokenExpired()
+    if user is None or user.deleted_at is not None or user.token_version != version:
+        raise errors.TokenExpired()  # 세대가 다르면 비밀번호를 바꾸기 전에 받은 토큰 (다른 기기 로그아웃)
     return user
 
 

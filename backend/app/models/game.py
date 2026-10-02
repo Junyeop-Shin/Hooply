@@ -35,16 +35,20 @@ class Quarter(CreatedAtMixin, Base):
     __table_args__ = (
         # 한 회차 안에서 쿼터 번호는 유일 (409 QUARTER_EXISTS)
         UniqueConstraint("event_id", "quarter_no", name="uq_quarters_event_no"),
-        # 점수는 음수가 될 수 없다
-        CheckConstraint("black_score >= 0 AND white_score >= 0", name="ck_quarters_score_nonneg"),
-        # 정규화 식의 분모이므로 0 이면 안 된다
-        CheckConstraint("duration_min > 0", name="ck_quarters_duration_positive"),
+        # 점수는 0~200. DB 는 넉넉한 하드 상한만 두고, API 는 팀당 쿼터 99점까지 받는다 (schemas/game.py) —
+        # 99 × 10 / 1분 = 990 이라 normalized_margin NUMERIC(5,2) 를 넘지 않는다 (0025)
+        CheckConstraint("black_score BETWEEN 0 AND 200 AND white_score BETWEEN 0 AND 200", name="ck_quarters_score_range"),
+        # 정규화 식의 분모. API 와 같은 1~10분
+        CheckConstraint("duration_min BETWEEN 1 AND 10", name="ck_quarters_duration_range"),
+        CheckConstraint("quarter_no >= 1", name="ck_quarters_quarter_no"),
+        CheckConstraint("home_squad_no BETWEEN 1 AND 3 AND away_squad_no BETWEEN 1 AND 3", name="ck_quarters_squad_no"),
         # 한 쿼터에 같은 팀끼리 붙을 수 없다 (3팀일 때 대진)
         CheckConstraint("home_squad_no <> away_squad_no", name="ck_quarters_distinct_squads"),
     )
 
     id: Mapped[BigPK]
-    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    # event_id 조회는 uq_quarters_event_no(event_id 가 맨 앞)가 맡는다 — 단독 인덱스는 0025 에서 지웠다
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     quarter_no: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1부터. 삭제 후 번호가 비어도 됨
     # 두 칸(BLACK · WHITE)의 득점. 칸 이름일 뿐이고 실제로 선 팀은 home/away_squad_no — 2팀이면 늘 1(블랙) · 2(화이트),
     # 3팀이면 쿼터마다 매니저가 고른 대진 (예: 화이트 vs 레드 → home 2, away 3)

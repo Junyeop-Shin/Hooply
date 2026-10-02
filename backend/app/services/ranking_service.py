@@ -20,14 +20,18 @@ from app.services import survey_service
 from app.services.player_service import to_card
 
 
-def _load(db: Session, ranking: ManagerRanking) -> RankingView:
-    ids = [e.player_id for e in ranking.entries]
-    players = {
+def _players(db: Session, ids: set[int]) -> dict[int, Player]:
+    return {
         p.id: p
         for p in db.scalars(
             select(Player).where(Player.id.in_(ids)).options(selectinload(Player.profile), selectinload(Player.positions), selectinload(Player.user))
         ).all()
     }
+
+
+def _load(db: Session, ranking: ManagerRanking, players: dict[int, Player] | None = None) -> RankingView:
+    if players is None:
+        players = _players(db, {e.player_id for e in ranking.entries})
     return RankingView(
         id=ranking.id, ranked_at=ranking.created_at, ranked_by=ranking.ranked_by, is_active=ranking.is_active,
         entries=[RankingEntryView(rank_no=e.rank_no, player=to_card(players[e.player_id])) for e in sorted(ranking.entries, key=lambda x: x.rank_no) if e.player_id in players],
@@ -49,7 +53,8 @@ def history(db: Session, team: Team) -> list[RankingView]:
         select(ManagerRanking).where(ManagerRanking.team_id == team.id)
         .options(selectinload(ManagerRanking.entries)).order_by(ManagerRanking.created_at.desc())
     ).all()
-    return [_load(db, r) for r in rows]
+    players = _players(db, {e.player_id for r in rows for e in r.entries})  # 버전마다 따로 읽지 않고 한 번에
+    return [_load(db, r, players) for r in rows]
 
 
 def create(db: Session, team: Team, by: User, player_ids: list[int]) -> RankingView:
@@ -66,6 +71,7 @@ def create(db: Session, team: Team, by: User, player_ids: list[int]) -> RankingV
         raise errors.PlayerNotInTeam(details=[ErrorDetail(field="player_ids", reason=f"이 팀에 없는 사람이 {len(bad)}명 있어요.")])
     for old in db.scalars(select(ManagerRanking).where(ManagerRanking.team_id == team.id, ManagerRanking.is_active.is_(True))).all():
         old.is_active = False
+    db.flush()  # 팀당 활성 버전은 하나 (uq_manager_rankings_active) — 새 버전을 넣기 전에 이전 것을 먼저 끈다
     ranking = ManagerRanking(team_id=team.id, ranked_by=by.id, is_active=True)
     ranking.entries = [ManagerRankingEntry(player_id=pid, rank_no=i + 1) for i, pid in enumerate(player_ids)]
     db.add(ranking)

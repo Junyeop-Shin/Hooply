@@ -116,7 +116,7 @@ def apply_guest_grade(db: Session, guest: Player, grade: int | None, by_user_id:
         prof.skill_confidence = max(prof.skill_confidence, GUEST_GRADE_CONFIDENCE)
     prof.prior_overall = after
     if prof.quarters_played == 0:
-        prof.skill_overall = after  # 쿼터가 있으면 아래 rating 재계산이 덮어쓴다
+        prof.skill_overall = after + (prof.admin_adjust or Decimal(0))  # 쿼터가 있으면 아래 rating 재계산이 덮어쓴다
     if before != after:
         db.add(
             SkillRatingHistory(
@@ -207,12 +207,13 @@ def create_guest(
 def update_guest(
     db: Session, guest: Player, by: User, *, display_name: str | None = None, skill_grade: int | None = None,
     preferred_position: Position | None = None, playable_positions: list[Position] | None = None,
-    grade_given: bool = False, height_cm: int | None = None,
+    grade_given: bool = False, height_cm: int | None = None, height_given: bool = False,
 ) -> Player:
-    """보낸 필드만 바꾼다. `grade_given` 이 True 면 skill_grade=None 도 '미지정으로 되돌리기' 로 해석한다."""
+    """보낸 필드만 바꾼다. `grade_given` 이 True 면 skill_grade=None 도 '미지정으로 되돌리기' 로 해석한다.
+    `height_given` 도 같다 — 요청에 `height_cm: null` 을 명시하면 키를 지우고, 필드를 빼면 그대로 둔다."""
     if display_name is not None:
         guest.display_name = display_name.strip()
-    if height_cm is not None:
+    if height_given or height_cm is not None:
         guest.height_cm = height_cm
     if grade_given:
         apply_guest_grade(db, guest, skill_grade, by.id)

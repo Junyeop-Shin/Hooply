@@ -11,14 +11,37 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
 
 from fastapi import Request
 
 from app.core import errors
 
 _lock = threading.Lock()
-_hits: dict[str, deque[float]] = defaultdict(deque)
+# 키 → (창 길이, 최근 요청 시각들). 창이 비면 키를 지운다 — 한 번 오고 마는 IP 들로 메모리가 계속 늘지 않게
+_hits: dict[str, tuple[int, deque[float]]] = {}
+MAX_KEYS = 20_000  # 이보다 많아지면 창이 지난 키를 훑어 지우고, 그래도 넘치면 오래된 키부터 버린다
+SWEEP_INTERVAL = 300.0  # 초. 이 간격마다 한 번 전체를 훑는다
+_last_sweep = 0.0
+
+
+def _prune(q: deque[float], window: int, now: float) -> None:
+    while q and now - q[0] > window:
+        q.popleft()
+
+
+def _sweep(now: float) -> None:
+    """창이 지난 키를 지운다. 그래도 MAX_KEYS 를 넘으면 마지막 요청이 오래된 키부터 버린다. `_lock` 안에서 부른다."""
+    global _last_sweep
+    _last_sweep = now
+    for key in list(_hits):
+        window, q = _hits[key]
+        _prune(q, window, now)
+        if not q:
+            del _hits[key]
+    if len(_hits) > MAX_KEYS:
+        for key, _ in sorted(_hits.items(), key=lambda kv: kv[1][1][-1])[: len(_hits) - MAX_KEYS]:
+            del _hits[key]
 
 
 def check(key: str, limit: int, window_seconds: int) -> None:
@@ -29,9 +52,13 @@ def check(key: str, limit: int, window_seconds: int) -> None:
         return
     now = time.monotonic()
     with _lock:
-        q = _hits[key]
-        while q and now - q[0] > window_seconds:
-            q.popleft()
+        if now - _last_sweep > SWEEP_INTERVAL or len(_hits) > MAX_KEYS:
+            _sweep(now)
+        entry = _hits.get(key)
+        if entry is None:
+            entry = _hits[key] = (window_seconds, deque())
+        q = entry[1]
+        _prune(q, window_seconds, now)
         if len(q) >= limit:
             raise errors.RateLimited()
         q.append(now)
@@ -44,10 +71,17 @@ def reset() -> None:
 
 
 def client_ip(request: Request) -> str:
-    """프록시(Render) 뒤에서는 X-Forwarded-For 의 첫 값이 실제 클라이언트다."""
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """요청한 사람의 IP.
+
+    운영은 Cloudflare 뒤에 있다 (응답에 server: cloudflare · cf-ray). Cloudflare 는 `CF-Connecting-IP`(엔터프라이즈는
+    `True-Client-IP`)를 자기가 본 접속 IP 로 **덮어써서** 넘기므로 이 값은 클라이언트가 꾸밀 수 없다. 반면
+    X-Forwarded-For 의 첫 값은 클라이언트가 보낸 헤더가 그대로 앞에 남아 있어, 그걸 믿으면 헤더만 바꿔 가며
+    제한을 피할 수 있었다. 둘 다 없으면(로컬 · 테스트) 소켓 주소.
+    """
+    for header in ("cf-connecting-ip", "true-client-ip"):
+        v = request.headers.get(header)
+        if v and v.strip():
+            return v.strip()
     return request.client.host if request.client else "unknown"
 
 
@@ -71,4 +105,5 @@ class Limit:
 # 분당 IP 기준. 사람이 손으로 틀리는 속도보다 넉넉하고, 자동 대입에는 턱없이 부족한 수
 LOGIN = Limit("login", 10, 60)
 SIGNUP = Limit("signup", 5, 60)
-PASSWORD = Limit("password", 5, 60)  # 재설정 메일 요청 · 재설정 토큰 시도
+ADMIN_LOGIN = Limit("admin-login", 10, 60)  # 관리자 콘솔(/admin) 로그인 폼
+PASSWORD = Limit("password", 5, 60)  # 재설정 메일 요청 · 재설정 토큰 시도 (메일 요청은 이메일로도 센다)

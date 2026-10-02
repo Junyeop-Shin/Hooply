@@ -122,31 +122,35 @@ def test_team_create_join_activate(client, signup):
     third_pid = next(x["id"] for x in m if x["id"] not in (my_pid, other_pid))
     r = client.patch(f"/api/v1/teams/{team_id}/players/{third_pid}/role", json={"role": "MANAGER"}, headers=owner)
     assert r.status_code == 403 and r.json()["code"] == "FORBIDDEN_ROLE"  # 위임 매니저는 권한을 못 준다
-    # 마지막 매니저는 제외도 안 된다: other(팀장) 를 PLAYER 로 내린 뒤 유일한 매니저(owner) 제외 시도
+    # other(팀장) 가 PLAYER 로 내려오면 팀장이 다시 owner 에게 돌아간다 (남은 매니저 중 가장 먼저 들어온 사람)
     assert client.patch(f"/api/v1/teams/{team_id}/players/{other_pid}/role", json={"role": "PLAYER"}, headers=other_headers).status_code == 200
-    r = client.delete(f"/api/v1/teams/{team_id}/players/{my_pid}", headers=owner)
-    assert r.status_code == 422 and r.json()["code"] == "CANNOT_DEMOTE_LAST_MANAGER"
-    # other 가 내려오면서 팀장이 다시 owner 로 돌아왔으므로 owner 가 other 를 다시 매니저로 올릴 수 있다
     assert client.get(f"/api/v1/teams/{team_id}", headers=owner).json()["owner"]["id"] != other_user_id
+    # 팀장은 누구도(자기 자신도) 제외할 수 없다 — 먼저 넘기거나 나가야 한다
+    r = client.delete(f"/api/v1/teams/{team_id}/players/{my_pid}", headers=owner)
+    assert r.status_code == 403 and r.json()["code"] == "FORBIDDEN_NOT_OWNER"
     assert client.patch(f"/api/v1/teams/{team_id}/players/{other_pid}/role", json={"role": "MANAGER"}, headers=owner).status_code == 200
-
-    # 새 매니저가 팀원 제외 → 4명 → PENDING (FR-06 역방향)
-    # members 리스트는 가입 순서, m(플레이어 카드 목록)은 API 정렬 순서라 둘의 인덱스가 다를 수
-    # 있다. other_pid가 m에서 몇 번째인지 찾아 같은 순번의 헤더를 꺼내 새 매니저 토큰을 얻는다.
-    new_manager = members[[x["id"] for x in m if x["id"] != my_pid].index(other_pid)]
+    new_manager = other_headers
+    # 위임받은 매니저는 다른 매니저(여기서는 팀장)를 제외할 수 없다
     r = client.delete(f"/api/v1/teams/{team_id}/players/{my_pid}", headers=new_manager)
+    assert r.status_code == 403 and r.json()["code"] == "FORBIDDEN_NOT_OWNER"
+    # 팀장은 매니저를 제외할 수 있다 → 4명 → PENDING (FR-06 역방향)
+    r = client.delete(f"/api/v1/teams/{team_id}/players/{other_pid}", headers=owner)
     assert r.status_code == 204
-    # 활성 회원이 4명으로 줄었으므로 refresh_team_status가 다시 PENDING으로 내린다
-    assert client.get(f"/api/v1/teams/{team_id}", headers=new_manager).json()["status"] == "PENDING"
-    # 제외된 사람(players.status=REMOVED)은 더 이상 팀원이 아니다 → 403 NOT_A_MEMBER
-    assert client.get(f"/api/v1/teams/{team_id}", headers=owner).json()["code"] == "NOT_A_MEMBER"
+    assert client.get(f"/api/v1/teams/{team_id}", headers=owner).json()["status"] == "PENDING"
+    # 제외된 사람(players.status=REMOVED)은 더 이상 팀원이 아니고, 팀 코드로 다시 들어올 수도 없다
+    assert client.get(f"/api/v1/teams/{team_id}", headers=new_manager).json()["code"] == "NOT_A_MEMBER"
+    r = client.post("/api/v1/teams/join", json={"team_code": code}, headers=new_manager)
+    assert r.status_code == 403 and r.json()["code"] == "REMOVED_FROM_TEAM"
 
-    # 재가입: 기존 players 행이 되살아나(새 행 없음) 기록은 승계되지만, 역할은 PLAYER로 초기화된다.
-    # (제외 전 MANAGER였던 사람이 코드만으로 매니저 권한을 되찾으면 안 된다)
-    r = client.post("/api/v1/teams/join", json={"team_code": code}, headers=owner)
+    # 스스로 나간(LEFT) 사람은 코드로 돌아온다: 기존 players 행이 되살아나(새 행 없음) 기록은 승계되지만,
+    # 역할은 PLAYER로 초기화된다 (나가기 전 MANAGER였던 사람이 코드만으로 매니저 권한을 되찾으면 안 된다)
+    third_headers = next(h for h in members if client.get("/api/v1/me", headers=h).json()["id"] == next(x["user_id"] for x in m if x["id"] == third_pid))
+    assert client.patch(f"/api/v1/teams/{team_id}/players/{third_pid}/role", json={"role": "MANAGER"}, headers=owner).status_code == 200
+    assert client.post(f"/api/v1/teams/{team_id}:leave", headers=third_headers).status_code == 204
+    r = client.post("/api/v1/teams/join", json={"team_code": code}, headers=third_headers)
     assert r.status_code == 200, r.text
-    assert r.json()["my_player_id"] == my_pid and r.json()["my_role"] == "PLAYER"
-    assert r.json()["status"] == "ACTIVE" and r.json()["member_count"] == 5
+    assert r.json()["my_player_id"] == third_pid and r.json()["my_role"] == "PLAYER"
+    assert r.json()["status"] == "PENDING" and r.json()["member_count"] == 4
 
 
 # 검증: 스텁(501) 엔드포인트는 모두 구현되어 남은 것이 없다. 헬스 체크만 확인한다.

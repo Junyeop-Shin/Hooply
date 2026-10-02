@@ -23,7 +23,7 @@ from app.api.deps import DB, CurrentUser, TeamManager, TeamMember, get_team_or_4
 from app.api.v1._docs import errors
 from app.core import errors as E
 from app.models import Player, Team, User
-from app.models.enums import PlayerKind, PlayerStatus, TeamRole
+from app.models.enums import GlobalRole, PlayerKind, PlayerStatus, TeamRole
 from app.schemas.common import ItemList, PlayerCard, PlayerCardDetailed, UserSummary
 from app.schemas.team import (
     RoleUpdate,
@@ -68,18 +68,18 @@ def create_team(db: DB, user: CurrentUser, body: TeamCreate):
 
 @router.post(
     "/teams/join", response_model=TeamDetail,
-    responses=errors(_404="TEAM_CODE_NOT_FOUND", _409="ALREADY_MEMBER"), summary="팀 코드로 가입",
+    responses=errors(_403="REMOVED_FROM_TEAM", _404="TEAM_CODE_NOT_FOUND", _409="ALREADY_MEMBER"), summary="팀 코드로 가입",
 )
 def join_team(db: DB, user: CurrentUser, body: TeamJoinRequest):
     """팀 코드를 입력해 팀에 PLAYER로 가입한다.
 
     - **권한:** 로그인 사용자.
     - **처리:** 코드를 대문자로 정규화해 팀을 찾는다 (`ARCHIVED` 팀은 없는 것으로 취급).
-      이미 `ACTIVE`로 소속돼 있으면 거부하고, 탈퇴(`LEFT`/`REMOVED`) 이력이 있으면 그 행을
-      다시 `ACTIVE`로 되살린다(과거 기록 승계). 가입 후 활성 회원이 5명 이상이 되면 팀을
+      이미 `ACTIVE`로 소속돼 있으면 거부하고, 스스로 나간(`LEFT`) 이력이 있으면 그 행을
+      다시 `ACTIVE`로 되살린다(과거 기록 승계, 역할은 PLAYER). 매니저가 제외한(`REMOVED`) 사람은 코드로 돌아올 수 없다. 가입 후 활성 회원이 5명 이상이 되면 팀을
       `ACTIVE`로 전환한다 (FR-06). 응답은 팀 상세 + 이 팀에서의 내 `player_id`·`role`.
     - **오류:** `404 TEAM_CODE_NOT_FOUND` — 존재하지 않거나 보관된 팀의 코드.
-      `409 ALREADY_MEMBER` — 이미 소속된 팀.
+      `409 ALREADY_MEMBER` — 이미 소속된 팀. `403 REMOVED_FROM_TEAM` — 매니저가 제외한 팀.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 (`POST /teams/join`), FR-05 · FR-06, 5.4절 잘못된 팀 코드·중복 가입,
       S-06 팀 가입.
@@ -255,33 +255,40 @@ def leave_team(db: DB, me: TeamMember, team: Annotated[Team, Depends(get_team_or
 
 @router.delete(
     "/teams/{team_id}/players/{player_id}", status_code=204,
-    responses=errors(_403="FORBIDDEN_ROLE"), summary="팀원 제외",
+    responses=errors(_403=("FORBIDDEN_ROLE", "FORBIDDEN_NOT_OWNER"), _422="CANNOT_DEMOTE_LAST_MANAGER"), summary="팀원 제외",
 )
-def remove_player(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_or_404)], player_id: int):
+def remove_player(db: DB, me: TeamManager, user: CurrentUser, team: Annotated[Team, Depends(get_team_or_404)], player_id: int):
     """팀원(회원 또는 게스트)을 팀에서 제외한다. 기록은 보존된다.
 
-    - **권한:** 팀 매니저 또는 ADMIN.
+    - **권한:** 팀 매니저 또는 ADMIN. **매니저를 제외하는 것은 팀장(또는 ADMIN)만** 할 수 있다 — 위임받은 매니저끼리
+      서로 내보내지 못하게 (플레이어 < 매니저 < 팀장 3단계, 권한 바꾸기와 같은 규칙). **팀장은 누구도 제외할 수 없다** —
+      팀장이 먼저 다른 매니저에게 넘기거나(권한 회수 시 자동 승계) 스스로 나가야 한다.
     - **처리:** 물리 삭제가 아니라 `players.status=REMOVED`로 바꾼다. 과거 쿼터 기록·배정·투표는
       `player_id`를 그대로 참조하므로 유지된다. 제외 후 활성 회원이 5명 미만이 되면 팀 상태를
-      `PENDING`으로 되돌린다. 같은 사람이 팀 코드로 다시 가입하면 이 행이 `ACTIVE`로 복원된다.
-    - **오류:** `404 NOT_FOUND` — 팀 또는 팀원 없음. `403 FORBIDDEN_ROLE`. `422 CANNOT_DEMOTE_LAST_MANAGER` — 마지막 매니저 제외.
+      `PENDING`으로 되돌린다. 제외된 회원은 팀 코드로 다시 가입할 수 없다(`403 REMOVED_FROM_TEAM`) —
+      스스로 나간 사람(LEFT)만 코드로 돌아올 수 있다.
+    - **오류:** `404 NOT_FOUND` — 팀 또는 팀원 없음. `403 FORBIDDEN_ROLE` — 매니저가 아님.
+      `403 FORBIDDEN_NOT_OWNER` — 팀장이 아닌 매니저가 매니저를 제외, 또는 팀장을 제외하려 함.
+      `422 CANNOT_DEMOTE_LAST_MANAGER` — 마지막 매니저 제외.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 (`DELETE .../players/{player_id}`), FR-07, F3, 6.2절 `players.status`.
     """
     target = db.get(Player, player_id)
     if target is None or target.team_id != team.id:
         raise E.NotFound("이 사람을 찾을 수 없어요.")
+    if target.user_id is not None and target.user_id == team.owner_user_id:
+        raise E.ForbiddenNotOwner("팀장은 제외할 수 없어요. 팀장이 먼저 다른 매니저에게 팀장을 넘기거나 팀을 나가야 해요.")
     if target.role == TeamRole.MANAGER and target.status == PlayerStatus.ACTIVE:
+        is_owner = me.user_id == team.owner_user_id
+        if not is_owner and user.global_role != GlobalRole.ADMIN:
+            raise E.ForbiddenNotOwner("매니저는 팀장만 제외할 수 있어요.")
         other = db.scalar(
             select(Player.id).where(
                 Player.team_id == team.id, Player.role == TeamRole.MANAGER, Player.status == PlayerStatus.ACTIVE, Player.id != target.id,
-            ).limit(1)
+            ).order_by(Player.joined_at, Player.id).limit(1)
         )
         if other is None:
             raise E.CannotDemoteLastManager("팀에 매니저가 한 명은 남아 있어야 해요. 먼저 다른 팀원에게 매니저 권한을 넘겨 주세요.")
-        if target.user_id == team.owner_user_id:
-            # 팀장을 제외하면 팀장 권한이 공중에 뜬다 → 가장 먼저 매니저가 된 사람에게 넘긴다 (update_role 과 같은 규칙)
-            team.owner_user_id = db.get(Player, other).user_id
     target.status = PlayerStatus.REMOVED
     team_service.refresh_team_status(db, team)
     db.commit()

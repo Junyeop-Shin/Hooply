@@ -6,7 +6,8 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
-import { ApiError } from '../api/client'
+import { errorMessage } from '../api/client'
+import { confirm, toast } from '../store/feedback'
 import { toAvatarDataUrl } from '../lib/image'
 import { peerApi } from '../api/peer'
 import { MarginTrend, QuarterList } from '../components/stats'
@@ -45,7 +46,7 @@ export function ProfilePage() {
                 <div className="mt-1.5 flex gap-1.5">
                   {u.identities.map((i) => <Badge key={i.provider} tone={i.provider === 'KAKAO' ? 'warn' : 'navy'}>{i.provider === 'KAKAO' ? '카카오' : '이메일'}</Badge>)}
                   {!u.identities.some((i) => i.provider === 'KAKAO') && (
-                    <button onClick={() => startKakao('link', (m) => alert(m))} className="rounded-full bg-[#FEE500] px-2.5 py-0.5 text-xs font-semibold text-[#191919]">카카오 연결</button>
+                    <button onClick={() => startKakao('link', (m) => toast(m, 'error'))} className="-my-3 flex min-h-11 items-center"><span className="rounded-full bg-[#FEE500] px-2.5 py-0.5 text-xs font-semibold text-[#191919]">카카오 연결</span></button>
                   )}
                   {u.global_role === 'ADMIN' && <Badge tone="court">관리자</Badge>}
                   {u.height_cm && <Badge>{u.height_cm}cm</Badge>}
@@ -68,7 +69,7 @@ export function ProfilePage() {
             {teams.length > 1 && (
               <div className="flex gap-1.5 overflow-x-auto px-1">
                 {teams.map((t) => (
-                  <button key={t.team_id} onClick={() => setChosen(t.team_id)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${current?.team_id === t.team_id ? 'bg-navy-800 text-white' : 'bg-sunken text-muted'}`}>
+                  <button key={t.team_id} onClick={() => setChosen(t.team_id)} aria-pressed={current?.team_id === t.team_id} className={`min-h-11 shrink-0 rounded-full px-3 text-xs font-semibold ${current?.team_id === t.team_id ? 'bg-navy-800 text-white' : 'bg-sunken text-muted'}`}>
                     {t.team_name}{u?.primary_team_id === t.team_id ? ' (기본)' : ''}
                   </button>
                 ))}
@@ -133,21 +134,27 @@ function AccountSection({ user, onLoggedOut }: { user: UserDetail; onLoggedOut: 
   const [open, setOpen] = useState(false)
   const [cur, setCur] = useState('')
   const [nw, setNw] = useState('')
-  const [msg, setMsg] = useState<string | null>(null)
+  const setTokens = useAuthStore((s) => s.setTokens)
+  // 결과 종류를 문구로 짐작하지 않고 따로 들고 있는다
+  const [msg, setMsg] = useState<{ kind: 'info' | 'error'; text: string } | null>(null)
   const change = useMutation({
     mutationFn: () => authApi.changePassword(cur, nw),
-    onSuccess: () => { setMsg('비밀번호를 바꿨어요.'); setOpen(false); setCur(''); setNw('') },
-    onError: (e) => setMsg(e instanceof ApiError ? e.message : '바꾸지 못했어요.'),
+    onSuccess: (pair) => {
+      // 서버가 새 토큰을 주면(다른 기기는 로그아웃) 이 기기는 그 토큰으로 계속 로그인돼 있게 한다. 본문이 없으면 지금 토큰 유지
+      if (pair?.access_token) setTokens(pair)
+      setMsg({ kind: 'info', text: '비밀번호를 바꿨어요.' }); setOpen(false); setCur(''); setNw('')
+    },
+    onError: (e) => setMsg({ kind: 'error', text: errorMessage(e, '바꾸지 못했어요.') }),
   })
   const remove = useMutation({
     mutationFn: authApi.deleteMe,
-    onSuccess: () => { alert('계정을 삭제했어요. 그동안 고마웠어요.'); onLoggedOut() },
-    onError: (e) => setMsg(e instanceof ApiError ? e.message : '삭제하지 못했어요.'),
+    onSuccess: () => { toast('계정을 삭제했어요. 그동안 고마웠어요.'); onLoggedOut() },
+    onError: (e) => setMsg({ kind: 'error', text: errorMessage(e, '삭제하지 못했어요.') }),
   })
   return (
     <section className="space-y-2">
       <SectionTitle>계정</SectionTitle>
-      {msg && <Alert kind={msg.includes('바꿨어요') ? 'info' : 'error'}>{msg}</Alert>}
+      {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
       {hasPassword ? (
         <Card className="space-y-3">
           <div className="flex items-center justify-between">
@@ -167,9 +174,13 @@ function AccountSection({ user, onLoggedOut }: { user: UserDetail; onLoggedOut: 
       )}
       <Button variant="danger" full onClick={onLoggedOut}>로그아웃</Button>
       <button
-        className="w-full py-2 text-center text-xs text-faint underline underline-offset-2"
+        className="min-h-11 w-full text-center text-xs text-faint underline underline-offset-2"
         disabled={remove.isPending}
-        onClick={() => confirm('계정을 삭제할까요? 이메일·이름·사진이 지워지고 팀에서 나가요. 경기 기록은 "탈퇴한 회원"으로 남아요.') && confirm('되돌릴 수 없어요. 정말 삭제할까요?') && remove.mutate()}
+        onClick={async () => {
+          // 두 번 묻는다 — 되돌릴 수 없다
+          if (!(await confirm({ title: '계정을 삭제할까요?', body: '이메일 · 이름 · 사진이 지워지고 팀에서 나가요. 경기 기록은 "탈퇴한 회원"으로 남아요.', confirmLabel: '다음', danger: true }))) return
+          if (await confirm({ title: '정말 삭제할까요?', body: '되돌릴 수 없어요.', confirmLabel: '계정 삭제', danger: true })) remove.mutate()
+        }}
       >
         계정 삭제
       </button>
@@ -184,7 +195,8 @@ function PositionEditor({ current }: { current: Position[] }) {
   const [order, setOrder] = useState<Position[]>(current)
   const save = useMutation({
     mutationFn: () => surveyApi.updatePositions(order.map((position) => ({ position }))),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['team'] }); setEditing(false) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['team'] }); setEditing(false); toast('포지션을 저장했어요.') },
+    onError: (e) => toast(errorMessage(e, '포지션을 저장하지 못했어요.'), 'error'),
   })
   if (!editing) {
     return (
@@ -205,7 +217,8 @@ function PositionEditor({ current }: { current: Position[] }) {
           const idx = order.indexOf(pos)
           return (
             <button key={pos} type="button" onClick={() => setOrder(idx >= 0 ? order.filter((x) => x !== pos) : [...order, pos])}
-              className={`relative min-h-11 flex-1 rounded-lg border text-sm font-bold ${idx >= 0 ? 'border-court-500 bg-court-500 text-white' : 'border-line bg-surface text-ink'}`}>
+              aria-pressed={idx >= 0}
+              className={`relative min-h-11 flex-1 rounded-lg border text-sm font-bold ${idx >= 0 ? 'border-brand bg-brand text-on-brand' : 'border-line bg-surface text-ink'}`}>
               {idx >= 0 && <span className="absolute -left-1 -top-1.5 flex size-5 items-center justify-center rounded-full bg-navy-800 text-[11px] text-white">{idx + 1}</span>}
               {pos}
             </button>
@@ -254,9 +267,13 @@ function AvatarEditor({ user }: { user: UserDetail }) {
   const upload = useMutation({
     mutationFn: async (file: File) => authApi.setAvatar(await toAvatarDataUrl(file)),
     onSuccess: () => { setErr(null); done() },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : e instanceof Error ? e.message : '사진을 올리지 못했어요.'),
+    onError: (e) => setErr(e instanceof Error ? e.message : '사진을 올리지 못했어요.'),  // ApiError 도 Error — 서버 문구 그대로
   })
-  const remove = useMutation({ mutationFn: authApi.deleteAvatar, onSuccess: done })
+  const remove = useMutation({
+    mutationFn: authApi.deleteAvatar,
+    onSuccess: () => { setErr(null); done() },
+    onError: (e) => setErr(errorMessage(e, '사진을 지우지 못했어요.')),
+  })
   const busy = upload.isPending || remove.isPending
   return (
     <div className="shrink-0">
@@ -267,17 +284,17 @@ function AvatarEditor({ user }: { user: UserDetail }) {
           className="relative block rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50"
         >
           <Avatar name={user.nickname ?? user.name} src={user.profile_image_url} size="xl" />
-          <span className="absolute -bottom-0.5 -right-0.5 flex size-7 items-center justify-center rounded-full border-2 border-white bg-court-500 text-xs font-bold text-white">
+          <span className="absolute -bottom-0.5 -right-0.5 flex size-7 items-center justify-center rounded-full border-2 border-white bg-brand text-xs font-bold text-on-brand">
             {busy ? '…' : user.profile_image_url ? '✎' : '+'}
           </span>
         </button>
         {user.profile_image_url && !busy && (
           <button
-            type="button" onClick={() => confirm('프로필 사진을 지울까요?') && remove.mutate()}
+            type="button" onClick={async () => { if (await confirm({ title: '프로필 사진을 지울까요?', body: '이름 첫 글자로 돌아가요.', confirmLabel: '지우기', danger: true })) remove.mutate() }}
             aria-label="프로필 사진 삭제"
-            className="absolute -right-1 -top-1 flex size-6 items-center justify-center rounded-full border border-line bg-surface text-xs text-muted shadow-sm"
+            className="absolute -right-3.5 -top-3.5 flex size-11 items-center justify-center"
           >
-            ×
+            <span className="flex size-6 items-center justify-center rounded-full border border-line bg-surface text-xs text-muted shadow-sm">×</span>
           </button>
         )}
       </div>

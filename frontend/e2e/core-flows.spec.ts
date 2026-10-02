@@ -9,7 +9,6 @@ test.describe('핵심 흐름', () => {
   })
 
   test('매니저: 팀 배정 실행 → 후보안 3개 → 확정', async ({ page }) => {
-    page.on('dialog', (d) => d.accept())
     await login(page)
     await openEvent(page, EVENT.THIS_WEEK)
     await page.getByRole('button', { name: /팀 배정하러 가기|재배정하기/ }).click()
@@ -17,11 +16,12 @@ test.describe('핵심 흐름', () => {
     const run = page.getByRole('button', { name: '3가지 배정안 만들기' })
     await expect(run).toBeEnabled()
     await run.click()
-    await expect(page.getByRole('button', { name: /실력 우선/ })).toBeVisible()
-    await expect(page.getByRole('button', { name: /친화도 우선/ })).toBeVisible()
-    await expect(page.getByRole('button', { name: /^종합/ })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /실력 우선/ })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /친화도 우선/ })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /^종합/ })).toBeVisible()
     await expect(page.getByText('이렇게 나눈 이유')).toBeVisible()
     await page.getByRole('button', { name: '이 배정안으로 확정' }).click()
+    await page.getByRole('dialog', { name: /배정안으로 확정할까요/ }).getByRole('button', { name: '확정' }).click()  // 확인 시트
     await expect(page.getByRole('heading', { name: '팀 배정 결과' })).toBeVisible()
     await expect(page.getByText(/팀 블랙/).first()).toBeVisible()
 
@@ -30,7 +30,7 @@ test.describe('핵심 흐름', () => {
     await page.getByRole('button', { name: '카카오톡 공유' }).click()
     const file = await download
     expect(file.suggestedFilename()).toMatch(/^팀배정-\d{4}-\d{2}-\d{2}\.png$/)
-    await expect(page.getByText('이미지를 저장했어요. 카카오톡에 첨부해 주세요.')).toBeVisible()
+    await expect(page.getByRole('status').getByText('이미지를 저장했어요. 카카오톡에 첨부해 주세요.')).toBeVisible()  // 공유 결과는 토스트
   })
 
   test('매니저: 지난 회차 경기 기록 화면에 쿼터가 보인다', async ({ page }) => {

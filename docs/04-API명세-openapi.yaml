@@ -282,8 +282,12 @@ paths:
             schema:
               $ref: '#/components/schemas/ChangePasswordRequest'
       responses:
-        '204':
+        '200':
           description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
         '401':
           description: INVALID_CREDENTIALS
           content:
@@ -503,6 +507,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TeamDetail'
+        '403':
+          description: REMOVED_FROM_TEAM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: TEAM_CODE_NOT_FOUND
           content:
@@ -709,7 +719,13 @@ paths:
         '204':
           description: 성공
         '403':
-          description: FORBIDDEN_ROLE
+          description: FORBIDDEN_ROLE / FORBIDDEN_NOT_OWNER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: CANNOT_DEMOTE_LAST_MANAGER
           content:
             application/json:
               schema:
@@ -1539,7 +1555,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: INVALID_SWAP
+          description: INVALID_SWAP / ASSIGNMENT_LOCKED
           content:
             application/json:
               schema:
@@ -1568,6 +1584,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: ASSIGNMENT_LOCKED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /assignments/candidates/{candidate_id}:adopt:
     post:
       summary: 후보안 확정
@@ -1588,6 +1610,12 @@ paths:
                 $ref: '#/components/schemas/CandidateView'
         '409':
           description: ALREADY_ADOPTED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: ASSIGNMENT_LOCKED
           content:
             application/json:
               schema:
@@ -3203,6 +3231,8 @@ components:
           items:
             $ref: '#/components/schemas/Strategy'
           type: array
+          maxItems: 3
+          minItems: 1
         constraints:
           $ref: '#/components/schemas/ConstraintSet'
       type: object
@@ -3294,6 +3324,7 @@ components:
           $ref: '#/components/schemas/AttendanceStatus'
         note:
           type: string
+          maxLength: 200
           nullable: true
       type: object
       required:
@@ -3372,6 +3403,7 @@ components:
       properties:
         data_url:
           type: string
+          maxLength: 700000
       type: object
       required:
       - data_url
@@ -3501,17 +3533,22 @@ components:
             items:
               type: integer
             type: array
+            maxItems: 30
           type: array
+          maxItems: 30
         separate_groups:
           items:
             items:
               type: integer
             type: array
+            maxItems: 30
           type: array
+          maxItems: 30
         pins:
           items:
             $ref: '#/components/schemas/PinConstraint'
           type: array
+          maxItems: 60
       type: object
     ConstraintViolation:
       properties:
@@ -3581,6 +3618,7 @@ components:
           nullable: true
         memo:
           type: string
+          maxLength: 1000
           nullable: true
       type: object
       required:
@@ -3706,6 +3744,7 @@ components:
           nullable: true
         memo:
           type: string
+          maxLength: 1000
           nullable: true
       type: object
     EventView:
@@ -3786,10 +3825,12 @@ components:
           items:
             type: integer
           type: array
+          maxItems: 30
         b_player_ids:
           items:
             type: integer
           type: array
+          maxItems: 30
         to_squad_no:
           type: integer
           minimum: 1.0
@@ -4864,11 +4905,11 @@ components:
           minimum: 1.0
         black_score:
           type: integer
-          maximum: 200.0
+          maximum: 99.0
           minimum: 0.0
         white_score:
           type: integer
-          maximum: 200.0
+          maximum: 99.0
           minimum: 0.0
         home_squad_no:
           type: integer
@@ -4916,6 +4957,11 @@ components:
           type: integer
         side:
           type: string
+        squad_no:
+          type: integer
+          maximum: 3.0
+          minimum: 1.0
+          nullable: true
         my_score:
           type: integer
         their_score:
@@ -4977,12 +5023,12 @@ components:
       properties:
         black_score:
           type: integer
-          maximum: 200.0
+          maximum: 99.0
           minimum: 0.0
           nullable: true
         white_score:
           type: integer
-          maximum: 200.0
+          maximum: 99.0
           minimum: 0.0
           nullable: true
         home_squad_no:
@@ -5058,6 +5104,7 @@ components:
           items:
             type: integer
           type: array
+          maxItems: 100
           minItems: 2
       type: object
       required:
@@ -5099,10 +5146,13 @@ components:
         skill_overall:
           anyOf:
           - type: number
+            maximum: 50.0
+            minimum: -50.0
           - type: string
             pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
         reason:
           type: string
+          maxLength: 500
           minLength: 1
       type: object
       required:
@@ -5610,14 +5660,17 @@ components:
           items:
             $ref: '#/components/schemas/SwapPair'
           type: array
+          maxItems: 30
         moves:
           items:
             $ref: '#/components/schemas/MovePlayer'
           type: array
+          maxItems: 30
         exchanges:
           items:
             $ref: '#/components/schemas/Exchange'
           type: array
+          maxItems: 30
       type: object
     TacticCommentIn:
       properties:
@@ -6131,6 +6184,7 @@ components:
           nullable: true
         profile_image_url:
           type: string
+          maxLength: 500
           nullable: true
         height_cm:
           type: integer

@@ -12,11 +12,14 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
-import { errorMessageWithDetails as errMsg } from '../api/client'
+import { errorMessage, errorMessageWithDetails as errMsg } from '../api/client'
+import { confirm } from '../store/feedback'
+import { invalidateEvent } from '../lib/invalidate'
+import { fromConstraintSet, isEmptyDraft, keepAttendees, readAssignDraft, writeAssignDraft } from '../lib/assign-draft'
 import { assignmentsApi } from '../api/assignments'
 import { eventsApi } from '../api/events'
 import { POSITIONS, type AttendanceView, type CandidateView, type ConstraintSet, type SquadView, type Strategy } from '../api/types'
-import { Alert, Button, Card, GradeDot, SectionTitle, Spinner } from '../components/ui'
+import { Alert, Button, Card, GradeDot, LoadError, SectionTitle, Spinner } from '../components/ui'
 import { inSameLock, mergeLock } from '../lib/locks'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
@@ -51,6 +54,9 @@ export function AssignPage() {
   const [threeChosen, setThreeChosen] = useState(false)
   const [dismissed, setDismissed] = useState<number[]>([])
   const [msg, setMsg] = useState<string | null>(null)
+  // 돌아왔을 때 조건 되살리기: 이 탭에서 고치던 조건 > 이 일정의 마지막 실행 조건 (lib/assign-draft)
+  const runs = useQuery({ queryKey: ['events', id, 'runs'], queryFn: () => assignmentsApi.runs(id), retry: false })
+  const [hydrated, setHydrated] = useState(false)
 
   const attendees: AttendanceView[] = useMemo(() => att.data?.items.filter((a) => a.status === 'ATTEND') ?? [], [att.data])
   const byId = useMemo(() => new Map(attendees.map((a) => [a.player.id, a.player])), [attendees])
@@ -79,7 +85,7 @@ export function AssignPage() {
   const qc = useQueryClient()
   const closeRsvp = useMutation({
     mutationFn: () => eventsApi.closeRsvp(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['events'] }); setMsg('참석 응답을 마감했어요.') },
+    onSuccess: () => { invalidateEvent(qc, id, ev.data?.team_id); setMsg('참석 응답을 마감했어요.') },
     onError: (e) => setMsg(errMsg(e, '마감하지 못했어요.')),
   })
   const loadLast = useMutation({
@@ -96,6 +102,23 @@ export function AssignPage() {
 
   useEffect(() => { setSelected((s) => s.filter((pid) => byId.has(pid))) }, [byId])
 
+  // 첫 렌더에서 한 번만 (데이터가 오면) — 렌더 중에 상태를 맞추는 React 의 "이전 렌더 정보로 조정" 방식
+  if (!hydrated && att.data) {
+    const draft = readAssignDraft(id)
+    if (draft || !runs.isLoading) {
+      const ids = new Set(attendees.map((a) => a.player.id))
+      const last = runs.data?.items[0]
+      const d = draft ? keepAttendees(draft, ids) : last ? keepAttendees(fromConstraintSet(last.constraints, last.team_count), ids) : null
+      if (d) { setLocks(d.locks); setSeps(d.seps); setPins(d.pins); setThreeChosen(d.three) }
+      if (!draft && d && !isEmptyDraft(d)) setMsg('지난번 팀을 짤 때 걸어 둔 조건을 불러왔어요.')
+      setHydrated(true)
+    }
+  }
+  // 고칠 때마다 이 탭에 보관 — 결과 화면에 갔다가 돌아와도 남는다
+  useEffect(() => {
+    if (hydrated) writeAssignDraft(id, { locks, seps, pins, three: threeChosen })
+  }, [hydrated, id, locks, seps, pins, threeChosen])
+
   const lockIndexOf = (pid: number) => locks.findIndex((g) => g.includes(pid))
   const sepIndexOf = (pid: number) => seps.findIndex((g) => g.includes(pid))
   const toggle = (pid: number) => setSelected((s) => (s.includes(pid) ? s.filter((x) => x !== pid) : [...s, pid]))
@@ -107,7 +130,7 @@ export function AssignPage() {
   const flipPin = (pid: number) => setPins((p) => ({ ...p, [pid]: nextTeam(p[pid]) }))
 
   if (ev.isLoading || att.isLoading) return <Screen><TopBar title="팀 배정" back={`/events/${id}`} /><Spinner /></Screen>
-  if (!ev.data) return <Screen><TopBar title="팀 배정" back={`/events/${id}`} /><Content><Alert>일정을 불러오지 못했어요.</Alert></Content></Screen>
+  if (!ev.data) return <Screen><TopBar title="팀 배정" back={`/events/${id}`} /><Content><LoadError message={errorMessage(ev.error, '일정을 불러오지 못했어요.')} onRetry={() => ev.refetch()} retrying={ev.isFetching} /></Content></Screen>
   const GRADE_ORDER: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4 }
   const pool = attendees.filter((a) => !activePins[a.player.id]).sort((x, y) => {  // 등급순 — 게스트도 회원과 같이 섞어 정렬
     const gx = x.player.skill_grade ? GRADE_ORDER[x.player.skill_grade] : 9, gy = y.player.skill_grade ? GRADE_ORDER[y.player.skill_grade] : 9
@@ -117,21 +140,31 @@ export function AssignPage() {
   const suggestions = (sug.data?.items ?? []).filter((s) => !inSameLock(locks, s.guest.id, s.target.id))
   const approvable = suggestions.filter((s) => !dismissed.includes(s.guest.id))
   const approveAll = () => setLocks((l) => approvable.reduce((acc, s) => mergeLock(acc, [s.guest.id, s.target.id]), l))
-  const feasible = settledBody === body && !validate.isPlaceholderData && (validate.data?.feasible ?? false)  // 이전 조건의 검사 결과로 켜지지 않게
+  const current = settledBody === body && !validate.isPlaceholderData
+  // 검사 자체가 실패(네트워크 · 서버 오류)하면 실행은 막지 않는다 — 실행할 때 서버가 같은 검사를 다시 한다
+  const checkFailed = validate.isError && settledBody === body
+  const feasible = checkFailed || (current && (validate.data?.feasible ?? false))  // 이전 조건의 검사 결과로 켜지지 않게
+  const locked = ev.data.quarter_count > 0  // 경기 기록이 있으면 서버가 422 ASSIGNMENT_LOCKED
+  const hasConstraints = locks.length > 0 || seps.length > 0 || Object.keys(pins).length > 0
+  const loadLastAsk = async () => {
+    if (hasConstraints && !(await confirm({ title: '지난 일정 조건으로 바꿀까요?', body: '지금 걸어 둔 묶기 · 갈라놓기 · 미리 배치는 지워져요.', confirmLabel: '불러오기' }))) return
+    loadLast.mutate()
+  }
 
   return (
     <Screen>
-      <TopBar title="팀 배정" back={`/events/${id}`} right={<button className="mr-1 text-xs font-semibold text-brand-ink" onClick={() => loadLast.mutate()}>지난 조건 불러오기</button>} />
+      <TopBar title="팀 배정" back={`/events/${id}`} right={<button className="-mr-1 min-h-11 px-2 text-xs font-semibold text-brand-ink disabled:opacity-50" disabled={loadLast.isPending} onClick={loadLastAsk}>지난 조건 불러오기</button>} />
       <Content>
         <FirstTimeTip id="assign" />
         {msg && <Alert kind="info">{msg}</Alert>}
+        {locked && <Alert kind="warn">경기 기록이 있는 일정은 팀을 다시 짤 수 없어요. 쿼터 기록을 먼저 지워 주세요.</Alert>}
         {ev.data.rsvp_open && (
           <Card className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-ink">아직 참석 응답을 받고 있어요</p>
               <p className="text-xs text-muted">지금 마감하면 인원이 확정되고 팀원은 응답을 바꿀 수 없어요.</p>
             </div>
-            <Button variant="secondary" className="min-h-10 shrink-0 whitespace-nowrap text-sm" loading={closeRsvp.isPending} onClick={() => confirm('참석 응답을 지금 마감할까요?') && closeRsvp.mutate()}>응답 마감</Button>
+            <Button variant="secondary" className="min-h-10 shrink-0 whitespace-nowrap text-sm" loading={closeRsvp.isPending} onClick={async () => { if (await confirm({ title: '참석 응답을 지금 마감할까요?', body: '인원이 확정되고 팀원은 응답을 바꿀 수 없어요.', confirmLabel: '마감하기' })) closeRsvp.mutate() }}>응답 마감</Button>
           </Card>
         )}
         {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 짠 배정안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
@@ -154,7 +187,7 @@ export function AssignPage() {
         {suggestions.length > 0 && (
           <section>
             <SectionTitle action={approvable.length >= 2 && (
-              <button className="text-xs font-semibold text-brand-ink" onClick={approveAll}>모두 승인 ({approvable.length})</button>
+              <button className="-my-2 min-h-11 px-1 text-xs font-semibold text-brand-ink" onClick={approveAll}>모두 승인 ({approvable.length})</button>
             )}>묶기 제안 {suggestions.length}</SectionTitle>
             <div className="space-y-2">
               {suggestions.map((s) => {
@@ -168,11 +201,11 @@ export function AssignPage() {
                         : <><b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님과 같은 팀으로 묶을까요?</>}
                     </p>
                     {off ? (
-                      <button className="text-xs font-semibold text-brand-ink" onClick={() => setDismissed((d) => d.filter((x) => x !== s.guest.id))}>무시 취소</button>
+                      <button className="-my-2 min-h-11 px-2 text-xs font-semibold text-brand-ink" onClick={() => setDismissed((d) => d.filter((x) => x !== s.guest.id))}>무시 취소</button>
                     ) : (
                       <>
-                        <Button className="min-h-9 text-xs" onClick={() => addLock([s.guest.id, s.target.id])}>승인</Button>
-                        <button className="text-xs text-faint" onClick={() => setDismissed((d) => [...d, s.guest.id])}>무시</button>
+                        <Button className="px-3 text-xs" onClick={() => addLock([s.guest.id, s.target.id])}>승인</Button>
+                        <button className="-my-2 -mr-2 min-h-11 min-w-11 px-2 text-xs text-muted" onClick={() => setDismissed((d) => [...d, s.guest.id])}>무시</button>
                       </>
                     )}
                   </Card>
@@ -184,10 +217,15 @@ export function AssignPage() {
 
         <section>
           <SectionTitle action={
-            <span className="flex gap-3">
-              {selected.length > 0 && <button className="text-xs text-muted" onClick={() => setSelected([])}>선택 해제</button>}
-              {(locks.length > 0 || seps.length > 0 || Object.keys(pins).length > 0) && (
-                <button className="text-xs font-semibold text-danger-ink" onClick={() => confirm('묶기·갈라놓기·미리 배치를 모두 지울까요?') && (setLocks([]), setSeps([]), setPins({}), setSelected([]))}>설정 초기화</button>
+            <span className="-my-2 flex gap-1">
+              {selected.length > 0 && <button className="min-h-11 px-1.5 text-xs text-muted" onClick={() => setSelected([])}>선택 해제</button>}
+              {hasConstraints && (
+                <button
+                  className="min-h-11 px-1.5 text-xs font-semibold text-danger-ink"
+                  onClick={async () => { if (await confirm({ title: '조건을 모두 지울까요?', body: '묶기 · 갈라놓기 · 미리 배치가 모두 지워져요.', confirmLabel: '모두 지우기', danger: true })) { setLocks([]); setSeps([]); setPins({}); setSelected([]) } }}
+                >
+                  설정 초기화
+                </button>
               )}
             </span>
           }>
@@ -210,7 +248,7 @@ export function AssignPage() {
                     {p.display_name}
                     <span className="text-[10px] text-faint">{p.primary_position ?? '?'}</span>
                     {p.kind === 'GUEST' && <span className="text-[10px] text-faint">G</span>}
-                    {a.team_lock_request_player_id && li < 0 && <span className="absolute -right-1 -top-1.5 rounded-full bg-court-500 px-1.5 text-[9px] text-white">제안</span>}
+                    {a.team_lock_request_player_id && li < 0 && <span className="absolute -right-1 -top-1.5 rounded-full bg-brand px-1.5 text-[9px] text-on-brand">제안</span>}
                   </button>
                 )
               })}
@@ -225,14 +263,14 @@ export function AssignPage() {
             {selected.length >= 1 && (
               <div className="mt-2 flex gap-2">
                 {squadNos.map((sq) => (
-                  <button key={sq} onClick={() => pinTo(sq)} className={`min-h-10 flex-1 rounded-xl border text-sm font-semibold ${squadStyle(sq).card}`}>{teamName(sq)}에 배치</button>
+                  <button key={sq} onClick={() => pinTo(sq)} className={`min-h-11 flex-1 rounded-xl border text-sm font-semibold ${squadStyle(sq).card}`}>{teamName(sq)}에 배치</button>
                 ))}
               </div>
             )}
             {(locks.length > 0 || seps.length > 0) && (
               <div className="mt-3 space-y-1 text-xs text-muted">
-                {locks.map((g, i) => <p key={`l${i}`}><span className={`mr-1 inline-block size-2 rounded-full ${['bg-court-500', 'bg-navy-500', 'bg-emerald-500', 'bg-amber-500'][i % 4]}`} />묶음: {g.map((p) => byId.get(p)?.display_name).join(' · ')} <button className="text-brand-ink" onClick={() => setLocks((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
-                {seps.map((g, i) => <p key={`s${i}`}>갈라놓기: {g.map((p) => byId.get(p)?.display_name).join(' ↔ ')} <button className="text-brand-ink" onClick={() => setSeps((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
+                {locks.map((g, i) => <p key={`l${i}`} className="flex items-center gap-1"><span className={`inline-block size-2 shrink-0 rounded-full ${['bg-court-500', 'bg-navy-500', 'bg-emerald-500', 'bg-amber-500'][i % 4]}`} /><span className="min-w-0 flex-1">묶음: {g.map((p) => byId.get(p)?.display_name).join(' · ')}</span> <button className="-my-2 min-h-11 shrink-0 px-2 font-semibold text-brand-ink" aria-label={`묶음 ${i + 1} 해제`} onClick={() => setLocks((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
+                {seps.map((g, i) => <p key={`s${i}`} className="flex items-center gap-1"><span className="min-w-0 flex-1">갈라놓기: {g.map((p) => byId.get(p)?.display_name).join(' ↔ ')}</span> <button className="-my-2 min-h-11 shrink-0 px-2 font-semibold text-brand-ink" aria-label={`갈라놓기 ${i + 1} 해제`} onClick={() => setSeps((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
               </div>
             )}
           </Card>
@@ -252,8 +290,8 @@ export function AssignPage() {
                       <li key={a.player.id} className={narrow ? 'space-y-0.5' : 'flex items-center justify-between gap-2'}>
                         <span className="block truncate">{a.player.display_name}</span>
                         <span className="flex shrink-0 gap-2">
-                          <button onClick={() => flipPin(a.player.id)} className="text-[11px] opacity-80">{moveLabel(sq, nextTeam(sq), toTeam(nextTeam(sq)))}</button>
-                          <button onClick={() => unpin(a.player.id)} className="text-[11px] opacity-60">빼기</button>
+                          <button onClick={() => flipPin(a.player.id)} className="-my-1 min-h-11 text-[11px] font-semibold opacity-80">{moveLabel(sq, nextTeam(sq), toTeam(nextTeam(sq)))}</button>
+                          <button onClick={() => unpin(a.player.id)} aria-label={`${a.player.display_name} 미리 배치 빼기`} className="-my-1 min-h-11 min-w-11 text-[11px] opacity-70">빼기</button>
                         </span>
                       </li>
                     ))}
@@ -264,7 +302,15 @@ export function AssignPage() {
           })}
         </div>
 
-        {validate.data && (
+        {checkFailed && (
+          <Alert kind="warn">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0 flex-1">조건을 미리 검사하지 못했어요. 그대로 실행해도 서버가 다시 검사해요.</span>
+              <button type="button" onClick={() => validate.refetch()} disabled={validate.isFetching} className="-my-2 min-h-11 shrink-0 px-2 text-sm font-semibold underline underline-offset-2 disabled:opacity-50">다시 검사</button>
+            </div>
+          </Alert>
+        )}
+        {validate.data && !checkFailed && (
           <div className="space-y-1">
             {validate.data.violations.map((v, i) => <Alert key={i}>{v.message}{v.player_ids.length ? ` — ${v.player_ids.map((p) => byId.get(p)?.display_name ?? p).join(', ')}` : ''}</Alert>)}
             {validate.data.warnings.map((w, i) => <Alert key={`w${i}`} kind="warn">{w}</Alert>)}
@@ -272,7 +318,7 @@ export function AssignPage() {
         )}
       </Content>
       <BottomAction>
-        <Button full loading={run.isPending} disabled={!feasible} onClick={() => run.mutate()}>{teams === 3 ? '3팀으로 ' : ''}3가지 배정안 만들기</Button>
+        <Button full loading={run.isPending} disabled={!feasible || locked} onClick={() => run.mutate()}>{teams === 3 ? '3팀으로 ' : ''}3가지 배정안 만들기</Button>
       </BottomAction>
     </Screen>
   )
@@ -291,7 +337,14 @@ export function RunResultPage() {
   const noPick: Record<number, number[]> = {}
   const [msg, setMsg] = useState<string | null>(null)
   // 옮기기 · 되돌리기는 이 실행만 바뀐다. 확정은 일정 화면(배정 결과)도 바뀐다
-  const refresh = (events = false) => { qc.invalidateQueries({ queryKey: ['runs', id] }); if (events) qc.invalidateQueries({ queryKey: ['events'] }) }
+  const refresh = (events = false) => {
+    qc.invalidateQueries({ queryKey: ['runs', id] })
+    if (events && run.data) {
+      const eid = run.data.event_id
+      invalidateEvent(qc, eid)  // 일정 · 확정 배정 · 팀 일정 목록(내 팀 표시)
+      qc.invalidateQueries({ queryKey: ['tactics', 'recommend', eid] }); qc.invalidateQueries({ queryKey: ['ai', 'message', eid] })  // 바뀐 팀에 맞는 전술 · 한마디
+    }
+  }
   const exchange = useMutation({
     mutationFn: ({ cid, a, b, to }: { cid: number; a: number[]; b: number[]; to?: number }) => assignmentsApi.exchange(cid, a, b, to),
     onSuccess: () => { setPick(noPick); setMsg(null); refresh() },
@@ -309,7 +362,7 @@ export function RunResultPage() {
   })
 
   if (run.isLoading) return <Screen><TopBar title="배정 결과" back="/" /><Spinner /></Screen>
-  if (!run.data) return <Screen><TopBar title="배정 결과" back="/" /><Content><Alert>{errMsg(run.error, '결과를 불러오지 못했어요.')}</Alert></Content></Screen>
+  if (!run.data) return <Screen><TopBar title="배정 결과" back="/" /><Content><LoadError message={errMsg(run.error, '결과를 불러오지 못했어요.')} onRetry={() => run.refetch()} retrying={run.isFetching} /></Content></Screen>
   const r = run.data
   const cand: CandidateView = r.candidates[Math.min(tab, r.candidates.length - 1)]
   const adoptedAny = r.candidates.some((c) => c.is_adopted)
@@ -347,9 +400,9 @@ export function RunResultPage() {
   return (
     <Screen>
       <TopBar title="배정 결과" back={`/events/${r.event_id}/assign`} />
-      <div className="grid grid-cols-3 border-b border-line bg-surface">
+      <div className="grid grid-cols-3 border-b border-line bg-surface" role="tablist" aria-label="배정안">
         {r.candidates.map((c, i) => (
-          <button key={c.id} onClick={() => { setTab(i); setPick({}) }} className={`min-h-11 text-sm font-semibold ${tab === i ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
+          <button key={c.id} type="button" role="tab" aria-selected={tab === i} onClick={() => { setTab(i); setPick({}) }} className={`min-h-11 text-sm font-semibold ${tab === i ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
             {STRATEGY_LABEL[c.strategy]}{c.is_adopted ? ' ✓' : ''}
           </button>
         ))}
@@ -367,7 +420,7 @@ export function RunResultPage() {
         {cand.metrics.manually_edited && (
           <div className="flex items-center justify-between rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn-ink">
             <span>이 안은 손으로 수정됐어요 (↔ 표시).</span>
-            <button className="font-semibold text-brand-ink" disabled={reset.isPending} onClick={() => confirm('수동으로 옮긴 것을 모두 되돌릴까요?') && reset.mutate(cand.id)}>수동 수정 초기화</button>
+            <button className="-my-2 -mr-1 min-h-11 shrink-0 px-1 font-semibold text-brand-ink" disabled={reset.isPending} onClick={async () => { if (await confirm({ title: '손으로 옮긴 것을 모두 되돌릴까요?', body: '알고리즘이 처음 만든 배정안으로 돌아가요.', confirmLabel: '되돌리기' })) reset.mutate(cand.id) }}>수동 수정 초기화</button>
           </div>
         )}
         <div className={`grid gap-2 ${three ? 'grid-cols-3' : 'grid-cols-2'}`}>
@@ -378,7 +431,7 @@ export function RunResultPage() {
         {!cand.is_adopted && hasPick && (
           <div className="space-y-2">
             {picked.length === 1 && cand.squads.filter((s) => s.squad_no !== picked[0][0]).map((s) => (
-              <Button key={s.squad_no} variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: [...picked[0][1]], b: [], to: s.squad_no })}>
+              <Button key={s.squad_no} variant="secondary" full disabled={exchange.isPending} loading={exchange.isPending && exchange.variables?.to === s.squad_no} onClick={() => exchange.mutate({ cid: cand.id, a: [...picked[0][1]], b: [], to: s.squad_no })}>
                 {moveLabel(picked[0][0], s.squad_no, `선택한 ${label(picked[0][1])}을 ${toTeam(s.squad_no)} 옮기기`)}
               </Button>
             ))}
@@ -404,7 +457,7 @@ export function RunResultPage() {
         {cand.is_adopted ? (
           <Button full variant="secondary" onClick={() => nav(`/events/${r.event_id}`)}>확정된 결과 보기</Button>
         ) : (
-          <Button full loading={adopt.isPending} onClick={() => confirm(`[${STRATEGY_LABEL[cand.strategy]}] 배정안으로 확정할까요? 참석자에게 공개돼요.${adoptedAny ? ' (기존 확정은 해제)' : ''}`) && adopt.mutate(cand.id)}>
+          <Button full loading={adopt.isPending} onClick={async () => { if (await confirm({ title: `[${STRATEGY_LABEL[cand.strategy]}] 배정안으로 확정할까요?`, body: `참석자에게 공개돼요.${adoptedAny ? ' 기존 확정은 해제돼요.' : ''}`, confirmLabel: '확정' })) adopt.mutate(cand.id) }}>
             이 배정안으로 확정
           </Button>
         )}

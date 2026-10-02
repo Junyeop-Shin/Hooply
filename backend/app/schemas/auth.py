@@ -11,9 +11,28 @@ GET|PATCH /me, GET /me/teams.
   서비스에서는 `.get_secret_value()` 로 꺼내 bcrypt 해시한다.
 """
 
-from pydantic import BaseModel, EmailStr, Field, SecretStr
+import re
+from urllib.parse import urlsplit
+
+from pydantic import BaseModel, EmailStr, Field, SecretStr, field_validator
 
 from app.schemas.common import ORMModel
+
+# 프로필 사진 주소로 받는 것: 카카오 CDN(로그인 때 받은 사진) 또는 이 서비스가 발급한 사진 주소(avatar_service.avatar_url).
+# 그 밖의 주소를 받으면 팀원 화면이 남의 서버로 요청을 보내게 된다 (추적 픽셀 등)
+_KAKAO_CDN = "kakaocdn.net"
+_OWN_AVATAR_RE = re.compile(r"^/api/v1/users/\d+/avatar(\?v=[A-Za-z0-9_-]{1,32})?$")
+
+
+def allowed_profile_image_url(url: str) -> bool:
+    if _OWN_AVATAR_RE.match(url):
+        return True
+    try:
+        u = urlsplit(url)
+    except ValueError:
+        return False
+    host = (u.hostname or "").lower()
+    return u.scheme in ("https", "http") and (host == _KAKAO_CDN or host.endswith("." + _KAKAO_CDN))
 
 
 class SignupRequest(BaseModel):
@@ -121,7 +140,8 @@ class ResetPasswordRequest(BaseModel):
 class AvatarIn(BaseModel):
     """`POST /me/avatar` 요청. 프론트가 사진을 256px 정사각으로 줄여 데이터 URL 로 보낸다."""
 
-    data_url: str = Field(description="`data:image/jpeg;base64,...` 형식. JPG · PNG · WEBP, 512KB 이하")
+    # 512KB 를 base64 로 쓰면 약 683KB — 머리말까지 넉넉히 70만 자. 그보다 긴 본문은 디코드하기 전에 거른다
+    data_url: str = Field(max_length=700_000, description="`data:image/jpeg;base64,...` 형식. JPG · PNG · WEBP, 512KB 이하")
 
 
 class IdentityView(ORMModel):
@@ -157,9 +177,19 @@ class UserUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=50)
     nickname: str | None = Field(default=None, max_length=50)
-    profile_image_url: str | None = None
+    profile_image_url: str | None = Field(
+        default=None, max_length=500,
+        description="카카오 CDN(*.kakaocdn.net) 주소 또는 이 서비스의 사진 주소(/api/v1/users/{id}/avatar?v=…)만. 사진을 올리려면 POST /me/avatar",
+    )
     height_cm: int | None = Field(default=None, ge=120, le=250)
     primary_team_id: int | None = Field(default=None, description="메인 팀으로 설정할 팀. 내가 ACTIVE 로 속한 팀이어야 한다")
+
+    @field_validator("profile_image_url")
+    @classmethod
+    def _image_host(cls, v: str | None) -> str | None:
+        if v is not None and v != "" and not allowed_profile_image_url(v.strip()):
+            raise ValueError("프로필 사진 주소는 카카오 사진이나 직접 올린 사진만 쓸 수 있어요.")
+        return v.strip() if v else None
 
 
 class TeamMembershipView(BaseModel):

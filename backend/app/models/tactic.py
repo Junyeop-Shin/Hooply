@@ -30,16 +30,22 @@ from app.db.base import Base, BigPK
 class EventPlayAssignment(Base):
     __tablename__ = "event_play_assignments"
     __table_args__ = (
+        # event_id 조회도 이 유니크 인덱스(event_id 가 맨 앞)가 맡는다 — 단독 인덱스는 0025 에서 지웠다
         UniqueConstraint("event_id", "squad_no", "play_key", "slot", name="uq_event_play_assignments_slot"),
+        # 한 전술 배치에서 한 사람은 한 자리에만 (0025)
+        UniqueConstraint("event_id", "squad_no", "play_key", "player_id", name="uq_event_play_assignments_player"),
         CheckConstraint("slot BETWEEN 1 AND 5", name="ck_event_play_assignments_slot"),
+        CheckConstraint("squad_no BETWEEN 1 AND 3", name="ck_event_play_assignments_squad_no"),
     )
 
     id: Mapped[BigPK]
-    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
-    squad_no: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1 블랙 · 2 화이트 (확정 배정의 squad_no)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    squad_no: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1 블랙 · 2 화이트 · 3 레드 (확정 배정의 squad_no)
     play_key: Mapped[str] = mapped_column(String(40), nullable=False)  # "preset:high_pnr"
+    # 팀 전술("team:<id>")이면 그 행 (0025). 전술을 지우면 함께 지워진다. 프리셋이면 NULL
+    team_play_id: Mapped[int | None] = mapped_column(ForeignKey("team_plays.id", ondelete="CASCADE"), index=True)
     slot: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1~5
-    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False, index=True)
     assigned_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -58,11 +64,11 @@ class TeamPlay(Base):
     name: Mapped[str] = mapped_column(String(30), nullable=False)
     summary: Mapped[str] = mapped_column(String(80), nullable=False)
     defense: Mapped[str] = mapped_column(String(4), nullable=False)  # man · zone · any
-    situation: Mapped[str] = mapped_column(String(12), nullable=False, default="half_court")  # half_court · inbound
-    counter: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    situation: Mapped[str] = mapped_column(String(12), nullable=False, default="half_court", server_default="half_court")  # half_court · inbound
+    counter: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
     body: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)  # {start: [{x,y}×5], ball, steps: [...], opp_defense, screen_call}
     roles: Mapped[list[str]] = mapped_column(JSONB, nullable=False)  # 자리 1~5 역할
-    role_source: Mapped[str] = mapped_column(String(10), nullable=False, default="RULE")  # RULE · AI · MANAGER
+    role_source: Mapped[str] = mapped_column(String(10), nullable=False, default="RULE", server_default="RULE")  # RULE · AI · MANAGER
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -78,7 +84,8 @@ class TacticComment(Base):
     id: Mapped[BigPK]
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     play_key: Mapped[str] = mapped_column(String(40), nullable=False)  # "preset:high_pnr" · "team:12"
-    author_player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    team_play_id: Mapped[int | None] = mapped_column(ForeignKey("team_plays.id", ondelete="CASCADE"), index=True)  # 팀 전술이면 (0025)
+    author_player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False, index=True)
     body: Mapped[str] = mapped_column(String(500), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -92,7 +99,8 @@ class TacticStar(Base):
     __table_args__ = (UniqueConstraint("team_id", "play_key", name="uq_tactic_stars_team_play"),)
 
     id: Mapped[BigPK]
-    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)  # 조회는 uq_tactic_stars_team_play 가
     play_key: Mapped[str] = mapped_column(String(40), nullable=False)  # "preset:high_pnr" · "team:12"
+    team_play_id: Mapped[int | None] = mapped_column(ForeignKey("team_plays.id", ondelete="CASCADE"), index=True)  # 팀 전술이면 (0025)
     starred_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

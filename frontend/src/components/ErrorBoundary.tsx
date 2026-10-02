@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
         <p className="text-sm text-muted">{stale ? '새로고침하면 새 버전으로 열려요.' : '잠시 문제가 생겼어요. 새로고침하면 대부분 해결돼요.'}</p>
         <p className="max-w-full truncate text-[11px] text-faint">{this.state.error.message}</p>
         <div className="mt-2 flex gap-2">
-          <button onClick={() => location.reload()} className="min-h-11 rounded-xl bg-court-500 px-4 text-sm font-semibold text-white">새로고침</button>
+          <button onClick={() => location.reload()} className="min-h-11 rounded-xl bg-brand px-4 text-sm font-semibold text-on-brand">새로고침</button>
           <button onClick={() => { this.setState({ error: null }); location.assign('/') }} className="min-h-11 rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink">홈으로</button>
         </div>
       </div>

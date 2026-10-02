@@ -5,7 +5,7 @@ import { EVENT, login, openEvent, PLAYER } from './helpers'
 test('전술 탭: 전술 22개 목록 → 전술판에서 단계를 넘기며 본다', async ({ page }) => {
   await login(page, PLAYER)
   await page.getByRole('button', { name: '일요 코트메이트 팀 열기' }).click()
-  await page.getByRole('button', { name: '전술', exact: true }).click()
+  await page.getByRole('tab', { name: '전술', exact: true }).click()
 
   await expect(page.getByRole('heading', { name: '전술 목록' })).toBeVisible()
   await expect(page.getByRole('button', { name: /전술판 보기$/ })).toHaveCount(22)
@@ -28,7 +28,7 @@ test('전술 탭: 전술 22개 목록 → 전술판에서 단계를 넘기며 �
 test('전술 탭에는 일정 추천이 없고, 매니저가 별표한 전술이 맨 위에 모인다', async ({ page }) => {
   await login(page)
   await page.getByRole('button', { name: '일요 코트메이트 팀 열기' }).click()
-  await page.getByRole('button', { name: '전술', exact: true }).click()
+  await page.getByRole('tab', { name: '전술', exact: true }).click()
   await expect(page.getByRole('heading', { name: '전술 목록' })).toBeVisible()
   await expect(page.getByText(/추천 전술/)).toHaveCount(0)
   await page.getByRole('button', { name: '혼즈 별표 달기' }).click()

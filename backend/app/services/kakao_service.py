@@ -29,7 +29,7 @@ from app.core.config import get_settings
 from app.models import AuthIdentity, User, UserAvatar
 from app.models.enums import AuthProvider
 from app.schemas.auth import TokenPair
-from app.services.auth_service import _issue_tokens
+from app.services.auth_service import issue_tokens, normalize_email
 
 AUTHORIZE_URL = "https://kauth.kakao.com/oauth/authorize"
 TOKEN_URL = "https://kauth.kakao.com/oauth/token"
@@ -131,8 +131,8 @@ def login_or_signup(db: Session, p: KakaoProfile) -> tuple[TokenPair, bool]:
         if p.profile_image_url and db.get(UserAvatar, user.id) is None:
             user.profile_image_url = p.profile_image_url
         db.commit()
-        return _issue_tokens(user), False
-    email = p.email
+        return issue_tokens(user), False
+    email = normalize_email(p.email) if p.email else None  # 이메일 가입과 같은 규칙(소문자)으로 저장 · 비교한다
     if email and db.scalar(select(User.id).where(User.email == email)):
         email = None  # 같은 이메일의 이메일 계정이 이미 있으면 충돌을 피해 이메일 없이 만든다 (5.4절 POSSIBLE_DUPLICATE 는 병합으로 해결)
     name = (p.nickname or "카카오 회원")[:50]
@@ -141,7 +141,7 @@ def login_or_signup(db: Session, p: KakaoProfile) -> tuple[TokenPair, bool]:
     db.add(user)
     db.commit()
     db.refresh(user)
-    return _issue_tokens(user), True
+    return issue_tokens(user), True
 
 
 def link(db: Session, user: User, p: KakaoProfile) -> User:

@@ -19,6 +19,8 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
+    Integer,
     LargeBinary,
     SmallInteger,
     String,
@@ -48,6 +50,8 @@ class User(TimestampMixin, Base):
         # S-02 입력값 범위 검증. NULL 은 통과 (선택 입력)
         # 키(cm). 120~250 밖은 오입력으로 간주
         CheckConstraint("height_cm IS NULL OR height_cm BETWEEN 120 AND 250", name="ck_users_height_cm"),
+        # 이메일은 소문자로만 저장한다 (auth_service.normalize_email). 대소문자만 다른 두 계정이 생기지 않게 (0026)
+        CheckConstraint("email IS NULL OR email = lower(email)", name="ck_users_email_lower"),
     )
 
     id: Mapped[BigPK]
@@ -79,6 +83,8 @@ class User(TimestampMixin, Base):
     )
     tutorial_path: Mapped[TutorialPath | None] = mapped_column(db_enum(TutorialPath, 10))
     tutorial_tips_seen: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
+    # 토큰 세대 (0025). 비밀번호를 바꾸거나 재설정하면 1 올라가고, 다른 세대의 access·refresh 토큰은 거부된다 (다른 기기 로그아웃)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     # 연결된 로그인 수단들. 계정 삭제 시 함께 삭제 (delete-orphan)
     identities: Mapped[list["AuthIdentity"]] = relationship(
@@ -149,6 +155,7 @@ class RevokedToken(Base):
     """
 
     __tablename__ = "revoked_tokens"
+    __table_args__ = (Index("ix_revoked_tokens_expires", "expires_at"),)  # 만료 청소 (0016)
 
     jti: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

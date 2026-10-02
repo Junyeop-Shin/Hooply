@@ -8,6 +8,9 @@ import { persist } from 'zustand/middleware'
 import type { TokenPair } from '../api/types'
 import { queryClient } from '../queryClient'
 
+/** localStorage 키 (zustand persist) */
+export const AUTH_STORAGE_KEY = 'hooply-auth'
+
 interface AuthState {
   accessToken: string | null
   refreshToken: string | null
@@ -33,8 +36,24 @@ export const useAuthStore = create<AuthState>()(
         queryClient.clear(); set({ accessToken: null, refreshToken: null })
       },
     }),
-    { name: 'hooply-auth' },
+    { name: AUTH_STORAGE_KEY },
   ),
 )
+
+/**
+ * 탭끼리 토큰 맞추기. 다른 탭이 refresh 로 토큰을 바꾸거나(회전) 로그아웃하면 localStorage 가 바뀌고
+ * 이 탭에는 'storage' 이벤트가 온다 — 그 값을 읽어 와서, 이미 버려진 refresh 토큰으로 요청하다 로그아웃되지 않게 한다.
+ */
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== null && e.key !== AUTH_STORAGE_KEY) return  // key=null 은 저장소 전체 비우기
+    const wasLoggedIn = useAuthStore.getState().accessToken !== null
+    Promise.resolve(useAuthStore.persist.rehydrate()).then(() => {
+      if (e.newValue === null) useAuthStore.setState({ accessToken: null, refreshToken: null })  // 키가 지워졌다
+      // 다른 탭에서 로그아웃했다 → 이 탭의 서버 캐시도 비운다 (화면은 RequireAuth 가 로그인으로 보낸다)
+      if (wasLoggedIn && useAuthStore.getState().accessToken === null) queryClient.clear()
+    }).catch(() => { /* 저장소를 못 읽으면 그대로 */ })
+  })
+}
 
 export const useIsLoggedIn = () => useAuthStore((s) => s.accessToken !== null)

@@ -21,6 +21,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors, ratelimit
@@ -42,7 +43,7 @@ from app.services.tactic_service import find_play, team_play_to_play, team_plays
 from app.tactics.court import zone_of
 from app.tactics.extract import ROLE_REASON, extract_roles, positions
 from app.tactics.play import ACTION_LABEL, Play, Point, Role, playability_errors
-from app.tactics.presets import TEAM_KEY_PREFIX, play_key
+from app.tactics.presets import TEAM_KEY_PREFIX, play_key, team_play_id
 
 DEFAULT_SUMMARY = "우리 팀이 만든 전술"
 COMMENTS_PER_MINUTE = 10
@@ -300,7 +301,7 @@ def add_comment(db: Session, team_id: int, key: str, text: str, me: Player) -> T
         raise errors.ValidationError("댓글 내용을 적어 주세요.")
     k = _require_play(db, team_id, key)
     ratelimit.check(f"tactic-comment:{me.id}", COMMENTS_PER_MINUTE, 60)
-    c = TacticComment(team_id=team_id, play_key=k, author_player_id=me.id, body=body)
+    c = TacticComment(team_id=team_id, play_key=k, team_play_id=team_play_id(k), author_player_id=me.id, body=body)
     db.add(c)
     db.commit()
     db.refresh(c)
@@ -332,10 +333,12 @@ def stars(db: Session, team_id: int, me: Player) -> TacticStars:
 def set_star(db: Session, team_id: int, key: str, on: bool, by: User, me: Player) -> TacticStars:
     """매니저가 별표를 달거나 뗀다. 같은 전술에 두 번 달아도 한 번만 남는다."""
     k = _require_play(db, team_id, key)
-    row = db.scalar(select(TacticStar).where(TacticStar.team_id == team_id, TacticStar.play_key == k))
-    if on and row is None:
-        db.add(TacticStar(team_id=team_id, play_key=k, starred_by=by.id))
-    elif not on and row is not None:
-        db.delete(row)
+    if on:  # 두 매니저가 동시에 달아도 유니크 위반 없이 하나만 남는다
+        db.execute(
+            pg_insert(TacticStar).values(team_id=team_id, play_key=k, team_play_id=team_play_id(k), starred_by=by.id)
+            .on_conflict_do_nothing(constraint="uq_tactic_stars_team_play")
+        )
+    else:
+        db.execute(delete(TacticStar).where(TacticStar.team_id == team_id, TacticStar.play_key == k))
     db.commit()
     return stars(db, team_id, me)

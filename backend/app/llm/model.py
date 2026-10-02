@@ -37,10 +37,6 @@ def _usable(model: str) -> bool:
     return bool(s.llm_api_key or (env and os.environ.get(env)))
 
 
-def available() -> bool:
-    return _usable(get_settings().llm_model)
-
-
 @lru_cache(maxsize=4)
 def _build(model: str, api_key: str, timeout: float) -> BaseChatModel:
     from langchain.chat_models import init_chat_model

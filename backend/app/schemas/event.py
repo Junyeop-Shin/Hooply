@@ -30,7 +30,7 @@ class EventCreate(BaseModel):
     rsvp_deadline: datetime | None = Field(
         default=None, description="참석 응답 마감 시각. 지나면 본인 응답은 422 RSVP_CLOSED (매니저 대리 응답은 가능)"
     )
-    memo: str | None = Field(default=None, description="공지 메모 (회비, 준비물 등)")
+    memo: str | None = Field(default=None, max_length=1000, description="공지 메모 (회비, 준비물 등). 1000자까지")
 
     @field_validator("rsvp_deadline")
     @classmethod
@@ -92,7 +92,7 @@ class AttendanceUpdate(BaseModel):
     """
 
     status: AttendanceStatus = Field(description="ATTEND / ABSENT / PENDING(응답 취소)")
-    note: str | None = Field(default=None, description="'늦게 감' 같은 짧은 메모")
+    note: str | None = Field(default=None, max_length=200, description="'늦게 감' 같은 짧은 메모 (200자까지)")
 
 
 class AttendanceView(BaseModel):
@@ -164,7 +164,7 @@ class EventGuestUpdate(BaseModel):
 
     display_name: str | None = Field(default=None, min_length=1, max_length=50)
     skill_grade: int | None = Field(default=None, ge=1, le=5)
-    height_cm: int | None = Field(default=None, ge=120, le=250, description="게스트 키(cm). 팀 평균 신장 계산에 쓰인다")
+    height_cm: int | None = Field(default=None, ge=120, le=250, description="게스트 키(cm). 필드를 빼면 그대로, null 을 보내면 지운다")
     preferred_position: Position | None = None
     playable_positions: list[Position] | None = None
     team_lock_request: bool | None = Field(default=None, description="None 이면 변경 없음")

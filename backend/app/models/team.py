@@ -110,6 +110,8 @@ class Player(CreatedAtMixin, Base):
         Index("ix_players_user_status", "user_id", "status"),  # 6.4절: 내 팀 목록 (GET /me/teams)
         # 병합된 게스트를 거슬러 올라가는 조회 — 값이 있는 행만 담아 인덱스를 작게 유지한다
         Index("ix_players_merged_into", "merged_into_player_id", postgresql_where=text("merged_into_player_id IS NOT NULL")),
+        # 자기 자신에게 병합되면 기록을 거슬러 올라갈 때 끝나지 않는다 (0025)
+        CheckConstraint("merged_into_player_id <> id", name="ck_players_not_merged_into_self"),
     )
 
     id: Mapped[BigPK]
@@ -155,11 +157,14 @@ class GuestInvitePreset(CreatedAtMixin, Base):
 
     __tablename__ = "guest_invite_presets"
     __table_args__ = (
+        # 팀으로 좁혀 읽는 조회도 이 유니크 인덱스(team_id 가 맨 앞)가 맡는다 — team_id 단독 인덱스는 0025 에서 지웠다
         UniqueConstraint("team_id", "created_by", "display_name", name="uq_guest_invite_presets_owner_name"),
+        Index("ix_guest_invite_presets_last_player", "last_player_id"),
+        CheckConstraint("skill_grade IS NULL OR skill_grade BETWEEN 1 AND 5", name="ck_guest_invite_presets_skill_grade"),
     )
 
     id: Mapped[BigPK]
-    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     display_name: Mapped[str] = mapped_column(String(50), nullable=False)
     skill_grade: Mapped[int | None] = mapped_column(SmallInteger)  # 1~5, 미지정 NULL
@@ -167,7 +172,7 @@ class GuestInvitePreset(CreatedAtMixin, Base):
     preferred_position: Mapped[str | None] = mapped_column(String(2))
     playable_positions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     team_lock_request: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
-    last_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"), index=True)  # 마지막 게스트 레코드
+    last_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"))  # 마지막 게스트 레코드
     use_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -182,7 +187,7 @@ class GuestClaim(CreatedAtMixin, Base):
     __tablename__ = "guest_claims"
     __table_args__ = (
         UniqueConstraint("guest_player_id", "user_id", name="uq_guest_claims_guest_user"),
-        CheckConstraint("status IN ('CONFIRMED','DECLINED')", name="ck_guest_claims_status"),
+        # 허용값은 claim_status_enum 타입이 지킨다 (0017 에서 CHECK 를 ENUM 으로 바꿨다)
     )
 
     id: Mapped[BigPK]

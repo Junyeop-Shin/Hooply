@@ -195,13 +195,13 @@ def test_long_text_is_truncated(db, fake_model):
 def test_no_key_returns_fallback_without_error(db, monkeypatch):
     monkeypatch.setattr(get_settings(), "llm_api_key", "")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    assert llm_model.available() is False and llm_model.structured(Explain) is None
+    assert llm_model.chat_model() is None and llm_model.structured(Explain) is None
     out = g.run(db, _call(), user_id=1)
     assert out.fallback is True and out.fail_reason == "disabled" and out.output["summary"] == "규칙 문장"
     assert db.scalar(select(func.count()).select_from(LlmResult)) == 0  # 키를 넣으면 바로 부르도록 남기지 않는다
     monkeypatch.setattr(get_settings(), "llm_api_key", "k")
     monkeypatch.setattr(get_settings(), "llm_enabled", False)
-    assert llm_model.available() is False
+    assert llm_model.chat_model() is None
 
 
 # T11 캐시
@@ -348,3 +348,76 @@ def test_third_squad_alias_skips_c_so_center_position_is_not_replaced():
     al = g.Aliases()
     assert [al.squad(1, "블랙"), al.squad(2, "화이트"), al.squad(3, "레드")] == ["A", "B", "D"]
     assert al.restore("D는 C 자리가 비어요. A와 D가 붙어요") == "레드는 C 자리가 비어요. 블랙과 레드가 붙어요"
+
+
+# ---------------------------------------------------------------------------
+# 동시성 · 보관 (C3 · D5)
+# ---------------------------------------------------------------------------
+
+
+# 검증: 같은 입력이 동시에 캐시를 놓치면 모델은 한 번만 부르고, 나머지는 저장된 결과를 읽는다 (single-flight)
+def test_concurrent_identical_misses_call_model_once(fake_model):
+    import threading
+
+    fake_model["reply"] = Explain(summary="P1 좋아요.", reasons=["x"])
+    fake_model["sleep"] = 0.3
+    outs: list = []
+
+    def worker():
+        with SessionLocal() as s:
+            outs.append(g.run(s, _call(), user_id=1))
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert fake_model["calls"] == 1
+    assert len(outs) == 4 and all(not o.fallback and o.output["summary"] == outs[0].output["summary"] for o in outs)
+    assert sum(o.cached for o in outs) == 3
+
+
+# 검증: 성공한 결과는 나중에 저장되는 폴백이 덮어쓰지 않는다 (폴백은 폴백을, 성공은 무엇이든 덮어쓴다)
+def test_store_never_overwrites_success_with_fallback(db):
+    call = _call()
+    key = g.cache_key(call.chain, call.key_parts)
+    g._store(db, call, key, g.GuardOutcome(output={"summary": "성공"}, fallback=False), "m")
+    g._store(db, call, key, g.GuardOutcome(output={"summary": "폴백"}, fallback=True, fail_reason="timeout"), "m")
+    row = db.scalar(select(LlmResult).where(LlmResult.cache_key == key))
+    db.refresh(row)
+    assert row.fallback is False and row.output["summary"] == "성공"
+    other = g.cache_key(call.chain, {"x": 1})
+    g._store(db, call, other, g.GuardOutcome(output={"summary": "폴백"}, fallback=True, fail_reason="timeout"), "m")
+    g._store(db, call, other, g.GuardOutcome(output={"summary": "성공"}, fallback=False), "m")
+    row = db.scalar(select(LlmResult).where(LlmResult.cache_key == other))
+    db.refresh(row)
+    assert row.fallback is False and row.output["summary"] == "성공"
+
+
+# 검증: 마감은 작업자가 일을 집어 든 순간부터 잰다 — 풀이 앞 작업으로 차 있어도 기다린 시간 때문에 시간 초과가 나지 않는다
+def test_timeout_starts_when_worker_picks_up(db, fake_model, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    fake_model["reply"] = Explain(summary="P1 좋아요.", reasons=["x"])
+    fake_model["sleep"] = 0.2
+    monkeypatch.setattr(get_settings(), "llm_timeout_seconds", 0.5)
+    pool = ThreadPoolExecutor(max_workers=1)
+    monkeypatch.setattr(g, "_pool", pool)
+    blocker = pool.submit(time.sleep, 0.4)  # 큐 앞에서 0.4초를 잡아먹는 작업
+    out = g.run(db, _call(), user_id=1)  # 시작까지 0.4 + 실행 0.2 = 0.6초 > 0.5초지만 실행만 보면 마감 안
+    blocker.result()
+    pool.shutdown()
+    assert out.fallback is False, out.fail_reason
+
+
+# 검증: 60일 지난 캐시 행은 청소된다
+def test_cleanup_old_results(db):
+    from datetime import UTC, datetime, timedelta
+
+    call = _call()
+    for i, age in enumerate((61, 1)):
+        db.add(LlmResult(chain="A", cache_key=f"k{i}", output={}, fallback=False, created_at=datetime.now(UTC) - timedelta(days=age)))
+    db.commit()
+    assert g.cleanup_old_results(db) == 1
+    assert db.scalars(select(LlmResult.cache_key)).all() == ["k1"]
+    assert call.chain == "A"

@@ -27,11 +27,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 from statistics import mean
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
+from app.db.session import lock_team_stats
 from app.models import Event, Player, PlayerProfile, Quarter, QuarterLineup, SkillRatingHistory
 from app.models.enums import EventStatus, PlayerKind, PriorSource, RatingSource, Side
 
@@ -63,13 +65,28 @@ def _base_confidence(prof: PlayerProfile, kind: PlayerKind) -> float:
     return 0.0
 
 
-def recompute_team(db: Session, team_id: int) -> dict[str, int]:
+def start_value(prof: PlayerProfile | None) -> float:
+    """재생의 출발점 = 사전값 + 관리자 보정. 사전값이 없으면 클럽 평균(0) 에서 출발한다.
+
+    관리자 보정은 사전값과 따로 둔다(`admin_adjust`). 설문 · 정렬이 사전값을 다시 계산해도 보정이 사라지지 않고,
+    쿼터를 다시 재생해도 출발점에 한 번만 더해지므로 두 번 반영되지 않는다.
+    """
+    if prof is None:
+        return 0.0
+    return float(prof.prior_overall or 0) + float(prof.admin_adjust or 0)
+
+
+def recompute_team(db: Session, team_id: int, *, start_override: dict[int, float] | None = None, dry_run: bool = False) -> dict[str, Any]:
     """팀의 모든 쿼터를 시간순으로 재생해 skill_overall·quarters_played·cumulative_residual·신뢰도를 다시 쓴다.
 
     부수 효과: player_profiles UPDATE, 값이 바뀐 사람마다 skill_rating_history(source=RESIDUAL). flush 까지.
     반환: {"quarters": 전체 쿼터 수, "rated": 지표에 반영된 쿼터 수, "warmup_events": 게이트로 제외된 회차 수}
+
+    `dry_run=True` 면 아무것도 쓰지 않고 {"r": player_id → 반올림 전 최종값} 만 돌려준다. `start_override` 로 일부 선수의
+    출발점을 바꿔 볼 수 있다 — 관리자 보정이 원하는 최종값이 되도록 admin_adjust 를 푸는 데 쓴다 (admin_adjust_for).
     """
     settings = get_settings()
+    lock_team_stats(db, team_id)  # 같은 팀을 동시에 재생하지 않게 (트랜잭션 끝까지)
     players = db.scalars(
         select(Player).where(Player.team_id == team_id).options(selectinload(Player.profile))
     ).all()
@@ -83,10 +100,8 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
             pid = by_id[pid].merged_into_player_id
         return pid
 
-    r: dict[int, float] = {}
-    for p in players:
-        prof = p.profile
-        r[p.id] = float(prof.prior_overall) if prof and prof.prior_overall is not None else 0.0
+    r: dict[int, float] = {p.id: start_value(p.profile) for p in players}
+    r.update(start_override or {})
     n_rated: dict[int, int] = defaultdict(int)
     n_played: dict[int, int] = defaultdict(int)
     residual: dict[int, float] = defaultdict(float)
@@ -162,6 +177,8 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
             residual[pid] += sign * d
         for lid, _pid, side_, _nm, old_res in q.lineups:
             _stage(lid, old_res, d if side_ == Side.BLACK else -d)
+    if dry_run:
+        return {"r": {p.id: r.get(p.id, 0.0) for p in players}}
     if changed:
         db.execute(update(QuarterLineup), changed)
 
@@ -171,7 +188,8 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
             continue
         before = prof.skill_overall
         # 사전값도 없고 평가 쿼터도 없으면 "모름"(None) 을 유지한다 — 0.0 을 쓰면 클럽 평균으로 오독된다
-        after = None if (prof.prior_overall is None and n_rated[p.id] == 0) else Decimal(str(round(r[p.id], 1)))
+        unknown = prof.prior_overall is None and not prof.admin_adjust and n_rated[p.id] == 0
+        after = None if unknown else Decimal(str(round(r[p.id], 1)))
         prof.skill_overall = after
         prof.quarters_played = n_played[p.id]
         prof.cumulative_residual = Decimal(str(round(residual[p.id], 2)))
@@ -191,3 +209,31 @@ def recompute_team(db: Session, team_id: int) -> dict[str, int]:
             )
     db.flush()
     return {"quarters": len(quarters), "rated": rated, "warmup_events": len(warmup)}
+
+
+ADMIN_ADJUST_LIMIT = 50.0  # 관리자 보정 오프셋 상한 (점). 이보다 크게 밀어야 닿는 값은 경기 기록과 너무 어긋난다
+
+
+def admin_adjust_for(db: Session, player: Player, target: float) -> Decimal:
+    """재계산 결과(skill_overall)가 `target` 이 되게 하는 admin_adjust.
+
+    재생은 출발점에 대해 선형이다 — 잔차 갱신 r ← r ± K·(M' − Σr)/5 에서 M' 의 클리핑은 점수에만 걸리고 r 에는 걸리지
+    않는다. 그래서 출발점을 두 번 넣어 본 기울기로 한 번에 푼다. 경기가 많을수록 출발점의 영향(기울기)이 작아지므로
+    필요한 오프셋이 ADMIN_ADJUST_LIMIT 를 넘으면 422 로 알린다.
+    """
+    from app.core import errors
+
+    prof = player.profile
+    base = start_value(prof)
+    now_adjust = float(prof.admin_adjust or 0) if prof else 0.0
+    f0 = recompute_team(db, player.team_id, dry_run=True)["r"][player.id]
+    f1 = recompute_team(db, player.team_id, start_override={player.id: base + 1.0}, dry_run=True)["r"][player.id]
+    slope = f1 - f0
+    if slope <= 1e-6:
+        raise errors.ValidationError("경기 기록이 많아 보정값이 반영되지 않아요.")
+    adjust = now_adjust + (target - f0) / slope
+    if abs(adjust) > ADMIN_ADJUST_LIMIT:
+        raise errors.ValidationError(
+            f"경기 기록과 너무 멀어서 {target:+.1f} 로 맞출 수 없어요. 출발점을 {ADMIN_ADJUST_LIMIT:.0f}점 넘게 옮겨야 해요."
+        )
+    return Decimal(str(round(adjust, 1)))

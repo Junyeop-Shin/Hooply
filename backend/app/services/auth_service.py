@@ -20,7 +20,9 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import errors
@@ -35,20 +37,35 @@ from app.models import AuthIdentity, Player, RevokedToken, User, UserAvatar
 from app.models.enums import AuthProvider, PlayerKind, PlayerStatus, TeamRole
 from app.schemas.auth import LoginRequest, SignupRequest, TokenPair
 
+ANON_NAME = "탈퇴한 회원"
+
 
 def normalize_email(email: str) -> str:
     """이메일은 대소문자를 구분하지 않는다. 저장·조회 모두 소문자로 (0016 마이그레이션이 기존 행도 맞췄다)."""
     return email.strip().lower()
 
 
-def _issue_tokens(user: User) -> TokenPair:
+def issue_tokens(user: User) -> TokenPair:
     """주어진 사용자에게 access/refresh 토큰 한 쌍을 발급한다.
 
     7.1절 규약대로 access 30분 / refresh 14일 만료이며, 실제 기간은
-    `Settings.jwt_access_minutes` / `jwt_refresh_days`에서 읽는다.
-    DB를 건드리지 않는 순수 함수다. signup / login / refresh가 공통으로 호출한다.
+    `Settings.jwt_access_minutes` / `jwt_refresh_days`에서 읽는다. 두 토큰 모두 계정의 현재 세대
+    (`users.token_version`)를 싣는다. DB를 건드리지 않는 순수 함수다. signup / login / refresh /
+    비밀번호 변경 / 카카오 로그인이 공통으로 호출한다.
     """
-    return TokenPair(access_token=create_access_token(user.id), refresh_token=create_refresh_token(user.id))
+    v = user.token_version or 0
+    return TokenPair(access_token=create_access_token(user.id, v), refresh_token=create_refresh_token(user.id, v))
+
+
+_dummy_hash: str | None = None
+
+
+def _dummy_password_hash() -> str:
+    """계정이 없을 때 대신 검증할 bcrypt 해시 (처음 한 번 만든다). 응답 시간으로 가입 여부가 드러나지 않게."""
+    global _dummy_hash
+    if _dummy_hash is None:
+        _dummy_hash = hash_password("hooply-timing-equalizer")
+    return _dummy_hash
 
 
 def signup(db: Session, req: SignupRequest) -> TokenPair:
@@ -65,10 +82,9 @@ def signup(db: Session, req: SignupRequest) -> TokenPair:
     입력: `SignupRequest` (email, password: SecretStr, name, nickname?, height_cm?)
     출력: `TokenPair`
     부수 효과: `db.commit()` — users 1행 + auth_identities 1행 INSERT.
-    에러: `409 EMAIL_DUPLICATED` (이미 가입된 이메일).
+    에러: `409 EMAIL_DUPLICATED` (이미 가입된 이메일. 같은 이메일로 동시에 가입해도 하나만 성공하고 나머지는 409).
 
-    참고: soft delete된 계정(`deleted_at` 설정)도 이메일 UNIQUE 제약에 걸리므로
-    같은 이메일로 재가입은 현재 불가하다. 재가입 정책은 아직 미정.
+    참고: 계정을 삭제하면 이메일을 비우므로(`delete_account`) 같은 이메일로 다시 가입할 수 있다.
     """
     email = normalize_email(req.email)
     if db.scalar(select(User).where(User.email == email)):
@@ -84,8 +100,12 @@ def signup(db: Session, req: SignupRequest) -> TokenPair:
         AuthIdentity(provider=AuthProvider.LOCAL, provider_uid=email, linked_at=datetime.now(UTC))
     )
     db.add(user)
-    db.commit()
-    return _issue_tokens(user)
+    try:
+        db.commit()
+    except IntegrityError:  # 검사와 저장 사이에 같은 이메일이 먼저 가입했다
+        db.rollback()
+        raise errors.EmailDuplicated() from None
+    return issue_tokens(user)
 
 
 def login(db: Session, req: LoginRequest) -> TokenPair:
@@ -99,17 +119,22 @@ def login(db: Session, req: LoginRequest) -> TokenPair:
     - 계정은 있으나 소셜 전용이라 `password_hash`가 NULL (카카오로만 가입한 사람)
     - 비밀번호 불일치
 
+    계정이 없거나 비밀번호가 없는 계정이어도 가짜 해시로 bcrypt 검증을 한 번 돌린다. 그러지 않으면 "없는 계정"이
+    bcrypt 시간(0.2초 남짓)만큼 빨리 실패해 응답 시간으로 가입 여부를 알 수 있다.
+
     입력: `LoginRequest` (email, password: SecretStr)
     출력: `TokenPair`
     부수 효과: 없음 (읽기 전용, 커밋 없음).
     에러: `401 INVALID_CREDENTIALS`.
     """
     user = db.scalar(select(User).where(User.email == normalize_email(req.email), User.deleted_at.is_(None)))
+    password = req.password.get_secret_value()
     if user is None or user.password_hash is None:
+        verify_password(password, _dummy_password_hash())
         raise errors.InvalidCredentials()
-    if not verify_password(req.password.get_secret_value(), user.password_hash):
+    if not verify_password(password, user.password_hash):
         raise errors.InvalidCredentials()
-    return _issue_tokens(user)
+    return issue_tokens(user)
 
 
 def refresh(db: Session, refresh_token: str) -> TokenPair:
@@ -121,20 +146,29 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
 
     입력: refresh 토큰 문자열
     출력: `TokenPair` (access·refresh 모두 새로 발급 — 회전 방식)
-    부수 효과: 쓴 refresh 토큰의 jti 를 폐기 목록에 넣는다 (같은 토큰을 두 번 쓰면 401).
-    에러: `401 TOKEN_EXPIRED` (무효·만료·타입 불일치·폐기됨·삭제된 계정 모두).
+    부수 효과: 쓴 refresh 토큰의 jti 를 폐기 목록에 넣는다 (같은 토큰을 두 번 쓰면 401). 폐기는
+    `INSERT … ON CONFLICT DO NOTHING` 이라 같은 토큰으로 동시에 두 번 갱신해도 하나만 새 쌍을 받고 나머지는 401 이다.
+    에러: `401 TOKEN_EXPIRED` (무효·만료·타입 불일치·폐기됨·삭제된 계정·비밀번호 변경 전 세대 모두).
     """
     maybe_cleanup_tokens(db)
     decoded = decode_refresh(refresh_token)
     if decoded is None:
         raise errors.TokenExpired()
-    user_id, jti, exp = decoded
+    user_id, jti, exp, version = decoded
     user = db.get(User, user_id)
-    if user is None or user.deleted_at is not None or db.get(RevokedToken, jti) is not None:
+    if user is None or user.deleted_at is not None or user.token_version != version:
         raise errors.TokenExpired()
-    db.add(RevokedToken(jti=jti, user_id=user.id, expires_at=exp))
+    if not _revoke(db, jti, user.id, exp):  # 이미 쓴 토큰 (먼저 온 요청이 폐기했다)
+        db.rollback()
+        raise errors.TokenExpired()
     db.commit()
-    return _issue_tokens(user)
+    return issue_tokens(user)
+
+
+def _revoke(db: Session, jti: str, user_id: int, exp: datetime) -> bool:
+    """jti 를 폐기 목록에 넣는다. 이번에 넣었으면 True, 이미 있었으면 False (동시 요청에도 하나만 True)."""
+    stmt = pg_insert(RevokedToken).values(jti=jti, user_id=user_id, expires_at=exp).on_conflict_do_nothing(index_elements=["jti"])
+    return db.execute(stmt.returning(RevokedToken.jti)).first() is not None
 
 
 _last_cleanup: float = 0.0
@@ -181,28 +215,35 @@ def logout(db: Session, refresh_token: str) -> None:
     decoded = decode_refresh(refresh_token)
     if decoded is None:
         return
-    user_id, jti, exp = decoded
-    if db.get(RevokedToken, jti) is None:
-        db.add(RevokedToken(jti=jti, user_id=user_id, expires_at=exp))
-        db.commit()
+    user_id, jti, exp, _version = decoded
+    if db.get(User, user_id) is None:  # 지워진 계정의 토큰 — 폐기 목록의 외래키를 걸 수 없다
+        return
+    _revoke(db, jti, user_id, exp)
+    db.commit()
 
 
-def change_password(db: Session, user: User, current: str, new: str) -> None:
-    """로그인 상태에서 비밀번호 교체. 현재 비밀번호가 맞아야 한다 (기기를 빌린 사람이 바꿔 버리지 못하게)."""
+def change_password(db: Session, user: User, current: str, new: str) -> TokenPair:
+    """로그인 상태에서 비밀번호 교체. 현재 비밀번호가 맞아야 한다 (기기를 빌린 사람이 바꿔 버리지 못하게).
+
+    토큰 세대(`users.token_version`)를 올려 다른 기기의 로그인을 모두 끊고, 지금 기기가 계속 쓸 새 토큰 쌍을 돌려준다.
+    """
     if user.password_hash is None:
         raise errors.ValidationError("이메일 비밀번호가 없는 계정이에요. 로그인 화면의 '비밀번호 찾기'로 먼저 만들어 주세요.")
     if not verify_password(current, user.password_hash):
         raise errors.InvalidCredentials("현재 비밀번호가 맞지 않아요.")
     user.password_hash = hash_password(new)
+    user.token_version = (user.token_version or 0) + 1
     db.commit()
+    return issue_tokens(user)
 
 
 def delete_account(db: Session, user: User) -> None:
     """계정 삭제 (soft delete + 개인정보 비식별화).
 
     행은 남긴다 — 경기 기록·배정·투표가 players 를 참조하기 때문. 대신 이메일·비밀번호·이름·사진·키·로그인 수단을
-    지우고 이름을 '탈퇴한 회원' 으로 바꾼다. 소속 팀에서는 LEFT 처리. 팀에 다른 활성 회원이 있는데 본인이 유일한
-    매니저면 먼저 권한을 넘기라고 거부한다 (매니저 없는 팀이 생기지 않게).
+    지우고 이름을 '탈퇴한 회원' 으로 바꾼다. 이름 · 키는 이 사람의 모든 players 행(이미 나갔거나 제외된 팀 포함)과
+    그 행으로 병합된 게스트 행에서도 지운다 (0026 이 예전 탈퇴자에게도 소급했다). 소속 팀에서는 LEFT 처리.
+    팀에 다른 활성 회원이 있는데 본인이 유일한 매니저면 먼저 권한을 넘기라고 거부한다 (매니저 없는 팀이 생기지 않게).
     이메일이 비워지므로 같은 이메일로 다시 가입할 수 있다.
     """
     from app.services import team_service
@@ -222,7 +263,6 @@ def delete_account(db: Session, user: User) -> None:
     now = datetime.now(UTC)
     for p in players:
         p.status = PlayerStatus.LEFT
-        p.display_name = "탈퇴한 회원"
         team = p.team
         if team.owner_user_id == user.id:
             heir = db.scalar(
@@ -232,10 +272,15 @@ def delete_account(db: Session, user: User) -> None:
                 team.owner_user_id = heir.user_id
         db.flush()
         team_service.refresh_team_status(db, team)
+    # 비식별화는 상태와 상관없이 모든 행 + 병합된 게스트 행 (위 루프는 활성 소속만 LEFT 로 바꾼다)
+    all_ids = select(Player.id).where(Player.user_id == user.id)
+    for p in db.scalars(select(Player).where(or_(Player.user_id == user.id, Player.merged_into_player_id.in_(all_ids)))).all():
+        p.display_name = ANON_NAME
+        p.height_cm = None
     user.deleted_at = now
     user.email = None
     user.password_hash = None
-    user.name = "탈퇴한 회원"
+    user.name = ANON_NAME
     user.nickname = None
     user.profile_image_url = None
     user.height_cm = None
@@ -253,32 +298,34 @@ def delete_account(db: Session, user: User) -> None:
 # ---------------------------------------------------------------------------
 
 
-def forgot_password(db: Session, email: str) -> None:
-    """계정이 있으면 30분짜리 토큰(해시만 저장)을 만들고 링크를 메일로 보낸다. 없으면 아무것도 하지 않는다.
+def forgot_password(db: Session, email: str) -> tuple[str, str] | None:
+    """계정이 있으면 30분짜리 토큰(해시만 저장)을 만들고 (받는 주소, 링크)를 돌려준다. 없으면 None.
 
-    응답은 호출부가 항상 202 로 고정한다 (계정 존재 여부를 노출하지 않기 위해). 카카오로만 가입해 비밀번호가 없는
-    계정도 이 경로로 비밀번호를 만들 수 있다 (reset 이 LOCAL 로그인 수단을 함께 붙인다).
+    메일은 호출부(라우터)가 응답을 보낸 뒤 BackgroundTasks 로 보낸다 — 메일 발송 시간이 응답 시간에 섞이면 계정
+    존재 여부가 드러난다. 응답은 호출부가 항상 202 로 고정한다. 카카오로만 가입해 비밀번호가 없는 계정도 이 경로로
+    비밀번호를 만들 수 있다 (reset 이 LOCAL 로그인 수단을 함께 붙인다).
     """
     from datetime import timedelta
 
     from app.core.config import get_settings
     from app.core.security import generate_reset_token
     from app.models import PasswordResetToken
-    from app.services import mail_service
 
     user = db.scalar(select(User).where(User.email == normalize_email(email), User.deleted_at.is_(None)))
     if user is None:
-        return
+        return None
     raw, digest = generate_reset_token()
     s = get_settings()
     db.add(PasswordResetToken(user_id=user.id, token_hash=digest, expires_at=datetime.now(UTC) + timedelta(minutes=s.password_reset_minutes)))
     db.commit()
     link = f"{s.frontend_base_url.rstrip('/')}/password/reset?token={raw}"
-    mail_service.send_password_reset(user.email, link)
+    return user.email, link
 
 
 def reset_password(db: Session, raw_token: str, new_password: str) -> None:
-    """토큰 검증(해시 조회 · 만료 · 1회 사용) 후 비밀번호 교체. 이메일 로그인 수단이 없던 계정에는 LOCAL 을 붙인다."""
+    """토큰 검증(해시 조회 · 만료 · 1회 사용) 후 비밀번호 교체. 이메일 로그인 수단이 없던 계정에는 LOCAL 을 붙인다.
+
+    토큰 세대를 올려 모든 기기의 로그인을 끊는다 (비밀번호를 잊어 재설정하는 상황은 계정 탈취 대응이기도 하다)."""
     import hashlib
 
     from app.models import PasswordResetToken
@@ -292,6 +339,7 @@ def reset_password(db: Session, raw_token: str, new_password: str) -> None:
     if user is None or user.deleted_at is not None or not user.email:
         raise errors.TokenInvalidOrExpired()
     user.password_hash = hash_password(new_password)
+    user.token_version = (user.token_version or 0) + 1
     if not any(i.provider == AuthProvider.LOCAL for i in user.identities):
         user.identities.append(AuthIdentity(provider=AuthProvider.LOCAL, provider_uid=user.email, linked_at=now))
     row.used_at = now

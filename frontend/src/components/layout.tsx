@@ -28,11 +28,14 @@ export function TopBar({
   back,
   right,
   tone = 'light',
+  beforeBack,
 }: {
   title: ReactNode
   back?: boolean | string
   right?: ReactNode
   tone?: 'light' | 'navy'
+  /** 뒤로 가기 전에 물어볼 것이 있으면(저장 안 한 입력 등) — false 를 돌려주면 머문다 */
+  beforeBack?: () => boolean | Promise<boolean>
 }) {
   const nav = useNavigate()
   const goBack = useGoBack()
@@ -45,8 +48,12 @@ export function TopBar({
     >
       {back ? (
         <button
-          onClick={() => (typeof back === 'string' ? goBack(back) : nav(-1))}
-          className="flex size-10 items-center justify-center rounded-full text-xl active:bg-black/10"
+          onClick={async () => {
+            if (beforeBack && !(await beforeBack())) return
+            if (typeof back === 'string') goBack(back)
+            else nav(-1)
+          }}
+          className="-ml-0.5 flex size-11 shrink-0 items-center justify-center rounded-full text-xl active:bg-black/10"
           aria-label="뒤로"
         >
           ‹

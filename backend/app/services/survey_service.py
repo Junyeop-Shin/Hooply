@@ -21,6 +21,7 @@ from decimal import Decimal
 from statistics import mean, pstdev
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core import errors
@@ -163,6 +164,11 @@ def submit(db: Session, user: User, body: SurveyResponseIn) -> SurveyResponse:
             SurveyAnswer(question_id=qid, selected_option_ids=list(a.selected_option_ids), numeric_value=a.numeric_value)
         )
     db.add(resp)
+    try:
+        db.flush()
+    except IntegrityError:  # 두 번 눌러 동시에 제출 — uq_survey_responses_user 가 하나만 남긴다
+        db.rollback()
+        raise errors.AlreadySubmitted("이미 설문을 제출했어요. 수정은 매니저·관리자 보정으로만 가능해요.") from None
     user.onboarding_completed = True
 
     feats = extract_features(tpl, resp, height_cm=user.height_cm)
@@ -351,7 +357,7 @@ def apply_positions(db: Session, player: Player, f: SurveyFeatures) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _members_with_features(db: Session, team_id: int, player_ids: list[int] | None = None) -> list[tuple[Player, SurveyFeatures]]:
+def members_with_features(db: Session, team_id: int, player_ids: list[int] | None = None) -> list[tuple[Player, SurveyFeatures]]:
     """팀 활성 회원의 설문 특성. `player_ids` 를 주면 그 사람들만 (전술 · AI 는 그날 배정 명단만 쓴다)."""
     tpl_cache: dict[int, SurveyTemplate] = {}
     q = (
@@ -383,7 +389,7 @@ def _members_with_features(db: Session, team_id: int, player_ids: list[int] | No
 
 
 def survey_sample_size(db: Session, team_id: int) -> int:
-    """팀에서 설문에 응답한 활성 회원 수. `_members_with_features` 와 같은 조건이지만 응답 본문은 읽지 않는다
+    """팀에서 설문에 응답한 활성 회원 수. `members_with_features` 와 같은 조건이지만 응답 본문은 읽지 않는다
     (내 프로필 화면이 팀마다 부르므로 COUNT 한 번이어야 한다)."""
     return db.scalar(
         select(func.count()).select_from(Player)
@@ -398,7 +404,7 @@ def _active_ranking_z(db: Session, team_id: int) -> dict[int, float]:
 
     ranking = db.scalar(
         select(ManagerRanking).where(ManagerRanking.team_id == team_id, ManagerRanking.is_active.is_(True))
-        .options(selectinload(ManagerRanking.entries)).order_by(ManagerRanking.created_at.desc())
+        .options(selectinload(ManagerRanking.entries)).order_by(ManagerRanking.created_at.desc(), ManagerRanking.id.desc()).limit(1)
     )
     if ranking is None or len(ranking.entries) < 2:
         return {}
@@ -415,11 +421,12 @@ def recompute_team_priors(db: Session, team_id: int) -> int:
     prior_z = 0.5 × 설문 z + 0.5 × 매니저 정렬 z (8.5절). 한쪽만 있으면 그쪽만 쓴다.
     - 설문 z: 응답자가 MIN_SAMPLE_FOR_Z 미만이면 0 (스펙 5절 — 클럽 평균).
     - 정렬 z: 활성 ManagerRanking 의 순위를 표준화. 정렬에 포함된 게스트도 값을 받는다.
-    - skill_overall 은 경기 기록이 없는 동안(quarters_played == 0) prior 를 그대로 따라간다.
+    - skill_overall 은 경기 기록이 없는 동안(quarters_played == 0) prior (+ 관리자 보정 admin_adjust) 를 따라간다.
+    - admin_adjust 는 읽기만 한다 — 관리자 보정이 설문 · 정렬 재계산에 지워지지 않게.
     - 값이 바뀐 사람만 skill_rating_history 를 남긴다.
     부수 효과: flush 까지. commit 은 호출자 책임.
     """
-    rows = _members_with_features(db, team_id)
+    rows = members_with_features(db, team_id)
     n = len(rows)
     survey_z: dict[int, float] = {}
     if n >= MIN_SAMPLE_FOR_Z:
@@ -469,7 +476,7 @@ def recompute_team_priors(db: Session, team_id: int) -> int:
             prof.skill_rebound_post = Decimal(str(round(f.axes["rebound_post"], 1)))
             prof.skill_stamina = Decimal(str(round(f.axes["stamina"], 1)))
         if prof.quarters_played == 0:
-            prof.skill_overall = after
+            prof.skill_overall = after + (prof.admin_adjust or Decimal(0))  # 관리자 보정은 사전값과 따로 둔다 (admin_adjust 는 건드리지 않는다)
         floor = SURVEY_CONFIDENCE if sz is not None else Decimal("0.30")
         prof.skill_confidence = max(prof.skill_confidence, floor)
         if before != after:

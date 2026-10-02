@@ -5,12 +5,15 @@
 ## 1. 공통 규약
 
 - Base URL: `https://hooply-backend.onrender.com/api/v1` (로컬 `http://localhost:8000/api/v1`)
-- 인증: `Authorization: Bearer <access_token>` (JWT, access 30분 / refresh 14일). 가입·로그인·토큰 갱신·로그아웃·비밀번호 찾기/재설정·카카오 로그인 URL/콜백·설문 템플릿 조회·프로필 사진 이미지(`?v=키`)·헬스 체크만 인증 없이 호출.
+- 인증: `Authorization: Bearer <access_token>` (JWT, access 30분 / refresh 14일). 토큰에는 계정의 토큰 세대(`users.token_version`)가 실려 있어, 비밀번호를 바꾸거나 재설정하면 그 전에 발급된 토큰은 모든 기기에서 401 이 된다. 가입·로그인·토큰 갱신·로그아웃·비밀번호 찾기/재설정·카카오 로그인 URL/콜백·설문 템플릿 조회·프로필 사진 이미지(`?v=키`)·헬스 체크만 인증 없이 호출.
 - 본문: `application/json`, 필드명 `snake_case`, 시각은 ISO 8601(TIMESTAMPTZ).
 - 목록: `{ items: [...] }` (ItemList) 또는 `{ items, meta: { page, size, total, has_next } }` (Page).
 - 오류: 모든 4xx/5xx 본문은 `ErrorResponse { code, message, details[]{field, reason} }`. 프론트는 `code` 로 분기하고 `message` 를 그대로 노출한다.
 - 액션형 경로는 `:동사` 접미사를 쓴다 (`/teams/{id}/code:regenerate`, `/assignments/candidates/{id}:adopt`, `/events/{id}/rsvp:close`).
-- 관리자 콘솔(SQLAdmin)은 API 가 아닌 서버 페이지 `/admin` 이다.
+- 요청 제한(429)의 IP 는 `CF-Connecting-IP` → `True-Client-IP` → 접속 주소 순으로 정한다. 클라이언트가 꾸밀 수 있는 `X-Forwarded-For` 는 믿지 않는다.
+- CORS 는 쿠키를 싣지 않는다(`allow_credentials=False`) — 인증은 Bearer 헤더뿐이다.
+- 목록 · 문자열 필드에는 길이 상한이 있다 (배정 전략 1~3개, 묶기 · 갈라놓기 그룹 30개 · 그룹당 30명, 사전 배치 60명, 정렬 100명, 일정 메모 1000자 등). 넘으면 `400 VALIDATION_ERROR`.
+- 관리자 콘솔(SQLAdmin)은 API 가 아닌 서버 페이지 `/admin` 이다. 로그인은 API 로그인과 같은 요청 제한을 받고, 참가자 · 일정 · 참석 · 쿼터는 읽기 전용이다(지표 재계산 같은 서비스 규칙을 건너뛰지 않게). 사용자 수정은 `audit_logs` 에 남는다.
 
 ## 2. HTTP 상태와 에러 코드
 
@@ -18,11 +21,11 @@
 | --- | --- | --- |
 | 400 | VALIDATION_ERROR, INVALID_LINEUP_SIZE, SELF_VOTE_NOT_ALLOWED, TOKEN_INVALID_OR_EXPIRED | 형식·범위 위반 |
 | 401 | INVALID_CREDENTIALS, TOKEN_EXPIRED, KAKAO_AUTH_FAILED | 인증 실패 |
-| 403 | FORBIDDEN_ROLE, NOT_A_MEMBER, NOT_ATTENDEE, SURVEY_NOT_OPEN, FORBIDDEN_NOT_OWNER | 권한 부족·아직 열리지 않음 |
+| 403 | FORBIDDEN_ROLE, NOT_A_MEMBER, NOT_ATTENDEE, SURVEY_NOT_OPEN, FORBIDDEN_NOT_OWNER, REMOVED_FROM_TEAM | 권한 부족·아직 열리지 않음·매니저가 제외한 팀에 코드로 재가입 |
 | 404 | NOT_FOUND, TEAM_CODE_NOT_FOUND, NOT_ADOPTED_YET, NO_RANKING | 리소스 없음 |
-| 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED | 상태 충돌 |
-| 422 | TEAM_NOT_ACTIVE, NOT_ENOUGH_PLAYERS, RSVP_CLOSED, INVALID_SWAP, CANNOT_DEMOTE_LAST_MANAGER, PLAYER_NOT_IN_TEAM, PLAYER_NOT_IN_SQUAD, PLAY_NOT_PLAYABLE, MERGE_KIND_MISMATCH, LOCK_GROUP_TOO_LARGE, CONSTRAINT_CONFLICT, SEPARATE_INFEASIBLE, LOCK_PARTITION_INFEASIBLE, SQUAD_OVERFLOW | 도메인 규칙 위반 (배정 제약 오류는 details 에 문제 인원 포함) |
-| 429 | RATE_LIMITED | 요청이 너무 많음 — 로그인 · 가입 · 비밀번호 찾기(IP · 이메일), AI 호출 · 전술 댓글(사용자당 분당 10회) |
+| 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED, CONFLICT | 상태 충돌. `CONFLICT` 는 동시에 들어온 요청이 같은 행을 먼저 만들거나 바꾼 경우(DB 유니크 · 외래키 위반, 교착) — "동시에 처리된 요청이 있어요. 다시 시도해 주세요." (DB CHECK 위반은 400 VALIDATION_ERROR) |
+| 422 | TEAM_NOT_ACTIVE, NOT_ENOUGH_PLAYERS, RSVP_CLOSED, INVALID_SWAP, CANNOT_DEMOTE_LAST_MANAGER, PLAYER_NOT_IN_TEAM, PLAYER_NOT_IN_SQUAD, PLAY_NOT_PLAYABLE, MERGE_KIND_MISMATCH, LOCK_GROUP_TOO_LARGE, CONSTRAINT_CONFLICT, SEPARATE_INFEASIBLE, LOCK_PARTITION_INFEASIBLE, SQUAD_OVERFLOW, ASSIGNMENT_LOCKED | 도메인 규칙 위반 (배정 제약 오류는 details 에 문제 인원 포함). `ASSIGNMENT_LOCKED` 는 쿼터 기록이 있는 일정에서 배정 실행 · 수정 · 초기화 · 확정 |
+| 429 | RATE_LIMITED | 요청이 너무 많음 — 로그인 · 가입 · 비밀번호 찾기 · 재설정(IP, 로그인 · 가입 · 비밀번호 찾기는 이메일로도), AI 호출 · 전술 댓글(사용자당 분당 10회) |
 | 500 | INTERNAL_ERROR | 서버 오류 |
 
 ## 3. 공통 스키마 (`components/schemas`, `$ref` 재사용)
@@ -63,11 +66,11 @@
 | POST | `/auth/kakao/link` | 기존 계정에 카카오 연결 | 200 · 401 · 409 |
 | POST | `/auth/refresh` | 토큰 갱신 | 200 · 401 |
 | POST | `/auth/logout` | refresh 토큰 폐기 (토큰이 무효해도 204) | 204 |
-| POST | `/auth/password/forgot` | 비밀번호 재설정 요청 | 202 |
-| POST | `/auth/password/reset` | 비밀번호 재설정 | 200 · 400 |
+| POST | `/auth/password/forgot` | 비밀번호 재설정 요청 (메일은 응답 뒤 백그라운드로) | 202 |
+| POST | `/auth/password/reset` | 비밀번호 재설정 (모든 기기의 로그인을 끊는다) | 200 · 400 |
 | GET | `/me` | 내 정보 조회 | 200 |
 | PATCH | `/me` | 내 프로필 수정 | 200 |
-| POST | `/me/password` | 비밀번호 변경 (현재 비밀번호 확인) | 204 · 401 |
+| POST | `/me/password` | 비밀번호 변경 (현재 비밀번호 확인) — 새 `TokenPair` 를 돌려주고 다른 기기의 토큰은 무효 | 200 · 400 · 401 |
 | DELETE | `/me` | 계정 삭제 (비식별화, 팀 LEFT, 유일한 매니저면 422) | 204 · 422 |
 | POST | `/me/avatar` | 프로필 사진 등록 · 교체 | 200 · 400 |
 | DELETE | `/me/avatar` | 프로필 사진 삭제 | 200 |
@@ -89,13 +92,13 @@
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
 | POST | `/teams` | 팀 생성 | 201 |
-| POST | `/teams/join` | 팀 코드로 가입 | 200 · 404 · 409 |
+| POST | `/teams/join` | 팀 코드로 가입 — 스스로 나간 팀은 다시 들어올 수 있고, 매니저가 제외한 팀이면 403 `REMOVED_FROM_TEAM` | 200 · 403 · 404 · 409 |
 | GET | `/teams/{team_id}` | 팀 상세 조회 | 200 · 403 |
 | PATCH | `/teams/{team_id}` | 팀 정보 수정 | 200 · 403 |
 | POST | `/teams/{team_id}/code:regenerate` | 팀 코드 재발급 | 200 · 403 |
 | GET | `/teams/{team_id}/players` | 팀원 목록 조회 | 200 |
 | PATCH | `/teams/{team_id}/players/{player_id}/role` | 매니저 권한 부여/회수 | 200 · 403 |
-| DELETE | `/teams/{team_id}/players/{player_id}` | 팀원 제외 | 204 · 403 |
+| DELETE | `/teams/{team_id}/players/{player_id}` | 팀원 제외 — 매니저는 팀장(또는 ADMIN)만 제외, 팀장은 누구도 제외할 수 없음(`FORBIDDEN_NOT_OWNER`), 마지막 매니저면 422 | 204 · 403 · 422 |
 | POST | `/teams/{team_id}:leave` | 팀 나가기 (유일한 매니저면 422) | 204 · 422 |
 
 ### 게스트 관리
@@ -142,14 +145,14 @@
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
 | GET | `/events/{event_id}/assignment/suggestions` | 게스트 묶기 제안 목록 | 200 · 403 |
-| POST | `/events/{event_id}/assignments` | 팀 배정 실행 — `team_count` 2(완전 탐색) · 3(지역 탐색, 15명 이상) | 201 |
+| POST | `/events/{event_id}/assignments` | 팀 배정 실행 — `team_count` 2(완전 탐색) · 3(지역 탐색, 15명 이상). 쿼터 기록이 있으면 `ASSIGNMENT_LOCKED` | 201 · 422 |
 | GET | `/events/{event_id}/assignments` | 배정 실행 이력 | 200 |
 | POST | `/events/{event_id}/assignments:validate` | 배정 제약 실현가능성 검사 | 200 |
 | GET | `/events/{event_id}/assignments/last-constraints` | 직전 회차 제약 불러오기 | 200 · 404 |
 | GET | `/assignments/runs/{run_id}` | 배정 실행 결과 조회 | 200 |
-| PATCH | `/assignments/candidates/{candidate_id}` | 후보안 선수 교체 — 3팀 일방 이동은 `exchanges[].to_squad_no` 또는 `moves[].to_squad_no` | 200 · 409 · 422 |
-| POST | `/assignments/candidates/{candidate_id}:reset` | 수동 수정 초기화 | 200 · 409 |
-| POST | `/assignments/candidates/{candidate_id}:adopt` | 후보안 확정 | 200 · 409 |
+| PATCH | `/assignments/candidates/{candidate_id}` | 후보안 선수 교체 — 3팀 일방 이동은 `exchanges[].to_squad_no` 또는 `moves[].to_squad_no`. swaps → moves → exchanges 를 한 번에 저장(하나라도 422 면 아무것도 안 바뀜) | 200 · 409 · 422 |
+| POST | `/assignments/candidates/{candidate_id}:reset` | 수동 수정 초기화 | 200 · 409 · 422 |
+| POST | `/assignments/candidates/{candidate_id}:adopt` | 후보안 확정 (같은 일정의 실행 · 확정은 일정 행을 잠가 차례로) | 200 · 409 · 422 |
 | GET | `/events/{event_id}/assignment/adopted` | 확정된 배정 결과 | 200 · 404 |
 | POST | `/assignments/candidates/{candidate_id}/ai-explanation` | AI 배정 설명 — LangChain 체인 A (매니저, 같은 배정이면 저장한 결과) | 200 · 403 · 404 · 429 |
 | GET | `/events/{event_id}/assignment/adopted/ai-message` | AI 한마디 — 체인 B (팀원, 내 것만, 팀마다 한 번 호출) | 200 · 403 · 404 · 429 |
@@ -159,7 +162,7 @@
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
 | POST | `/events/{event_id}/quarters` | 쿼터 1건 추가 | 201 · 400 · 409 |
-| PUT | `/events/{event_id}/quarters` | 쿼터 일괄 저장 — 쿼터마다 `home_squad_no` · `away_squad_no`(3팀 대진, 기본 1 · 2) | 200 · 400 |
+| PUT | `/events/{event_id}/quarters` | 쿼터 일괄 저장 — 쿼터마다 `home_squad_no` · `away_squad_no`(3팀 대진, 기본 1 · 2), 득점은 팀당 0~99 | 200 · 400 |
 | GET | `/events/{event_id}/quarters` | 쿼터 기록 조회 — 요약에 `team_count` · 팀별 `squads[]{quarters, points_for, points_against, wins, losses}` | 200 |
 | PATCH | `/quarters/{quarter_id}` | 쿼터 수정 | 200 · 400 · 403 |
 | DELETE | `/quarters/{quarter_id}` | 쿼터 삭제 (마진 롤백) | 204 · 403 |
@@ -210,7 +213,7 @@
 | --- | --- | --- | --- |
 | GET | `/admin/users` | 전체 사용자 검색 | 200 |
 | GET | `/admin/players/{player_id}/raw` | 선수 원시 데이터 열람 | 200 · 403 |
-| PATCH | `/admin/players/{player_id}/rating` | 실력 지표 수동 보정 | 200 · 403 |
+| PATCH | `/admin/players/{player_id}/rating` | 실력 지표 수동 보정 — 재계산 출발점에 더하는 오프셋 `admin_adjust`(±50)로 저장해 설문 · 정렬 · 쿼터 재계산 뒤에도 남는다 | 200 · 400 · 403 |
 | GET | `/admin/audit-logs` | 감사 로그 조회 | 200 |
 | GET | `/admin/teams` | 팀 목록 (승인 대기 우선) | 200 |
 | POST | `/admin/teams/{team_id}:approve` | 팀 승인 | 200 |

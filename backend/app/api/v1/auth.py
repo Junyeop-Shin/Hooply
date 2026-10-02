@@ -21,7 +21,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser
@@ -65,9 +65,11 @@ def signup(db: DB, body: SignupRequest):
       저장한다. 동시에 `auth_identities`에 `LOCAL` 로그인 수단을 연결하고
       access/refresh 토큰 쌍을 돌려준다. 온보딩 설문은 아직 미완료 상태다.
     - **오류:** `409 EMAIL_DUPLICATED` — 이미 가입된 이메일. `400 VALIDATION_ERROR` — 형식 위반.
+      `429 RATE_LIMITED` — 같은 IP 또는 같은 이메일로 분당 5회 초과.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증, FR-01 · FR-02, 11.5절 (bcrypt 해시).
     """
+    ratelimit.SIGNUP.by_email(body.email)
     return auth_service.signup(db, body)
 
 
@@ -76,7 +78,6 @@ def signup(db: DB, body: SignupRequest):
     responses=errors(_401="INVALID_CREDENTIALS"), summary="이메일 로그인",
 )
 def login(db: DB, body: LoginRequest):
-    ratelimit.LOGIN.by_email(body.email)
     """이메일/비밀번호를 검증하고 토큰 쌍을 발급한다.
 
     - **권한:** 비회원 (인증 불필요).
@@ -84,10 +85,12 @@ def login(db: DB, body: LoginRequest):
       저장된 해시와 비교한다. 소셜 전용 계정(`password_hash` 없음)은 이 경로로 로그인할 수 없다.
       성공하면 access 30분 / refresh 14일 JWT를 발급한다.
     - **오류:** `401 INVALID_CREDENTIALS` — 이메일 또는 비밀번호 불일치 (어느 쪽이 틀렸는지
-      구분하지 않는다).
+      구분하지 않는다. 없는 계정도 같은 시간이 걸리도록 가짜 해시로 검증한다).
+      `429 RATE_LIMITED` — 같은 IP 또는 같은 이메일로 분당 10회 초과.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증, FR-01, 11.5절.
     """
+    ratelimit.LOGIN.by_email(body.email)
     return auth_service.login(db, body)
 
 
@@ -161,9 +164,10 @@ def refresh(db: DB, body: RefreshRequest):
     """refresh 토큰으로 새 access/refresh 토큰 쌍을 발급한다.
 
     - **권한:** 비회원 (본문의 refresh 토큰으로 인증).
-    - **처리:** 토큰의 `type`이 `refresh`인지와 서명·만료를 검증하고, 계정이 삭제되지 않았으면
-      새 토큰 쌍을 발급한다. 이전 refresh 토큰은 별도로 무효화하지 않는다 (만료까지 유효).
-    - **오류:** `401 TOKEN_EXPIRED` — 토큰 만료·위조·타입 불일치, 또는 삭제된 계정.
+    - **처리:** 토큰의 `type`이 `refresh`인지와 서명·만료·세대(`ver`)를 검증하고, 계정이 삭제되지 않았으면
+      새 토큰 쌍을 발급한다(회전). 보낸 refresh 토큰은 폐기 목록(`revoked_tokens`)에 들어가 다시 쓸 수 없다 —
+      같은 토큰으로 동시에 두 번 갱신하면 하나만 성공하고 나머지는 401.
+    - **오류:** `401 TOKEN_EXPIRED` — 토큰 만료·위조·타입 불일치·이미 사용·비밀번호 변경 전 발급, 또는 삭제된 계정.
     - **상태:** `구현됨`.
     - **설계서:** 7.1절 공통 규약 (access 30분 / refresh 14일), 7.3절 인증.
     """
@@ -185,18 +189,24 @@ def logout(db: DB, body: LogoutRequest):
     "/auth/password/forgot", dependencies=[Depends(ratelimit.PASSWORD)], status_code=status.HTTP_202_ACCEPTED,
     summary="비밀번호 재설정 요청",
 )
-def forgot_password(db: DB, body: ForgotPasswordRequest):
+def forgot_password(db: DB, body: ForgotPasswordRequest, background: BackgroundTasks):
     """비밀번호 재설정 메일 발송을 요청한다. 가입 여부와 무관하게 항상 202를 돌려준다.
 
     - **권한:** 비회원 (인증 불필요).
     - **처리:** 계정이 있으면 `password_reset_tokens` 에 토큰의 SHA-256 해시만 저장(30분 만료·1회 사용)하고
       원문 토큰을 담은 링크(`FRONTEND_BASE_URL/password/reset?token=…`)를 메일로 보낸다(Resend, 키가 없으면 서버 로그).
       계정이 없으면 아무것도 하지 않는다. 응답이 계정 존재 여부에 따라 달라지면 계정 탐색 통로가 되므로 항상 202.
-    - **오류:** `400 VALIDATION_ERROR` — 이메일 형식 위반.
+      메일은 응답을 보낸 뒤 백그라운드로 보낸다 (발송 시간으로 계정 존재 여부가 드러나지 않게).
+    - **오류:** `400 VALIDATION_ERROR` — 이메일 형식 위반. `429 RATE_LIMITED` — 같은 IP 또는 같은 이메일로 분당 5회 초과.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증 (항상 202), 7.4절 설계 원칙, 6.2절 `password_reset_tokens`, 11.5절.
     """
-    auth_service.forgot_password(db, body.email)
+    ratelimit.PASSWORD.by_email(body.email)
+    found = auth_service.forgot_password(db, body.email)
+    if found is not None:
+        from app.services import mail_service
+
+        background.add_task(mail_service.send_password_reset, *found)
     return {"accepted": True}
 
 
@@ -211,7 +221,7 @@ def reset_password(db: DB, body: ResetPasswordRequest):
     - **권한:** 비회원 (본문의 재설정 토큰으로 인증).
     - **처리:** 토큰을 SHA-256 해시해 `password_reset_tokens` 에서 찾고, 만료 전이며 `used_at` 이 비어 있으면
       `users.password_hash` 를 새 bcrypt 해시로 교체하고 토큰을 사용 처리한다. 카카오 전용 계정이면 이메일 로그인
-      수단(LOCAL)을 함께 추가한다.
+      수단(LOCAL)을 함께 추가한다. 토큰 세대를 올려 모든 기기의 로그인을 끊는다.
     - **오류:** `400 TOKEN_INVALID_OR_EXPIRED` — 토큰 없음·만료·이미 사용됨.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증, FR-02, 6.2절 `password_reset_tokens`, 11.5절.
@@ -243,7 +253,8 @@ def update_me(db: DB, user: CurrentUser, body: UserUpdate):
     - **처리:** 본문에 포함된 필드만(`exclude_unset`) `users` 행에 덮어쓰고 커밋한다.
       이메일·비밀번호·권한은 이 경로로 바꿀 수 없다. 팀별 `players.display_name`은 갱신하지
       않는다 (가입 시점의 닉네임이 유지됨).
-    - **오류:** `400 VALIDATION_ERROR` — 범위 위반 (출생년도 1940~, 키 120~250cm 등).
+    - **오류:** `400 VALIDATION_ERROR` — 범위 위반 (키 120~250cm 등), 카카오 CDN · 이 서비스의 사진 주소가 아닌
+      `profile_image_url`.
       `401 TOKEN_EXPIRED`.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 (`PATCH /me`), 6.2절 `users`, S-17 내 프로필.
@@ -264,15 +275,18 @@ def update_me(db: DB, user: CurrentUser, body: UserUpdate):
     return user
 
 
-@router.post("/me/password", status_code=204, responses=errors(_401="INVALID_CREDENTIALS", _400="VALIDATION_ERROR"), summary="비밀번호 변경")
+@router.post(
+    "/me/password", response_model=TokenPair, responses=errors(_401="INVALID_CREDENTIALS", _400="VALIDATION_ERROR"), summary="비밀번호 변경",
+)
 def change_password(db: DB, user: CurrentUser, body: ChangePasswordRequest):
     """로그인 상태에서 현재 비밀번호를 확인하고 새 비밀번호로 바꾼다.
 
+    - **처리:** 비밀번호를 바꾸고 토큰 세대(`users.token_version`)를 올린다 — 다른 기기의 access · refresh 토큰은
+      모두 401 이 된다. 이 기기는 응답의 새 토큰 쌍(로그인 응답과 같은 형태)으로 바꿔 끼우면 계속 로그인 상태다.
     - **오류:** `401 INVALID_CREDENTIALS` — 현재 비밀번호 불일치. `400 VALIDATION_ERROR` — 카카오 전용 계정(비밀번호 없음).
     - **상태:** `구현됨`.
     """
-    auth_service.change_password(db, user, body.current_password.get_secret_value(), body.new_password.get_secret_value())
-    return Response(status_code=204)
+    return auth_service.change_password(db, user, body.current_password.get_secret_value(), body.new_password.get_secret_value())
 
 
 @router.delete("/me", status_code=204, responses=errors(_422="CANNOT_DEMOTE_LAST_MANAGER"), summary="계정 삭제")

@@ -60,9 +60,17 @@ def test_change_password(client, signup):
     r = client.post(f"{API}/me/password", json={"current_password": "nope-nope", "new_password": "newpassword1"}, headers=h)
     assert r.status_code == 401 and r.json()["code"] == "INVALID_CREDENTIALS"
     assert client.post(f"{API}/me/password", json={"current_password": "password123", "new_password": "short"}, headers=h).status_code == 400
-    assert client.post(f"{API}/me/password", json={"current_password": "password123", "new_password": "newpassword1"}, headers=h).status_code == 204
+    other_device = _login(client, "p@example.com").json()  # 다른 기기의 로그인
+    r = client.post(f"{API}/me/password", json={"current_password": "password123", "new_password": "newpassword1"}, headers=h)
+    assert r.status_code == 200 and {"access_token", "refresh_token", "token_type"} <= set(r.json())
     assert _login(client, "p@example.com", "password123").status_code == 401
     assert _login(client, "p@example.com", "newpassword1").status_code == 200
+    # 바꾼 기기는 응답의 새 토큰으로 계속 쓰고, 예전 토큰(이 기기의 옛 access · 다른 기기의 access/refresh)은 모두 막힌다
+    assert client.get(f"{API}/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"}).status_code == 200
+    assert client.post(f"{API}/auth/refresh", json={"refresh_token": r.json()["refresh_token"]}).status_code == 200
+    assert client.get(f"{API}/me", headers=h).status_code == 401
+    assert client.get(f"{API}/me", headers={"Authorization": f"Bearer {other_device['access_token']}"}).status_code == 401
+    assert client.post(f"{API}/auth/refresh", json={"refresh_token": other_device["refresh_token"]}).status_code == 401
 
 
 # 검증: 계정 삭제 — 로그인·토큰이 막히고, 개인정보가 지워지고, 팀에서 나가며, 같은 이메일로 다시 가입할 수 있다

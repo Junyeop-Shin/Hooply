@@ -31,9 +31,9 @@ from app.services import tactic_service
 from app.services.ai_insight import ROLE_KO, Insight, analyze
 from app.services.assignment_service import (
     STRATEGY_LABEL,
-    _players_of,
     adopted_candidate,
     constraints_of,
+    players_of,
 )
 
 
@@ -70,7 +70,7 @@ def _player_view(ins: Insight, al: llm_guard.Aliases, pid: int) -> dict[str, Any
 def explain_candidate(db: Session, cand: AssignmentCandidate, user: User) -> AiExplanation:
     roster = _roster(cand)
     ids = [pid for _, ms in roster for pid, _ in ms]
-    players = _players_of(db, ids)
+    players = players_of(db, ids)
     event = db.get(Event, cand.run.event_id)
     ins = analyze(db, event, cand, players)
     names = {sq.squad_no: sq.squad_name for sq in cand.squads}
@@ -143,7 +143,7 @@ def member_message(db: Session, event: Event, me: Player, user: User) -> AiMessa
         return AiMessage(in_assignment=False, fallback=True)
     no, members = mine
     all_ids = [pid for _, ms in roster for pid, _ in ms]
-    players = _players_of(db, all_ids)  # 역할 점수의 기준은 그날 참석자 전원
+    players = players_of(db, all_ids)  # 역할 점수의 기준은 그날 참석자 전원
     ins = analyze(db, event, cand, players)
     names = {sq.squad_no: sq.squad_name for sq in cand.squads}
     al = llm_guard.Aliases()
@@ -196,8 +196,8 @@ def _rule_sentence(lu, names: dict[int, str]) -> str:
 
 
 def explain_tactics(db: Session, event: Event, me: Player, user: User, *, squad_no: int, zone: bool) -> AiTactics:
-    ctx = tactic_service._context(db, event)
-    tactic_service._require_attendee(db, event, me, ctx)
+    ctx = tactic_service.context(db, event)
+    tactic_service.require_attendee(db, event, me, ctx)
     if ctx is None:
         raise errors.NotAdoptedYet()
     if squad_no not in ctx.by_squad:

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import String, delete, func, literal_column, or_, select, union_all
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core import errors
@@ -448,28 +449,31 @@ def register_guest(db: Session, event: Event, me: Player, by: User, body: EventG
 
 
 def _upsert_preset(db: Session, team_id: int, by: User, guest: Player, body: EventGuestCreate) -> None:
-    """(팀, 등록자, 이름) 단위로 초대 이력을 갱신한다. 다음 일정에서 '이전 초대 목록 불러오기' 에 쓰인다."""
-    name = guest.display_name
-    preset = db.scalar(
-        select(GuestInvitePreset).where(
-            GuestInvitePreset.team_id == team_id, GuestInvitePreset.created_by == by.id, GuestInvitePreset.display_name == name
-        )
-    )
+    """(팀, 등록자, 이름) 단위로 초대 이력을 갱신한다. 다음 일정에서 '이전 초대 목록 불러오기' 에 쓰인다.
+
+    `INSERT … ON CONFLICT DO UPDATE` 한 문장이라 같은 사람이 같은 이름을 동시에 두 번 초대해도 유니크 위반이 나지 않는다.
+    등급 · 키는 이번에 주지 않았으면 예전 값을 그대로 둔다.
+    """
     playable = [p.value for p in (body.playable_positions or [])] or [pp.position.value for pp in guest.positions if pp.can_play]
     preferred = body.preferred_position.value if body.preferred_position else next((pp.position.value for pp in guest.positions if pp.preference_rank == 1), None)
-    grade = body.skill_grade if body.skill_grade is not None else (preset.skill_grade if preset else None)
-    if preset is None:
-        preset = GuestInvitePreset(team_id=team_id, created_by=by.id, display_name=name, use_count=0, last_used_at=datetime.now(UTC))
-        db.add(preset)
-    preset.skill_grade = grade
-    preset.height_cm = body.height_cm if body.height_cm is not None else (guest.height_cm or preset.height_cm)
-    preset.preferred_position = preferred
-    preset.playable_positions = playable
-    preset.team_lock_request = body.team_lock_request
-    preset.last_player_id = guest.id
-    preset.use_count += 1
-    preset.last_used_at = datetime.now(UTC)
-    db.flush()
+    now = datetime.now(UTC)
+    stmt = pg_insert(GuestInvitePreset).values(
+        team_id=team_id, created_by=by.id, display_name=guest.display_name, skill_grade=body.skill_grade,
+        height_cm=body.height_cm if body.height_cm is not None else guest.height_cm,
+        preferred_position=preferred, playable_positions=playable, team_lock_request=body.team_lock_request,
+        last_player_id=guest.id, use_count=1, last_used_at=now,
+    )
+    ex = stmt.excluded
+    db.execute(stmt.on_conflict_do_update(
+        constraint="uq_guest_invite_presets_owner_name",
+        set_={
+            "skill_grade": func.coalesce(ex.skill_grade, GuestInvitePreset.skill_grade),
+            "height_cm": func.coalesce(ex.height_cm, GuestInvitePreset.height_cm),
+            "preferred_position": ex.preferred_position, "playable_positions": ex.playable_positions,
+            "team_lock_request": ex.team_lock_request, "last_player_id": ex.last_player_id,
+            "use_count": GuestInvitePreset.use_count + 1, "last_used_at": ex.last_used_at,
+        },
+    ))
 
 
 def my_presets(db: Session, team_id: int, by: User) -> list[GuestInvitePreset]:
@@ -492,7 +496,7 @@ def update_event_guest(db: Session, event: Event, me: Player, by: User, guest: P
     guest_service.update_guest(
         db, guest, by, display_name=body.display_name, skill_grade=body.skill_grade,
         preferred_position=body.preferred_position, playable_positions=body.playable_positions,
-        grade_given="skill_grade" in fields, height_cm=body.height_cm,
+        grade_given="skill_grade" in fields, height_cm=body.height_cm, height_given="height_cm" in fields,
     )
     if body.team_lock_request is not None:
         # 요청 대상은 "현재 수정하는 사람" 이 아니라 원래 등록자 — 매니저가 대신 켜 줄 때도 등록자 기준

@@ -62,7 +62,7 @@ def lock_suggestions(db: DB, me: EventManager, event: Annotated[Event, Depends(g
 
 _CONSTRAINT_ERRORS = (
     "LOCK_GROUP_TOO_LARGE", "CONSTRAINT_CONFLICT", "SEPARATE_INFEASIBLE",
-    "LOCK_PARTITION_INFEASIBLE", "SQUAD_OVERFLOW", "NOT_ENOUGH_PLAYERS",
+    "LOCK_PARTITION_INFEASIBLE", "SQUAD_OVERFLOW", "NOT_ENOUGH_PLAYERS", "ASSIGNMENT_LOCKED",
 )
 
 
@@ -81,7 +81,8 @@ def run_assignment(db: DB, me: EventManager, user: CurrentUser, event: Annotated
       같은 회차에서 다시 실행하면 새 run 이 쌓이고 이전 결과는 이력으로 남는다.
     - **오류:** `422 NOT_ENOUGH_PLAYERS / LOCK_GROUP_TOO_LARGE / CONSTRAINT_CONFLICT / SEPARATE_INFEASIBLE /
       LOCK_PARTITION_INFEASIBLE / SQUAD_OVERFLOW / PLAYER_NOT_IN_TEAM` — `details[]`에 문제 그룹·선수.
-      `400 VALIDATION_ERROR` — 4팀 이상, 취소된 일정.
+      `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정 (기록이 그날 편성을 근거로 하므로 먼저 지워야 한다).
+      `400 VALIDATION_ERROR` — 4팀 이상, 취소된 일정, 전략 4개 이상 · 제약 그룹 30개 초과 같은 요청 크기 위반.
     - **상태:** `구현됨`.
     - **설계서:** 9.5절 알고리즘, 9.6절 제약, 9.7절 완전 탐색, FR-16 ~ FR-21, FR-33, S-12.
     """
@@ -152,7 +153,7 @@ def get_run(db: DB, user: CurrentUser, run_id: int):
 
 @router.patch(
     "/assignments/candidates/{candidate_id}", response_model=CandidateView,
-    responses=errors(_409="ALREADY_ADOPTED", _422="INVALID_SWAP"), summary="후보안 선수 교체",
+    responses=errors(_409="ALREADY_ADOPTED", _422=("INVALID_SWAP", "ASSIGNMENT_LOCKED")), summary="후보안 선수 교체",
 )
 def swap_players(db: DB, user: CurrentUser, candidate_id: int, body: SwapRequest):
     """두 선수를 맞바꾸거나(`swaps`), 한 명을 옮기거나(`moves`), 그룹끼리 교환하고(`exchanges`) 지표·설명을 즉시 재계산한다 (F7).
@@ -162,37 +163,32 @@ def swap_players(db: DB, user: CurrentUser, candidate_id: int, body: SwapRequest
     - **권한:** 그 팀의 매니저 또는 ADMIN.
     - **처리:** 교체된 슬롯은 `is_manual_override=true`. 묶음(LOCK)·사전 배치(PIN)에 속한 사람은 개별로
       옮길 수 없다. 확정된 후보안은 수정할 수 없다 (재배정 실행).
-    - **오류:** `422 INVALID_SWAP`, `409 ALREADY_ADOPTED`, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+    - **오류:** `422 INVALID_SWAP`, `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정, `409 ALREADY_ADOPTED`, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.
     - **설계서:** FR-22, F7, S-13 드래그 swap.
     """
-    cand = assignment_service._load_candidate(db, candidate_id)
+    cand = assignment_service.load_candidate(db, candidate_id)
     event = db.get(Event, cand.run.event_id)
     if not guest_service.is_manager(db, user, event.team_id):
         raise E.ForbiddenRole()
-    if body.swaps:
-        cand = assignment_service.swap(db, cand, body.swaps)
-    if body.moves:
-        cand = assignment_service.move(db, cand, body.moves)
-    if body.exchanges:
-        cand = assignment_service.exchange(db, cand, body.exchanges)
+    cand = assignment_service.edit(db, cand, swaps=body.swaps or [], moves=body.moves or [], exchanges=body.exchanges or [])
     return assignment_service.candidate_view(db, cand)
 
 
 @router.post(
     "/assignments/candidates/{candidate_id}:reset", response_model=CandidateView,
-    responses=errors(_409="ALREADY_ADOPTED"), summary="수동 수정 초기화",
+    responses=errors(_409="ALREADY_ADOPTED", _422="ASSIGNMENT_LOCKED"), summary="수동 수정 초기화",
 )
 def reset_candidate(db: DB, user: CurrentUser, candidate_id: int):
     """매니저가 손으로 옮긴 것을 모두 되돌려 알고리즘이 낸 원래 편성으로 복원한다.
 
     - **권한:** 그 팀의 매니저 또는 ADMIN.
     - **처리:** 후보안에 저장된 원본 편성(`metrics.original_squads`)으로 슬롯을 되돌리고 지표를 재계산한다.
-    - **오류:** `409 ALREADY_ADOPTED`, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+    - **오류:** `409 ALREADY_ADOPTED`, `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.
     - **설계서:** F7 (사용자 요청으로 추가).
     """
-    cand = assignment_service._load_candidate(db, candidate_id)
+    cand = assignment_service.load_candidate(db, candidate_id)
     event = db.get(Event, cand.run.event_id)
     if not guest_service.is_manager(db, user, event.team_id):
         raise E.ForbiddenRole()
@@ -201,7 +197,7 @@ def reset_candidate(db: DB, user: CurrentUser, candidate_id: int):
 
 @router.post(
     "/assignments/candidates/{candidate_id}:adopt", response_model=CandidateView,
-    responses=errors(_409="ALREADY_ADOPTED"), summary="후보안 확정",
+    responses=errors(_409="ALREADY_ADOPTED", _422="ASSIGNMENT_LOCKED"), summary="후보안 확정",
 )
 def adopt_candidate(db: DB, user: CurrentUser, candidate_id: int):
     """후보안을 확정해 참석자에게 공개한다 (FR-23). 일정은 CLOSED(응답 마감·배정 단계)가 된다.
@@ -209,11 +205,12 @@ def adopt_candidate(db: DB, user: CurrentUser, candidate_id: int):
     - **권한:** 그 팀의 매니저 또는 ADMIN.
     - **처리:** 같은 회차의 다른 확정을 해제하고 이 후보안을 `is_adopted=true` 로. 노쇼 등으로 재배정하면
       새 run 을 실행해 다시 확정한다.
-    - **오류:** `409 ALREADY_ADOPTED` — 같은 run 안에 이미 확정된 다른 후보안. `404`, `403`.
+    - **오류:** `409 ALREADY_ADOPTED` — 같은 run 안에 이미 확정된 다른 후보안, 또는 동시에 다른 안이 먼저 확정됨.
+      `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정 (기록을 먼저 지워야 편성을 바꿀 수 있다). `404`, `403`.
     - **상태:** `구현됨`.
     - **설계서:** FR-23, 6.2절 부분 유니크 인덱스.
     """
-    cand = assignment_service._load_candidate(db, candidate_id)
+    cand = assignment_service.load_candidate(db, candidate_id)
     event = db.get(Event, cand.run.event_id)
     if not guest_service.is_manager(db, user, event.team_id):
         raise E.ForbiddenRole()

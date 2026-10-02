@@ -2,19 +2,20 @@
  * 확정된 팀 배정 표시 (S-14) — 일정 화면의 "팀 배정 결과", 팀 일정 탭의 확정 요약, 배정 결과 화면의 팀 카드.
  * 일정 · 팀 화면이 배정 실행 페이지(pages/assignment) 전체를 끌어오지 않도록 따로 둔다.
  */
-import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { assignmentsApi } from '../api/assignments'
 import { teamsApi } from '../api/teams'
 import type { EventView, PlayerCard, SquadView } from '../api/types'
-import { SHARE_DONE, shareImage } from '../lib/kakao'
+import { announceShare, shareImage } from '../lib/kakao'
+import { errorMessage } from '../api/client'
+import { toast } from '../store/feedback'
 import { fmtEvent } from '../lib/format'
 import { isChunkLoadError } from '../lib/stale-chunk'
 import { squadStyle } from '../lib/squads'
 import { AiExplainCard, AiMessageCard } from './ai-cards'
 import { FirstTimeTip } from './tutorial'
-import { Badge, Card, GradeDot, SectionTitle, Spinner } from './ui'
+import { Badge, Card, GradeDot, LoadError, SectionTitle, Spinner } from './ui'
 
 /** 명단이 바뀌면 달라지는 값 — AI 설명을 새로 부를지 가르는 데 쓴다 */
 export const rosterKey = (squads: SquadView[]) => squads.map((sq) => sq.members.map((m) => m.id).sort((a, b) => a - b).join('.')).join('|')
@@ -71,7 +72,6 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
   const view = useQuery({ queryKey: ['events', id, 'adopted'], queryFn: () => assignmentsApi.adopted(id), retry: false })
   const isManager = e.my_role === 'MANAGER'
   const team = useQuery({ queryKey: ['team', e.team_id], queryFn: () => teamsApi.get(e.team_id), enabled: isManager })
-  const [shareMsg, setShareMsg] = useState<string | null>(null)
   // 구성표 이미지 → 카카오톡. 실력 정보는 이미지에 넣지 않는다
   const share = useMutation({
     mutationFn: async () => {
@@ -81,11 +81,12 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
       const img = await renderSquadImage({ teamName: team.data?.name ?? '팀 배정', eventLine, squads: v.squads }, `팀배정-${e.event_date}.png`)
       return shareImage(img.file, { title: `${team.data?.name ?? '팀 배정'} · ${fmtEvent(e)}`, description: `팀 배정 결과예요. ${v.squads.map((s) => `${s.squad_name} ${s.members.length}명`).join(' · ')}`, url: `${location.origin}/events/${id}`, width: img.width, height: img.height })
     },
-    onSuccess: (r) => setShareMsg(SHARE_DONE[r]),
-    onError: (err) => setShareMsg(isChunkLoadError(err) ? '새 버전이 나왔어요. 새로고침한 뒤 다시 눌러 주세요.' : err instanceof Error ? err.message : '공유하지 못했어요.'),
+    onSuccess: announceShare,  // 다른 공유와 같이 토스트로
+    onError: (err) => toast(isChunkLoadError(err) ? '새 버전이 나왔어요. 새로고침한 뒤 다시 눌러 주세요.' : err instanceof Error ? err.message : '공유하지 못했어요.', 'error'),
   })
   if (view.isLoading) return <Spinner />
-  if (!view.data) return null
+  // 확정된 일정에서만 그리므로 못 받은 것은 오류다 — 비워 두면 배정이 사라진 줄 안다
+  if (!view.data) return <LoadError message={errorMessage(view.error, '팀 배정 결과를 불러오지 못했어요.')} onRetry={() => view.refetch()} retrying={view.isFetching} />
   const v = view.data
   const mine = v.squads.find((s) => s.squad_no === v.my_squad_no)
   const others = v.squads.filter((s) => s.squad_no !== v.my_squad_no)
@@ -99,7 +100,7 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
         <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${squadStyle(mine.squad_no).card}`}>
           <span className="text-xs opacity-70">내 팀</span>
           <span className="text-xl font-black">{mine.squad_name}</span>
-          {v.my_assigned_position && <span className="rounded-lg bg-court-500 px-2 py-0.5 text-sm font-bold text-white">{v.my_assigned_position}</span>}
+          {v.my_assigned_position && <span className="rounded-lg bg-brand px-2 py-0.5 text-sm font-bold text-on-brand">{v.my_assigned_position}</span>}
         </div>
       )}
       {isManager
@@ -109,11 +110,11 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
         <Card className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-ink">단체방에 팀 구성 보내기</p>
-            <p className="text-xs text-muted">{shareMsg ?? `${v.squads.length === 3 ? '세' : '두'} 팀 명단을 이미지 한 장으로 보내요.`}</p>
+            <p className="text-xs text-muted">{`${v.squads.length === 3 ? '세' : '두'} 팀 명단을 이미지 한 장으로 보내요.`}</p>
           </div>
           <button
             onClick={() => share.mutate()} disabled={share.isPending}
-            className="min-h-10 shrink-0 rounded-xl bg-[#FEE500] px-3 text-sm font-semibold text-[#191919] disabled:opacity-50"
+            className="min-h-11 shrink-0 rounded-xl bg-[#FEE500] px-3 text-sm font-semibold text-[#191919] disabled:opacity-50"
           >
             {share.isPending ? '만드는 중…' : '카카오톡 공유'}
           </button>
@@ -150,7 +151,7 @@ export function AdoptedSummary({ eventId, isManager }: { eventId: number; isMana
     <div className="-mt-1 space-y-2 rounded-b-2xl border border-t-0 border-line bg-surface-2 px-3 py-3">
       <div className="flex items-center justify-between px-1">
         <p className="text-sm font-bold text-ink">팀 배정 확정</p>
-        <button onClick={() => nav(`/events/${eventId}`)} className="text-xs font-semibold text-brand-ink">자세히 →</button>
+        <button onClick={() => nav(`/events/${eventId}`)} className="-my-2 -mr-1 min-h-11 px-1 text-xs font-semibold text-brand-ink">자세히 →</button>
       </div>
       <div className={`grid gap-2 ${ordered.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
         {ordered.map((s) => (

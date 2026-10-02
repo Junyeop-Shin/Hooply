@@ -18,12 +18,14 @@ from pydantic import BaseModel, Field
 from app.models.enums import Position, TeamRole
 from app.schemas.common import ORMModel, PlayerCard, UserSummary
 
+MAX_RANKING_PLAYERS = 100  # 정렬 한 번에 올릴 수 있는 인원 (요청 크기 상한)
+
 
 class TeamCreate(BaseModel):
     """팀 생성 요청 — `POST /teams` (S-05, FR-04). 생성자는 자동으로 MANAGER 가 된다."""
 
     name: str = Field(min_length=1, max_length=50, description="팀명")
-    description: str | None = Field(default=None, description="팀 소개")
+    description: str | None = Field(default=None, max_length=500, description="팀 소개 (500자까지)")
     home_court: str | None = Field(default=None, max_length=100, description="주로 모이는 체육관")
 
 
@@ -48,7 +50,7 @@ class TeamUpdate(BaseModel):
     """팀 정보 수정 — `PATCH /teams/{id}` (MANAGER 전용). 보낸 필드만 바꾼다."""
 
     name: str | None = Field(default=None, min_length=1, max_length=50)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=500)
     home_court: str | None = Field(default=None, max_length=100)
 
 
@@ -141,7 +143,7 @@ class PlayerUpdate(BaseModel):
 
     display_name: str | None = Field(default=None, min_length=1, max_length=50)
     skill_grade: int | None = Field(default=None, ge=1, le=5, description="1~5. 바꾸면 prior_overall이 다시 계산된다")
-    height_cm: int | None = Field(default=None, ge=120, le=250, description="게스트 키(cm). None이면 변경 없음")
+    height_cm: int | None = Field(default=None, ge=120, le=250, description="게스트 키(cm). 필드를 빼면 변경 없음, null 을 보내면 지운다")
     preferred_position: Position | None = Field(default=None, description="None이면 변경 없음")
     playable_positions: list[Position] | None = Field(default=None, description="None이면 변경 없음, 빈 배열이면 전부 해제")
 
@@ -169,7 +171,7 @@ class RankingCreate(BaseModel):
     (8.5절: `prior_final_z = 0.5 × 설문 + 0.5 × 정렬`). 다른 팀의 id 가 섞이면 422 PLAYER_NOT_IN_TEAM.
     """
 
-    player_ids: list[int] = Field(min_length=2, description="상위 → 하위 순서")
+    player_ids: list[int] = Field(min_length=2, max_length=MAX_RANKING_PLAYERS, description=f"상위 → 하위 순서 (최대 {MAX_RANKING_PLAYERS}명)")
 
 
 class RankingEntryView(BaseModel):

@@ -13,10 +13,11 @@
  * 6. 미리 보기(상대 수비 포함) · 막히면 · 저장
  * 7. 되돌리기(바로 앞 변경 취소, 50번까지) · 처음으로(이 화면을 열었을 때의 움직임으로) — 시작 위치 · 처음 공 · 단계·동작이 대상
  */
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
+import { confirm, toast } from '../store/feedback'
 import { teamPlaysApi } from '../api/tactics'
 import type { CourtPoint, OppDefense, Play, PlayAction, PlayActionType, PlayStep, RoleSource, ScreenCall, Situation, TacticRole, TeamPlayIn } from '../api/types'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
@@ -56,7 +57,7 @@ export function PlayEditorPage() {
     return (
       <Screen>
         <TopBar title="전술 고치기" back={`/teams/${teamId}`} />
-        {existing.isLoading ? <Spinner /> : <Content><Alert>{existing.error instanceof ApiError ? existing.error.message : '전술을 불러오지 못했어요.'}</Alert></Content>}
+        {existing.isLoading ? <Spinner /> : <Content><Alert>{errorMessage(existing.error, '전술을 불러오지 못했어요.')}</Alert></Content>}
       </Screen>
     )
   }
@@ -126,19 +127,24 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
   const ai = useMutation({
     mutationFn: (_key: string) => teamPlaysApi.aiRoles(teamId, { ...body, roles: shownRoles }),
     onSuccess: (r, key) => setAiReasons({ key, reasons: r.reasons, fallback: r.fallback }),
+    meta: { inlineError: true },
   })
   const save = useMutation({
     mutationFn: () => (playId ? teamPlaysApi.update(teamId, playId, body) : teamPlaysApi.create(teamId, body)),
     onSuccess: (v) => {
+      leaving.current = true
       qc.invalidateQueries({ queryKey: ['tactics', 'team-plays', teamId] })
       qc.setQueryData(['tactics', 'team-play', teamId, v.id], v)
       nav(`/tactics/team_${v.id}?team=${teamId}`, { replace: true })
     },
+    meta: { inlineError: true },
   })
   const remove = useMutation({
     mutationFn: () => teamPlaysApi.remove(teamId, playId!),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tactics', 'team-plays', teamId] }); nav(`/teams/${teamId}`, { replace: true }) },
+    onSuccess: () => { leaving.current = true; qc.invalidateQueries({ queryKey: ['tactics', 'team-plays', teamId] }); toast('전술을 지웠어요.'); nav(`/teams/${teamId}`, { replace: true }) },
+    onError: (e) => toast(errorMessage(e, '전술을 지우지 못했어요.'), 'error'),
   })
+  const leaving = useRef(false)  // 저장 · 삭제로 나갈 때는 묻지 않는다
 
   // 되돌리기: 움직임(시작 위치 · 처음 공 · 단계)을 바꾸기 직전 모습을 쌓아 둔다
   type Snapshot = { start: CourtPoint[]; ball: number; steps: PlayStep[]; edited: Set<number> }
@@ -160,12 +166,26 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
     setHistory((h) => h.slice(0, -1))
     restore(last)
   }
-  const resetAll = () => {
-    if (!window.confirm(playId ? '고치기 전 움직임으로 되돌릴까요?' : '그린 움직임을 모두 지우고 처음부터 할까요?')) return
+  const resetAll = async () => {
+    if (!(await confirm(playId
+      ? { title: '고치기 전 움직임으로 되돌릴까요?', body: '되돌리기(↶)로 다시 가져올 수 있어요.', confirmLabel: '되돌리기' }
+      : { title: '처음부터 다시 그릴까요?', body: '그린 움직임이 모두 지워져요. 되돌리기(↶)로 다시 가져올 수 있어요.', confirmLabel: '처음부터', danger: true }))) return
     remember() // 처음으로 돌린 것도 되돌리기로 취소할 수 있다
     restore(initialShape)
   }
   const changed = start !== initialShape.start || ball !== initialShape.ball || steps !== initialShape.steps
+  // 저장하지 않은 입력이 있는지 — 움직임 · 이름 · 설명 · 막히면 · 상대 수비 · 역할
+  const [initialMeta] = useState(() => ({ name, summary, counter, oppDefense, screenCall, situation, roles }))
+  const dirty = changed || name !== initialMeta.name || summary !== initialMeta.summary || counter !== initialMeta.counter
+    || oppDefense !== initialMeta.oppDefense || screenCall !== initialMeta.screenCall || situation !== initialMeta.situation || roles !== initialMeta.roles
+  // 새로고침 · 탭 닫기 · 주소 이동 전에 브라우저가 한 번 묻게
+  useEffect(() => {
+    if (!dirty) return
+    const onUnload = (e: BeforeUnloadEvent) => { if (leaving.current) return; e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', onUnload)
+    return () => window.removeEventListener('beforeunload', onUnload)
+  }, [dirty])
+  const askLeave = async () => !dirty || confirm({ title: '저장하지 않고 나갈까요?', body: '그린 움직임과 적은 내용이 사라져요.', confirmLabel: '나가기', cancelLabel: '계속 그리기', danger: true })
 
   const setStep = (i: number, next: PlayStep) => setSteps((ss) => ss.map((s, j) => (j === i ? next : s)))
   const addAction = (a: PlayAction) => {
@@ -233,7 +253,7 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
 
   return (
     <Screen>
-      <TopBar title={playId ? '전술 고치기' : '새 전술 만들기'} back={playId ? `/tactics/team_${playId}?team=${teamId}` : `/teams/${teamId}`} />
+      <TopBar title={playId ? '전술 고치기' : '새 전술 만들기'} back={playId ? `/tactics/team_${playId}?team=${teamId}` : `/teams/${teamId}`} beforeBack={askLeave} />
       <Content>
         <section className="space-y-3">
           <Field label="전술 이름" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} placeholder="예: 우리 팀 픽앤롤" />
@@ -250,8 +270,8 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
         <section className="space-y-2">
           <SectionTitle action={
             <span className="flex gap-3">
-              <button type="button" onClick={undo} disabled={!history.length} className="text-sm font-semibold text-brand-ink disabled:opacity-30">↶ 되돌리기</button>
-              <button type="button" onClick={resetAll} disabled={!changed} className="text-sm font-semibold text-muted disabled:opacity-30">처음으로</button>
+              <button type="button" onClick={undo} disabled={!history.length} className="-my-2 min-h-11 text-sm font-semibold text-brand-ink disabled:opacity-30">↶ 되돌리기</button>
+              <button type="button" onClick={resetAll} disabled={!changed} className="-my-2 min-h-11 text-sm font-semibold text-muted disabled:opacity-30">처음으로</button>
             </span>
           }>움직임 그리기</SectionTitle>
           <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label="단계">
@@ -333,7 +353,7 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
             {roles && rolesFor && rolesFor !== shape && ' 움직임을 바꿨다면 역할도 다시 확인해 보세요.'}
             {explained && (explained.fallback ? ' AI를 쓸 수 없어 움직임에서 읽은 이유를 보여 줘요.' : ' 아래 설명은 AI가 전술을 읽고 쓴 거예요.')}
           </p>
-          {ai.isError && <Alert>{ai.error instanceof ApiError ? ai.error.message : '이유를 받지 못했어요.'}</Alert>}
+          {ai.isError && <Alert>{errorMessage(ai.error, '이유를 받지 못했어요.')}</Alert>}
           <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
             {shownRoles.map((r, i) => (
               <li key={i} className="flex items-start gap-3 px-4 py-2.5">
@@ -360,6 +380,7 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
           {counter.trim() && <p className="px-1 text-xs text-muted">보이는 모습: {renderCounter(counter)}</p>}
         </section>
 
+        {save.isError && !saveError && <Alert>{errorMessage(save.error, '저장하지 못했어요.')}</Alert>}
         {saveError && (
           <Alert>
             <span className="block font-semibold">{saveError.message}</span>
@@ -367,7 +388,7 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
           </Alert>
         )}
         {playId && (
-          <Button variant="danger" full loading={remove.isPending} onClick={() => { if (window.confirm('이 전술을 지울까요? 자리 배치와 댓글도 함께 지워져요.')) remove.mutate() }}>
+          <Button variant="danger" full loading={remove.isPending} onClick={async () => { if (await confirm({ title: '이 전술을 지울까요?', body: '자리 배치와 댓글도 함께 지워지고 되돌릴 수 없어요.', confirmLabel: '지우기', danger: true })) remove.mutate() }}>
             전술 지우기
           </Button>
         )}

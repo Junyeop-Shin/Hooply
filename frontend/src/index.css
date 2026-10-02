@@ -52,9 +52,11 @@
   --color-faint: #a8a29e;         /* 비활성·힌트 */
 
   /* 주요 액션(오렌지) */
-  --color-brand: #f26b1d;         /* 채운 버튼 바탕 */
+  /* 채운 버튼 바탕. 원색 court-500(#f26b1d)은 흰 글자와 3.05:1 이라 작은 글자가 읽히지 않는다 —
+     한 단계 짙은 오렌지로 흰 글자 4.78:1 (WCAG AA 4.5:1) 을 맞춘다 */
+  --color-brand: #c24e0e;
   --color-on-brand: #ffffff;      /* 그 위 글자 */
-  --color-brand-ink: #d9560f;     /* 오렌지 글자·링크 */
+  --color-brand-ink: #b3430c;     /* 오렌지 글자·링크 — 흰 바탕 5.64:1, 옅은 오렌지 면(brand-soft) 5.25:1 */
   --color-brand-soft: #fff5ee;    /* 옅은 오렌지 면 */
   --color-brand-line: #ffc9a3;
 

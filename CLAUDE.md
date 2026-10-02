@@ -1,6 +1,6 @@
 # HOOPLY — 농구 동호회 팀 매칭 서비스 기획·설계서
 
-**버전** v1.0 · **작성일** 2026\-09\-08 · **개정** 2026\-09\-30 · **단계** 구현 완료 · 운영 중 (https://hooply-green.vercel.app)
+**버전** v1.0 · **작성일** 2026\-09\-08 · **개정** 2026\-10\-02 · **단계** 구현 완료 · 운영 중 (https://hooply-green.vercel.app)
 
 > **v1.0 주요 변경 (v0.3 기획 → 구현 반영)** — 서비스명 **HOOPLY** 확정 · 팀장(OWNER)과 관리자 팀 승인 · **3팀 배정**(참석 16명 이상, 선택) · 로테이션 자동 제안(F17) 제외 · 설문 v2(12문항, 자기 위치는 팀 가입 후 팀별로) · 지난 기록 추가 · 카카오 로그인·공유 · **AI 설명(F20)** · **전술 추천(F21)** · **전술판·팀 전술(F22)** · 배지 · 시작 안내 · 도움말 · 기술 스택을 실제 운영 구성(Neon · Render · Vercel · LangChain)으로
 >
@@ -153,7 +153,7 @@ Table of Contents
 | 액터 | 범위 | 부여 방식 |
 | --- | --- | --- |
 | **관리자 (ADMIN)** | 전역 | DB 에서 직접 지정. 관리자 콘솔(SQLAdmin)과 `/admin` API |
-| **팀장 (OWNER)** | 팀 단위 | 팀 생성자(`teams.owner_user_id`). 매니저 권한을 부여 · 회수한다. 자진 해제하면 다른 매니저에게 승계 |
+| **팀장 (OWNER)** | 팀 단위 | 팀 생성자(`teams.owner_user_id`). 매니저 권한을 부여 · 회수하고, 매니저를 제외할 수 있는 유일한 사람이다(팀장 자신은 누구도 제외할 수 없다). 자진 해제하면 다른 매니저에게 승계 |
 | **팀 매니저 (MANAGER)** | 팀 단위 | 팀장이 위임(팀장도 매니저다). 일정 · 배정 · 기록 · 정렬 |
 | **플레이어 (PLAYER)** | 팀 단위 | 팀 코드로 가입 시 기본 부여 |
 
@@ -176,12 +176,12 @@ Table of Contents
 
 - 새 팀 승인 · 거절 (승인 전 팀은 일정 기능이 잠긴다)
 - 전체 사용자 · 팀 · 일정 · 경기 조회, 특정 선수의 **원시 데이터 전체 열람** — 설문 응답, 쿼터별 점수 이력, 코트 마진, 피어 투표 수신 내역, 실력 지표 변동 이력
-- 실력 점수 **수동 보정** (이력 · 감사 로그)
+- 실력 점수 **수동 보정** (이력 · 감사 로그). 보정값은 사전값을 덮어쓰지 않고 재계산 출발점에 더하는 오프셋(`player_profiles.admin_adjust`, ±50)으로 둬서 설문 · 정렬 · 쿼터를 다시 계산해도 사라지거나 두 번 더해지지 않는다
 
 ### 팀장 (OWNER) · 팀 매니저 (MANAGER)
 
-- 팀 정보 수정, 팀 코드 재발급, 팀원 초대(카카오톡) · 제외
-- (팀장) 다른 팀원에게 매니저 권한 부여 / 회수
+- 팀 정보 수정, 팀 코드 재발급, 팀원 초대(카카오톡) · 제외 (제외된 회원은 팀 코드로 다시 가입할 수 없다 — 스스로 나간 사람만 돌아올 수 있다)
+- (팀장) 다른 팀원에게 매니저 권한 부여 / 회수, 매니저 제외
 - 일정 등록 · 수정 · 삭제, 응답 미리 마감, 대리 참석 응답, 지난 기록 추가
 - **팀원 실력 정렬** (F14), 게스트 등급 즉시 수정, 게스트 → 회원 병합
 - **팀 배정 실행** — 회차별 제약(묶기 · 갈라놓기 · 사전 배치), 3팀 선택, 3가지 전략 후보안 → 수정 → 확정
@@ -240,9 +240,9 @@ Table of Contents
 | FR-02 | 비밀번호는 bcrypt 해시로 저장한다 | SYSTEM | — | — | — |
 | FR-03 | 가입 직후 설문에 응답하면 실력·포지션 프로필이 생긴다 | PLAYER | F1 | S-03 | `GET /surveys/onboarding`, `POST /surveys/onboarding/responses` |
 | FR-04 | 팀을 만들면 코드가 발급되고 생성자는 팀장이 된다 | PLAYER | F2 | S-05 | `POST /teams` |
-| FR-05 | 팀 코드로 가입한다. 초대 링크는 코드를 미리 채운다 | PLAYER | F2 | S-06 | `POST /teams/join` |
+| FR-05 | 팀 코드로 가입한다. 초대 링크는 코드를 미리 채운다. 스스로 나간 팀은 코드로 다시 들어올 수 있지만, 매니저가 제외한 팀은 들어올 수 없다(`403 REMOVED_FROM_TEAM`) | PLAYER | F2 | S-06 | `POST /teams/join` |
 | FR-06 | 관리자 승인 후 5명 이상이면 팀이 활성화된다 | SYSTEM, ADMIN | F2, F12 | S-07, 관리자 콘솔 | `POST /admin/teams/{id}:approve` |
-| FR-07 | 팀장은 매니저 권한을 부여·회수하고, 매니저는 팀원을 제외한다 | OWNER, MANAGER | F3 | S-08 | `PATCH /teams/{id}/players/{pid}/role`, `DELETE /teams/{id}/players/{pid}` |
+| FR-07 | 팀장은 매니저 권한을 부여·회수하고, 매니저는 팀원을 제외한다. 매니저를 제외하는 것은 팀장만 할 수 있고, 팀장은 누구도 제외할 수 없다(`403 FORBIDDEN_NOT_OWNER`) | OWNER, MANAGER | F3 | S-08 | `PATCH /teams/{id}/players/{pid}/role`, `DELETE /teams/{id}/players/{pid}` |
 | FR-08 | 매니저는 일정을 등록·수정·취소하고 응답을 미리 마감할 수 있다 | MANAGER | F4 | S-09, S-10 | `POST/PATCH/DELETE /events…`, `POST /events/{id}/rsvp:close` |
 | FR-09 | 플레이어는 마감 전까지 참석/불참을 바꿀 수 있다 | PLAYER | F4 | S-10 | `PUT /events/{id}/attendance` |
 | FR-10 | 팀원 누구나 게스트를 이름으로 등록해 회차 참석자에 추가한다 | PLAYER | F13 | S-10, S-11 | `POST /events/{id}/guests` |
@@ -259,7 +259,7 @@ Table of Contents
 | FR-20 | 후보안은 예상 점수 차·균형 점수·포지션 커버리지와 설명을 보여준다 | MANAGER | F6 | S-13 | `GET /assignments/runs/{id}` |
 | FR-21 | 선수를 옮기거나 맞교체하면 지표가 즉시 재계산된다 | MANAGER | F7 | S-13 | `PATCH /assignments/candidates/{id}` |
 | FR-22 | 확정하면 참석자에게 결과가 공개된다 (실력 수치 비공개) | MANAGER, PLAYER | F7 | S-14 | `POST …:adopt`, `GET /events/{id}/assignment/adopted` |
-| FR-23 | 매니저는 일정 시작 후 쿼터별 스코어와 출전 5명을 입력한다 | MANAGER | F8 | S-15 | `PUT /events/{id}/quarters` |
+| FR-23 | 매니저는 일정 시작 후 쿼터별 스코어(팀당 0~99점)와 출전 5명을 입력한다. 쿼터 기록이 생긴 일정은 배정을 다시 짜거나 바꿀 수 없다(`422 ASSIGNMENT_LOCKED`, 기록을 지우면 다시 가능) | MANAGER | F8 | S-15 | `PUT /events/{id}/quarters` |
 | FR-24 | 쿼터 저장 시 마진이 시간 정규화되고 잔차로 실력이 갱신된다 (첫 2회 미반영, 삭제 시 롤백) | SYSTEM | F10 | — | 서버 내부 |
 | FR-25 | 남의 실력은 매니저에게만 수치·등급으로 보인다. 플레이어는 **자기 등급만** 본다 | SYSTEM | F10 | S-08, S-14, S-17 | 응답 마스킹 |
 | FR-26 | 일정 종료 후 참석자는 같이 뛰고 싶은 사람을 우리 팀 2·상대 팀 2까지 고른다 | PLAYER | F9 | S-16 | `GET/POST /events/{id}/post-game-survey` |
@@ -268,7 +268,7 @@ Table of Contents
 | FR-29 | 플레이어는 참석·출전·쿼터별 마진 기록을 본다 | PLAYER | F11 | S-17 | `GET /players/{id}/stats` |
 | FR-30 | 매니저는 선수별 실력 지표의 근거(설문·정렬·잔차·투표)를 본다 | MANAGER | F11 | S-20 | `GET /players/{id}/stats` (수치 포함) |
 | FR-31 | 팀원은 참여율·출전 쿼터 리더보드를, 매니저는 잔차 리더보드를 본다 | PLAYER, MANAGER | F11 | S-21 | `GET /teams/{id}/stats/leaderboard` |
-| FR-32 | 관리자는 팀을 승인·거절하고 원시 데이터를 열람하며 지표를 보정한다 | ADMIN | F12 | 관리자 콘솔 | `/admin/*` |
+| FR-32 | 관리자는 팀을 승인·거절하고 원시 데이터를 열람하며 지표를 보정한다. 보정은 재계산 출발점에 더하는 오프셋(`player_profiles.admin_adjust`)이라 설문 · 정렬 · 쿼터를 다시 계산해도 남는다 | ADMIN | F12 | 관리자 콘솔 | `/admin/*` |
 | FR-33 | 참석 인원이 팀 수×5 미만이면 배정이 차단된다 | SYSTEM | F5 | S-10 | `422 NOT_ENOUGH_PLAYERS` |
 | FR-34 | 핸들러·빅맨이 부족하면 경고와 함께 완화한다 | SYSTEM | F5 | S-11, S-13 | `warnings[]` |
 | FR-35 | 매니저는 앱 도입 전 모임을 일자·참석·쿼터로 입력할 수 있다 | MANAGER | F18 | S-22 | 일정·참석·게스트·쿼터 API 조합 |
@@ -372,6 +372,7 @@ S-09 일정 등록 → (팀원 참석 응답 · 게스트 초대) → S-10 참�
 | --- | --- | --- | --- |
 | 잘못된 팀 코드 | 존재하지 않는 코드 | 입력 필드 하단 인라인 에러 | `404 TEAM_CODE_NOT_FOUND` |
 | 중복 가입 | 이미 소속된 팀에 재가입 시도 | 토스트 \+ 팀 상세로 이동 | `409 ALREADY_MEMBER` |
+| 제외된 팀에 재가입 | 매니저가 제외한 사람이 팀 코드 입력 | "매니저가 제외한 팀이에요. 매니저에게 문의해 주세요." | `403 REMOVED_FROM_TEAM` |
 | 카카오 계정에 이메일 없음 | 이메일 동의항목 없음 | 가입은 진행, 이메일 비움. 나중에 비밀번호 재설정으로 이메일 로그인을 더할 수 있음 | `200` \+ `email: null` |
 | 팀 미활성 | 관리자 승인 전이거나 5명 미만 | 일정 등록 잠금 \+ 사유 안내 | `422 TEAM_NOT_ACTIVE` |
 | **게스트 동명이인** | 같은 이름의 게스트가 이미 존재 | 기존 게스트 목록을 먼저 보여 주고 "새 게스트로 추가"를 아래에 | `200` \+ `similar[]` |
@@ -381,13 +382,17 @@ S-09 일정 등록 → (팀원 참석 응답 · 게스트 초대) → S-10 참�
 | **사전 배치 초과** | 한 팀 칸에 정원 초과 배치 | 배치 거부 | `422 SQUAD_OVERFLOW` |
 | 빅맨 · 핸들러 부족 | 4·5번 또는 1번 가능 인원 \< 팀 수 | 경고 배너(차단 아님) | `200` \+ `warnings[]` |
 | RSVP 마감 후 응답 | 마감 시각 경과 | 토글 비활성 \+ "응답이 마감되었어요" (매니저는 대리 변경 가능) | `422 RSVP_CLOSED` |
-| 노쇼 / 당일 인원 변동 | 확정 후 참석자 변경 | 매니저 "재배정". 쿼터 기록에서 늦게 온 사람 · 당일 게스트를 명단에 추가 | 배정 재실행 |
+| 노쇼 / 당일 인원 변동 | 확정 후 참석자 변경 | 경기 기록 전이면 매니저 "재배정". 쿼터 기록에서 늦게 온 사람 · 당일 게스트를 명단에 추가 | 배정 재실행 |
+| **기록 뒤 재배정** | 쿼터 기록이 있는 일정에서 배정 실행 · 수정 · 초기화 · 확정 | 재배정 버튼 대신 "쿼터 기록을 먼저 지워 주세요" 안내 | `422 ASSIGNMENT_LOCKED` |
 | **쿼터 수 변경** | 예정보다 일찍 끝나거나 더 뜀 | 쿼터 카드 추가 · 삭제 자유. 삭제 시 지표 롤백(팀 전체 재계산) | `PUT /events/{id}/quarters` |
 | **쿼터 출전 인원 오류** | 한 팀에 5명이 아닌 인원 | 저장 버튼 비활성 \+ "블랙 팀 4명이 선택되었어요" | `400 INVALID_LINEUP_SIZE` |
 | 권한 없음 | 플레이어가 매니저 URL 직접 접근 | 안내 \+ 홈 복귀 | `403 FORBIDDEN_ROLE` |
+| 매니저 · 팀장 제외 | 팀장 아닌 매니저가 매니저를, 또는 누가 팀장을 제외 | 메뉴에 "매니저는 팀장만 제외" · "팀장 제외 불가" | `403 FORBIDDEN_NOT_OWNER` |
+| 동시 요청 충돌 | 같은 것을 두 요청이 동시에 만들거나 바꿈 (DB 유니크 위반 · 교착) | "동시에 처리된 요청이 있어요. 다시 시도해 주세요." | `409 CONFLICT` |
 | 자기 자신 투표 | 피어 투표에서 본인 선택 | 본인은 후보에서 제외 | `400 SELF_VOTE_NOT_ALLOWED` |
 | **게스트에게 투표** | 게스트는 대상은 되지만 응답자는 아님 | 후보 목록에는 포함, 투표 화면은 회원만 | — |
 | 요청 과다 | 로그인 · 가입 · 비밀번호 찾기 반복, AI 호출 · 댓글 연타 | "요청이 너무 많아요" | `429 RATE_LIMITED` |
+| 서버 응답 지연 | 무료 서버가 잠에서 깨는 중 | 5초 뒤 농구 기다림 문구 \+ "처음 접속하면 최대 1분쯤 걸려요", 70초가 지나면 끊고 다시 시도 안내 | — |
 | AI 실패 | 키 없음 · 시간 초과 · 가드레일 위반 | 같은 자리에 규칙 설명("AI" 표시 없이) | `200` \+ `fallback: true` |
 | 네트워크 오류 · 이탈 | 체육관 통신 불량, 저장 전 창 닫기 | 쿼터 입력은 기기에 임시 저장 후 복원 | — |
 
@@ -399,7 +404,7 @@ S-09 일정 등록 → (팀원 참석 응답 · 게스트 초대) → S-10 참�
 
 # 6\. 데이터 모델 (ERD)
 
-PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이그레이션 **0001~0024**. 컬럼 단위 정의는 `docs/03-데이터모델.md` 가 정본이다(모델 메타데이터에서 추출). 이 장은 설계 원칙과 구조를 요약한다.
+PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이그레이션 **0001~0026**. 컬럼 단위 정의는 `docs/03-데이터모델.md` 가 정본이다(모델 메타데이터에서 추출). 이 장은 설계 원칙과 구조를 요약한다.
 
 ## 6\.1 설계 원칙
 
@@ -409,7 +414,8 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 4. **경기는 events → quarters 직결.** 하루 팀이 고정이라 `games` 계층이 없고, 쿼터 수·길이가 유동적이라 `duration_min` 으로 정규화한다.
 5. **실력값 변동은 append-only 이력**(`skill_rating_history`), 관리자 조작은 `audit_logs` 에 남긴다.
 6. **상태값은 PostgreSQL ENUM 타입.** 팀 상태·역할·포지션 등 23종을 `team_status_enum`, `position_enum` 같은 전용 타입으로 두어 스키마만 봐도 열거형임이 드러나고 허용값이 한 곳에서 관리된다 (0017, 튜토리얼 두 종은 0019). 값을 더할 때는 `ALTER TYPE ... ADD VALUE`.
-7. **외래키 인덱스.** 외래키에는 인덱스가 자동으로 생기지 않으므로 조회 조건·ON DELETE 검사에 쓰이는 컬럼에는 명시적으로 건다. 감사용 `*_by` 컬럼은 조회 조건으로 쓰이지 않아 두지 않는다.
+7. **외래키 인덱스.** 외래키에는 인덱스가 자동으로 생기지 않으므로 조회 조건·ON DELETE 검사에 쓰이는 컬럼에는 명시적으로 건다. 감사용 `*_by` 컬럼은 조회 조건으로 쓰이지 않아 두지 않는다. 다른 유니크 · 복합 인덱스의 맨 앞 컬럼과 같은 단독 인덱스는 두지 않는다 (0025 에서 9개를 지웠다).
+8. **값 범위는 DB 도 지킨다.** 쿼터 점수 · 길이 · 번호, 팀 수 · 팀 번호(1~3), 정렬 순위, 게스트 등급, 선호 점수, 자기 자신 병합, 일정 시각 순서, 이메일 소문자에 CHECK 를 둔다 (0025 · 0026). API 검증을 빠져나온 값은 `400 VALIDATION_ERROR` 가 된다. 운영 데이터 위에서 붙일 때는 고칠 수 있는 행을 먼저 고치고 `NOT VALID` 로 붙인 뒤, 어긋난 행이 없을 때만 `VALIDATE` 한다.
 
 ## 6\.2 엔터티 그룹
 
@@ -446,7 +452,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 | players → player_profiles | 1:1 | player_id (PK=FK, CASCADE) | 팀 단위 실력 지표 |
 | players → player_positions | 1:N | player_id (CASCADE) | UNIQUE(player_id, position), 최대 5행 |
 | players → skill_rating_history | 1:N | player_id (CASCADE) | 변동 이력 |
-| teams → manager_rankings → entries → players | 1:N → 1:N → N:1 | team_id, ranking_id (CASCADE), player_id | UNIQUE(ranking_id, player_id), (ranking_id, rank_no) |
+| teams → manager_rankings → entries → players | 1:N → 1:N → N:1 | team_id, ranking_id (CASCADE), player_id | UNIQUE(ranking_id, player_id), (ranking_id, rank_no), 팀당 활성 버전 1개(부분 유니크, 0025) |
 | teams → guest_invite_presets | 1:N | team_id (CASCADE), created_by, last_player_id (SET NULL) | 초대 목록 불러오기 |
 | survey_templates → questions → options | 1:N → 1:N | template_id, question_id | 버전 관리 |
 | users → survey_responses → answers | 1:1 → 1:N | user_id (CASCADE, UNIQUE), response_id (CASCADE) | 1인 1회 |
@@ -460,24 +466,25 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 | events → post_game_surveys → votes | 1:N → 1:N | event_id, survey_id (CASCADE) | 응답자 1회(UNIQUE event_id, respondent), 투표 대상은 게스트 포함 |
 | players ↔ players (선호 조합) | M:N self | chemistry_scores(player_a_id < player_b_id) | UNIQUE(a, b), pref_score/pref_mutual/together_events |
 | users → audit_logs | 1:N | actor_user_id | 관리자 조작 |
-| events → event_play_assignments | 1:N | event_id (CASCADE) | 그날 팀 · 전술별 매니저가 저장한 자리 배치 |
+| events → event_play_assignments | 1:N | event_id (CASCADE) | 그날 팀 · 전술별 매니저가 저장한 자리 배치, UNIQUE(event_id, squad_no, play_key, slot) · (…, player_id) |
 | teams → team_plays · tactic_comments · tactic_stars | 1:N | team_id (CASCADE) | 팀 전술 · 전술별 댓글 · 별표 (docs/07) |
+| team_plays → tactic_comments · tactic_stars · event_play_assignments | 1:N | team_play_id (CASCADE, 0025) | 팀 전술(`team:<id>`)을 가리키는 행. 프리셋이면 NULL. 팀 전술을 지우면 함께 지워진다 |
 
 
 ## 6\.4 핵심 테이블 요약
 
 | 테이블 | 핵심 컬럼 | 설계 포인트 |
 | --- | --- | --- |
-| `users` | email(NULL 허용, 소문자) · password_hash(NULL 허용) · name · nickname · height_cm · global_role · primary_team_id · position_prefs · 튜토리얼 상태 | 카카오 계정은 이메일이 없을 수 있다(11.5절). 식별은 `id`, 로그인 수단은 `auth_identities` |
+| `users` | email(NULL 허용, 소문자 — CHECK) · password_hash(NULL 허용) · name · nickname · height_cm · global_role · primary_team_id · position_prefs · 튜토리얼 상태 · token_version | 카카오 계정은 이메일이 없을 수 있다(11.5절). 식별은 `id`, 로그인 수단은 `auth_identities`. 비밀번호를 바꾸거나 재설정하면 `token_version` 이 올라가 다른 기기의 토큰이 무효가 된다 |
 | `teams` | team_code(8자) · owner_user_id(팀장) · status(PENDING/ACTIVE/ARCHIVED) · approval_status · approved_by · min_members | 관리자 승인 + 5명 이상이면 ACTIVE |
 | `players` | team_id · user_id(NULL = 게스트) · kind · display_name · role(MANAGER/PLAYER) · status · created_by · merged_into_player_id · height_cm | UNIQUE(team_id, user_id), CHECK (kind = GUEST) = (user_id IS NULL). 병합은 포인터라 되돌릴 수 있다 |
-| `player_profiles` | prior_overall · prior_source · skill_overall · 6축 · skill_confidence · quarters_played · cumulative_residual · self_rank_level | 실력은 **팀 단위**. 자기 위치는 팀마다 |
+| `player_profiles` | prior_overall · prior_source · skill_overall · 6축 · skill_confidence · quarters_played · cumulative_residual · self_rank_level · admin_adjust | 실력은 **팀 단위**. 자기 위치는 팀마다. 재계산은 `prior_overall + admin_adjust`(관리자 보정)에서 출발한다 |
 | `assignment_runs → candidates → squads → slots` | team_count(2·3) · params · roster_snapshot / strategy · total_score · metrics · explanation · is_adopted / squad_no · squad_name(블랙 · 화이트 · 레드) / player_id · assigned_position · is_manual_override | 한 회차에 남는 배정은 확정한 실행 하나. 채택 후보는 run 당 1개(부분 유니크) |
 | `assignment_constraints` | run_id · type(LOCK/SEPARATE/PIN) · group_no · player_id · squad_no | 제약은 회차별 (9.6절) |
-| `quarters` · `quarter_lineups` | quarter_no · black_score · white_score · **duration_min(기본 8)** · home_squad_no · away_squad_no / player_id · side · raw_margin · normalized_margin · residual | events 직결(`games` 없음). 3팀이면 쿼터마다 뛴 두 팀. 잔차는 재계산 가능한 형태로 |
+| `quarters` · `quarter_lineups` | quarter_no · black_score · white_score · **duration_min(기본 8)** · home_squad_no · away_squad_no / player_id · side · raw_margin · normalized_margin · residual | events 직결(`games` 없음). 3팀이면 쿼터마다 뛴 두 팀. 잔차는 재계산 가능한 형태로. 점수 · 길이 · 팀 번호에 CHECK(점수는 DB 0~200, API 0~99) |
 | `post_game_surveys` · `post_game_votes` · `chemistry_scores` | 응답자(회원만) / 대상(게스트 포함) · PLAY_AGAIN · 이유 태그 / pref_score · pref_mutual · together_events · together_quarters · synergy_*(v1 에서 계산 안 함) | 선언된 선호와 관찰된 시너지를 분리 (9.4절) |
-| `team_plays` · `tactic_comments` · `tactic_stars` · `event_play_assignments` | 팀이 그린 전술(JSON) · 역할 · role_source / 전술별 댓글 / 별표 / 그날 팀 · 전술별 자리 배치 | 14장, docs/07 |
-| `llm_results` | chain(A~D) · cache_key · output · fallback · fail_reason · latency_ms · model | AI 결과 캐시 겸 호출 기록. 입력 원문은 저장하지 않는다 |
+| `team_plays` · `tactic_comments` · `tactic_stars` · `event_play_assignments` | 팀이 그린 전술(JSON) · 역할 · role_source / 전술별 댓글 / 별표 / 그날 팀 · 전술별 자리 배치 | 14장, docs/07. 팀 전술을 가리키는 행은 `team_play_id` 외래키(CASCADE)로 함께 지워진다 |
+| `llm_results` | chain(A~D) · cache_key · output · fallback · fail_reason · latency_ms · model | AI 결과 캐시 겸 호출 기록. 입력 원문은 저장하지 않는다. 60일이 지난 행은 지운다 |
 | `user_badges` · `guest_claims` · `user_avatars` · `revoked_tokens` | 행동 배지 / 게스트 기록 본인 확인 / 프로필 사진 / 폐기한 refresh 토큰 | docs/03, docs/06 |
 
 ## 6\.5 v0.3 설계 대비 달라진 점
@@ -485,6 +492,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 - `users.birth_year` 삭제(0003) — 수집하지 않는다. 키는 가입 폼 · 프로필에서
 - `teams` 에 승인 상태와 팀장, `users` 에 기본 팀 · 포지션 선호 · 튜토리얼 상태가 더해졌다
 - `quarters.duration_min` 기본값 10 → **8**(0013, 실제 운영 쿼터 길이), 3팀 대진 `home_squad_no · away_squad_no`(0024)
+- 하드닝(0025 · 0026) — 관리자 보정 오프셋 `player_profiles.admin_adjust` · 토큰 세대 `users.token_version`, 값 범위 CHECK(쿼터 점수 · 길이 · 번호, 팀 수 · 팀 번호, 정렬 순위, 게스트 등급, 선호 점수, 자기 병합 금지, 일정 시각 순서, 이메일 소문자), 중복 단독 인덱스 9개 정리, 팀 전술 참조에 `team_play_id` 외래키, 팀당 활성 정렬 하나(부분 유니크), 탈퇴 회원 비식별화 소급
 - 상태값 23종을 PostgreSQL ENUM 타입으로(0017), 조회 · 삭제 경로 외래키 인덱스
 - 새 테이블: guest_invite_presets · guest_claims · user_avatars · revoked_tokens · user_badges · event_play_assignments · llm_results · team_plays · tactic_comments · tactic_stars
 - v0.3 6.4절의 `team_memberships` · `user_id` 기준 인덱스 권고는 `players` · `player_id` 기준으로 바뀌었다
@@ -498,11 +506,12 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 ## 7\.1 공통 규약
 
 - Base URL: `https://hooply-backend.onrender.com/api/v1` (로컬 `http://localhost:8000/api/v1`)
-- 인증: `Authorization: Bearer <access_token>` (JWT, access 30분 / refresh 14일, refresh 는 회전하고 로그아웃 · 회전된 토큰은 폐기 목록으로 막는다)
+- 인증: `Authorization: Bearer <access_token>` (JWT, access 30분 / refresh 14일, refresh 는 회전하고 로그아웃 · 회전된 토큰은 폐기 목록으로 막는다. 비밀번호를 바꾸거나 재설정하면 토큰 세대(`users.token_version`)가 올라가 다른 기기의 토큰이 모두 무효 — `POST /me/password` 는 이 기기가 쓸 새 토큰 쌍을 돌려준다)
 - 요청 · 응답 본문은 `application/json`, 필드명은 `snake_case`
 - 목록 응답은 `{ items }` 또는 `{ items, meta: { page, size, total, has_next } }`
 - 액션형 경로는 `:동사` 접미사 (`/assignments/candidates/{id}:adopt`, `/events/{id}/rsvp:close`)
-- 요청 제한: 로그인 · 가입 · 비밀번호 경로(IP · 이메일), AI 호출 · 전술 댓글(사용자당 분당 10회) → `429 RATE_LIMITED`
+- 요청 제한: 로그인 · 가입 · 비밀번호 경로(IP · 이메일), 관리자 콘솔 로그인, AI 호출 · 전술 댓글(사용자당 분당 10회) → `429 RATE_LIMITED`. IP 는 `CF-Connecting-IP` → `True-Client-IP` → 접속 주소 순으로 정하고, 클라이언트가 꾸밀 수 있는 `X-Forwarded-For` 는 믿지 않는다
+- 목록 · 문자열 필드에 길이 상한(배정 전략 1~3개, 묶기 · 갈라놓기 그룹 30개 등) → 넘으면 `400 VALIDATION_ERROR`
 
 ## 7\.2 엔드포인트 그룹
 
@@ -546,18 +555,18 @@ POST /api/v1/events/{event_id}/assignments
 | --- | --- | --- |
 | 400 | VALIDATION_ERROR, INVALID_LINEUP_SIZE, SELF_VOTE_NOT_ALLOWED, TOKEN_INVALID_OR_EXPIRED | 형식·범위 위반 |
 | 401 | INVALID_CREDENTIALS, TOKEN_EXPIRED, KAKAO_AUTH_FAILED | 인증 실패 |
-| 403 | FORBIDDEN_ROLE, NOT_A_MEMBER, NOT_ATTENDEE, SURVEY_NOT_OPEN, FORBIDDEN_NOT_OWNER | 권한 부족·아직 열리지 않음 |
+| 403 | FORBIDDEN_ROLE, NOT_A_MEMBER, NOT_ATTENDEE, SURVEY_NOT_OPEN, FORBIDDEN_NOT_OWNER, REMOVED_FROM_TEAM | 권한 부족·아직 열리지 않음·매니저가 제외한 팀에 코드로 재가입 |
 | 404 | NOT_FOUND, TEAM_CODE_NOT_FOUND, NOT_ADOPTED_YET, NO_RANKING | 리소스 없음 |
-| 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED | 상태 충돌 |
-| 422 | TEAM_NOT_ACTIVE, NOT_ENOUGH_PLAYERS, RSVP_CLOSED, INVALID_SWAP, CANNOT_DEMOTE_LAST_MANAGER, PLAYER_NOT_IN_TEAM, PLAYER_NOT_IN_SQUAD, PLAY_NOT_PLAYABLE, MERGE_KIND_MISMATCH, LOCK_GROUP_TOO_LARGE, CONSTRAINT_CONFLICT, SEPARATE_INFEASIBLE, LOCK_PARTITION_INFEASIBLE, SQUAD_OVERFLOW | 도메인 규칙 위반 (배정 제약 오류는 details 에 문제 인원 포함) |
-| 429 | RATE_LIMITED | 요청이 너무 많음 — 로그인 · 가입 · 비밀번호 찾기(IP · 이메일), AI 호출 · 전술 댓글(사용자당 분당 10회) |
+| 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED, CONFLICT | 상태 충돌. `CONFLICT` 는 동시에 들어온 요청이 같은 행을 먼저 만들거나 바꾼 경우(DB 유니크 · 외래키 위반, 교착). DB CHECK 위반은 400 VALIDATION_ERROR |
+| 422 | TEAM_NOT_ACTIVE, NOT_ENOUGH_PLAYERS, RSVP_CLOSED, INVALID_SWAP, CANNOT_DEMOTE_LAST_MANAGER, PLAYER_NOT_IN_TEAM, PLAYER_NOT_IN_SQUAD, PLAY_NOT_PLAYABLE, MERGE_KIND_MISMATCH, LOCK_GROUP_TOO_LARGE, CONSTRAINT_CONFLICT, SEPARATE_INFEASIBLE, LOCK_PARTITION_INFEASIBLE, SQUAD_OVERFLOW, ASSIGNMENT_LOCKED | 도메인 규칙 위반 (배정 제약 오류는 details 에 문제 인원 포함). `ASSIGNMENT_LOCKED` 는 쿼터 기록이 있는 일정에서 배정 실행 · 수정 · 초기화 · 확정 |
+| 429 | RATE_LIMITED | 요청이 너무 많음 — 로그인 · 가입 · 비밀번호 찾기 · 재설정(IP, 로그인 · 가입 · 비밀번호 찾기는 이메일로도), AI 호출 · 전술 댓글(사용자당 분당 10회) |
 | 500 | INTERNAL_ERROR | 서버 오류 |
 
 > **설계 원칙:** 형식 오류는 400, 권한은 403, 존재하지 않음은 404, 상태 충돌은 409, **도메인 규칙 위반은 422**. 프론트는 `code`로 분기하고 `message`는 그대로 노출 가능한 한국어 문구로 유지합니다.
 >
 > **배정 제약 오류는 `details[]`에 어떤 그룹·선수가 문제인지 담아야 합니다.** "제약을 만족할 수 없습니다"만으로는 매니저가 무엇을 풀어야 할지 알 수 없습니다.
 >
-> **`/auth/password/forgot`은 항상 202를 반환합니다.** 가입 여부에 따라 응답이 달라지면 계정 존재 여부를 확인하는 통로가 됩니다.
+> **`/auth/password/forgot`은 항상 202를 반환합니다.** 가입 여부에 따라 응답이 달라지면 계정 존재 여부를 확인하는 통로가 됩니다. 같은 이유로 메일은 응답을 보낸 뒤 백그라운드로 보내고, 로그인은 없는 계정도 가짜 해시로 bcrypt 검증을 한 번 돌려 응답 시간을 맞춥니다.
 
 # 8\. 온보딩 설문 설계 (설문 v2)
 
@@ -1020,7 +1029,7 @@ POST /api/v1/events/{event_id}/assignments
 | 19명 이상 | 2팀 (묶음 뒤 18개 초과) | 수십만 이상 | **지역 탐색** — 24명 약 0.1초 |
 | 16\~21명 | **3팀** (21명이면 7 · 7 · 7) | 수억 | **지역 탐색** — 21명 약 0.1초 |
 
-- **2팀:** 묶음 축약 뒤 슈퍼노드 18개까지는 완전 탐색(2^18 ≈ 26만, 약 0.6초 — 22개는 10초). **넘어도 막지 않고** 지역 탐색으로 푼다(새 출발 12번, 24명 약 0.1초, 16명 60건 모두 완전 탐색 최적과 같음). 참석이 18명을 넘으면 화면이 3팀을 권한다(선택은 매니저)
+- **2팀:** 묶음 축약 뒤 슈퍼노드 18개까지는 완전 탐색(팀 인원을 고르게 맞추는 분할만 세므로 18개면 약 2만 개, 실측 약 0.09초). **넘어도 막지 않고** 지역 탐색으로 푼다(새 출발 12번, 24명 약 0.1초, 16명 60건 모두 완전 탐색 최적과 같음). 참석이 18명을 넘으면 화면이 3팀을 권한다(선택은 매니저)
 - **3팀 지역 탐색:** 욕심쟁이 초기해에서 출발해 이웃(한 명 옮기기 · 두 명 맞바꾸기)을 한 번에 채점하고 가장 좋은 이웃으로 옮기기를 반복, 국소 최적에 빠지면 무작위로 두 번 맞바꿔 흔든 뒤 다시 내려간다. 전략마다 6번 새로 출발 · 흔들기 25번 · 8번 연달아 나아지지 않으면 멈춤 · 시드 고정(같은 입력 → 같은 결과)
 - **정답 기준:** 15명 이하에서는 3팀도 완전 탐색이 가능해, 지역 탐색 결과가 완전 탐색 최적해와 같은지 테스트로 검증한다(60건 중 60건 일치)
 
@@ -1078,10 +1087,10 @@ POST /api/v1/events/{event_id}/assignments
 | 레이어 | 선택 | 선정 이유 · 쓰임 |
 | --- | --- | --- |
 | **Backend** | **FastAPI** (Python 3.12) | ① 알고리즘 코드(NumPy)와 같은 언어 ② **Pydantic 스키마가 곧 OpenAPI 명세** → `docs/04-API명세-openapi.yaml` 을 코드에서 생성 ③ 구조가 명시적 |
-| ORM / 마이그레이션 | SQLAlchemy 2.0 \+ Alembic | ERD 를 코드로, 스키마 이력 0001~0024. 배포할 때 `alembic upgrade head` 를 먼저 돌린다 |
+| ORM / 마이그레이션 | SQLAlchemy 2.0 \+ Alembic | ERD 를 코드로, 스키마 이력 0001~0026. 배포할 때 `alembic upgrade head` 를 먼저 돌린다. CI 는 `alembic check` 로 모델과 마이그레이션이 어긋나지 않았는지 확인한다 |
 | 검증 | Pydantic v2 | Request/Response 스키마, 비밀번호는 `SecretStr` |
 | **Database** | **PostgreSQL** — 운영 **Neon**(18), 로컬 Docker(16) | JSONB(배정 파라미터 · 전술 본문 · AI 결과), 부분 유니크 인덱스, ENUM 타입 |
-| 인증 | JWT(python\-jose) \+ passlib(bcrypt), 카카오 OAuth | refresh 회전 · 폐기 목록, 로그인 경로 요청 제한 |
+| 인증 | JWT(python\-jose) \+ passlib(bcrypt), 카카오 OAuth | refresh 회전 · 폐기 목록, 토큰 세대(비밀번호 변경 · 재설정 시 다른 기기 로그아웃), 로그인 경로 요청 제한. 운영 환경에서 기본 JWT 키면 서버가 시작을 거부한다 |
 | 메일 | Resend | 비밀번호 재설정 링크 (키가 없으면 서버 로그) |
 | 관리자 화면 | **SQLAdmin** (`/admin`) | 관리자 콘솔을 직접 만들지 않음 — 팀 승인/거절 액션만 추가 |
 | 알고리즘 | NumPy | 2팀 완전 탐색 · 3팀 지역 탐색(벡터화한 이웃 채점) · 잔차 Elo. OR-Tools 는 필요 없었다 |
@@ -1091,7 +1100,7 @@ POST /api/v1/events/{event_id}/assignments
 | 상태 · 데이터 | TanStack Query \+ Zustand | 서버 상태(캐싱 · 재검증)와 인증 상태 분리 |
 | API 타입 | 손으로 쓴 `frontend/src/api/types.ts` | OpenAPI 와 필드명을 맞춘다 (자동 생성 도구는 쓰지 않았다) |
 | **배포** | **Render**(API) · **Vercel**(웹) · **Neon**(DB) | 무료 등급. GitHub 푸시로 자동 배포 |
-| CI · 운영 작업 | GitHub Actions | 푸시마다 ruff · pytest · 타입 검사 · Vitest · 빌드 · Playwright. 매주 월요일 데모 데이터 새로 만들기, 매일 DB 백업(pg_dump) |
+| CI · 운영 작업 | GitHub Actions | 푸시마다 ruff · `alembic check` · pytest · 타입 검사 · Vitest · 빌드 · Playwright. 매주 월요일 데모 데이터 새로 만들기, 매일 DB 백업(pg_dump) |
 | 테스트 | pytest \+ httpx (백), Vitest \+ Testing Library \+ Playwright (프론트) | 권한 · 배정 제약 · 롤백 · 전술 · AI 가드레일 · 쿼리 수 예산 |
 | 문서 | FastAPI `/docs` (로컬) \+ `docs/01~07` \+ 이 문서 | API 명세가 코드와 동기화 |
 
@@ -1192,7 +1201,7 @@ MVP에서는 **카카오 먼저** 만드는 편이 낫습니다. 이메일 경�
 | 1 | 서비스명 · 목적 · 페인포인트 · 액터 · 기능 요구사항 | ✅ HOOPLY, `docs/01` |
 | 2 | 화면 설계 · ERD · API 명세 · 배정 알고리즘 검증 | ✅ `docs/02` · `03` · `04`, 시뮬레이션(`scripts/simulate_rating.py`) |
 | 3 | 애플리케이션 개발 (9.8절 순서) | ✅ 운영 중 — https://hooply-green.vercel.app |
-| 4 | 테스트 · 디버깅 | ✅ pytest 약 210개 · Vitest 61개 · Playwright 22개, GitHub Actions |
+| 4 | 테스트 · 디버깅 | ✅ pytest 246개 · Vitest 84개 · Playwright 22개, GitHub Actions |
 | 5 | AI 설명 · 전술 (14장) | ✅ `docs/07` v1.9, AI 검증 `docs/eval_result.md` |
 | 6 | 데모 · 포트폴리오 | ✅ `docs/05` 데모 시나리오, 데모 데이터 매주 자동 갱신 |
 

@@ -23,6 +23,8 @@ export const assignmentsApi = {
   run: (eventId: number, body: AssignmentRunRequest) =>
     api<AssignmentRunView>(`/events/${eventId}/assignments`, { method: 'POST', body }),
   lastConstraints: (eventId: number) => api<ConstraintSet>(`/events/${eventId}/assignments/last-constraints`),
+  /** 이 일정의 배정 실행 이력 (최신순, 매니저) — 돌아왔을 때 마지막 조건을 되살리는 데 쓴다 */
+  runs: (eventId: number) => api<{ items: AssignmentRunView[] }>(`/events/${eventId}/assignments`),
   getRun: (runId: number) => api<AssignmentRunView>(`/assignments/runs/${runId}`),
   /** 그룹 교환: a 는 b 의 팀으로, b 는 a 의 팀으로. 한쪽만 보내면 일방 이동 — 3팀이면 toSquadNo 로 옮길 팀을 준다. 묶음은 서버가 통째로 움직인다 */
   exchange: (candidateId: number, aIds: number[], bIds: number[], toSquadNo?: number) =>

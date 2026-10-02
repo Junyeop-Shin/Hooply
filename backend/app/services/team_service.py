@@ -19,6 +19,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import errors
@@ -128,11 +129,13 @@ def join_team(db: Session, user: User, team_code: str) -> Team:
     팀 코드는 대문자로 정규화해서 찾는다 (카카오톡으로 받은 코드를 소문자로 입력해도
     통과). ARCHIVED 팀은 존재해도 "없는 코드"로 취급해 가입을 막는다.
 
-    **재가입 경로(`LEFT` / `REMOVED`).**
+    **재가입 경로(`LEFT`).**
     `players`에는 `UNIQUE (team_id, user_id)` 제약이 있어 같은 사람의 행을 두 번 만들 수
     없다. 그래서 이 사람의 `Player` 행이 이미 있으면 상태로 분기한다:
     - `ACTIVE`  → 이미 소속됨. `409 ALREADY_MEMBER`.
-    - `LEFT` / `REMOVED` → **기존 행을 되살린다** (status를 ACTIVE로, `joined_at` 갱신).
+    - `REMOVED` → 매니저가 제외한 사람. 팀 코드만으로는 돌아올 수 없다 — `403 REMOVED_FROM_TEAM`.
+      (팀 코드는 카카오톡으로 퍼져 있어, 막지 않으면 제외가 의미가 없다)
+    - `LEFT` → 스스로 나간 사람. **기존 행을 되살린다** (status를 ACTIVE로, `joined_at` 갱신).
       새 행을 만들지 않으므로 그 행에 묶인 `PlayerProfile`·쿼터 기록·투표 이력이
       그대로 승계된다. "나갔다 돌아온 사람의 실력 데이터가 0으로 리셋되지 않는다"는
       의도된 동작이다.
@@ -146,7 +149,8 @@ def join_team(db: Session, user: User, team_code: str) -> Team:
     입력: 가입자 `User`, 팀 코드 문자열
     출력: 가입된 `Team`
     부수 효과: `db.commit()`.
-    에러: `404 TEAM_CODE_NOT_FOUND`, `409 ALREADY_MEMBER`.
+    에러: `404 TEAM_CODE_NOT_FOUND`, `409 ALREADY_MEMBER` (같은 코드로 동시에 두 번 가입해도 하나만 성공),
+    `403 REMOVED_FROM_TEAM`.
     """
     team = db.scalar(select(Team).where(Team.team_code == team_code.upper()))
     if team is None or team.status == TeamStatus.ARCHIVED:
@@ -155,6 +159,8 @@ def join_team(db: Session, user: User, team_code: str) -> Team:
     if existing is not None:
         if existing.status == PlayerStatus.ACTIVE:
             raise errors.AlreadyMember()
+        if existing.status == PlayerStatus.REMOVED:
+            raise errors.RemovedFromTeam()
         existing.status = PlayerStatus.ACTIVE  # 탈퇴 후 재가입 — 기록은 승계
         existing.joined_at = datetime.now(UTC)
         existing.role = TeamRole.PLAYER  # 권한은 승계하지 않음 (제외된 매니저의 자동 복귀 방지)
@@ -164,7 +170,11 @@ def join_team(db: Session, user: User, team_code: str) -> Team:
 
         survey_service.on_member_joined(db, existing)
     else:
-        _add_member(db, team, user, role=TeamRole.PLAYER)
+        try:
+            _add_member(db, team, user, role=TeamRole.PLAYER)
+        except IntegrityError:  # 검사와 저장 사이에 같은 사람이 먼저 가입했다 (uq_players_team_user)
+            db.rollback()
+            raise errors.AlreadyMember() from None
     refresh_team_status(db, team)
     db.commit()
     return team

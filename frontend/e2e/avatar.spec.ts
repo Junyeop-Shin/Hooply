@@ -5,15 +5,16 @@ import { login, MANAGER } from './helpers'
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGN4li1LEmIY1TCqYfhqAABc724QodhNOQAAAABJRU5ErkJggg==', 'base64')
 
 test('프로필 사진 추가 → 팀원 목록 아바타에 반영 → 삭제', async ({ page }) => {
-  page.on('dialog', (d) => d.accept())
   await login(page, MANAGER)
+  // 지우기는 확인 시트에서 한 번 더 누른다
+  const confirmDelete = () => page.getByRole('dialog', { name: '프로필 사진을 지울까요?' }).getByRole('button', { name: '지우기' }).click()
   await page.goto('/me')
 
   // 프로필 카드가 다 그려진 뒤에 판단한다 — 로딩 중에 보면 '사진 없음' 으로 잘못 읽는다
   await expect(page.getByRole('button', { name: /프로필 사진 (추가하기|바꾸기)/ })).toBeVisible()
   // 이전 실행이 남긴 사진이 있으면 먼저 지운다 (반복 실행 가능하게)
   const remove = page.getByRole('button', { name: '프로필 사진 삭제' })
-  if (await remove.isVisible()) await remove.click()
+  if (await remove.isVisible()) { await remove.click(); await confirmDelete() }
   await expect(page.getByRole('button', { name: '프로필 사진 추가하기' })).toBeVisible()
 
   await page.setInputFiles('input[type=file]', { name: 'me.png', mimeType: 'image/png', buffer: PNG })
@@ -28,12 +29,13 @@ test('프로필 사진 추가 → 팀원 목록 아바타에 반영 → 삭제',
 
   // 팀원 목록의 동그란 아바타에도 같은 사진이 들어간다
   await page.goto('/teams/1')
-  await page.getByRole('button', { name: /팀원 \d+/ }).click()
+  await page.getByRole('tab', { name: /팀원 \d+/ }).click()
   await expect(page.locator('img[src*="avatar"]').first()).toBeVisible({ timeout: 15000 })
 
   // 지우면 이름 첫 글자로 돌아간다
   await page.goto('/me')
   await page.getByRole('button', { name: '프로필 사진 삭제' }).click()
+  await confirmDelete()
   await expect(page.getByRole('button', { name: '프로필 사진 추가하기' })).toBeVisible()
   await expect(page.locator('img[src*="avatar"]')).toHaveCount(0)
 })

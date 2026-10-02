@@ -10,7 +10,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { ApiError } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
 import { tacticStarsApi, tacticsApi, teamPlaysApi } from '../api/tactics'
 import type { AiTacticItem, EventView, Play, PlayLineup, SlotLineup, SquadRecommendation } from '../api/types'
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
@@ -56,6 +56,7 @@ export function TacticsTab({ teamId }: { teamId: number }) {
   const star = useMutation({
     mutationFn: ({ key, on }: { key: string; on: boolean }) => tacticStarsApi.set(teamId, playKeyOf(key), on),
     onSuccess: (v) => qc.setQueryData(['tactics', 'stars', teamId], v),
+    meta: { inlineError: true },
   })
   const starred = stars.data?.play_keys.map(keyOf) ?? [] // 전술판 주소 키, 별표한 순서
   const canStar = !!stars.data?.can_edit
@@ -89,7 +90,7 @@ export function TacticsTab({ teamId }: { teamId: number }) {
         title="인바운드" desc="골밑 베이스라인에서 공을 넣을 때 쓰는 전술이에요. 오늘 추천에는 들어가지 않아요."
         items={presets.data && rest(presets.data.items.filter((p) => p.situation === 'inbound'))} loading={presets.isLoading} row={row}
       />
-      {star.isError && <p className="px-1 text-xs text-danger-ink">{star.error instanceof ApiError ? star.error.message : '별표를 바꾸지 못했어요.'}</p>}
+      {star.isError && <p className="px-1 text-xs text-danger-ink">{errorMessage(star.error, '별표를 바꾸지 못했어요.')}</p>}
     </div>
   )
 }

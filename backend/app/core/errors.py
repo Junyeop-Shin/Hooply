@@ -29,6 +29,10 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError
+
+# 409 CONFLICT 로 바꾸는 SQLSTATE — 유니크 위반 · 외래키 위반 · 교착 · 직렬화 실패
+_CONFLICT_STATES = {"23505", "23503", "40P01", "40001"}
 
 
 class ErrorDetail(BaseModel):
@@ -131,9 +135,12 @@ KakaoAuthFailed = _error(401, "KAKAO_AUTH_FAILED", "카카오 로그인에 실�
 ForbiddenRole = _error(403, "FORBIDDEN_ROLE", "이 기능은 매니저만 쓸 수 있어요.")
 # 소속되지 않은 팀의 자원에 접근 — deps.require_team_member / require_event_member
 NotAMember = _error(403, "NOT_A_MEMBER", "내가 속한 팀이 아니에요.")
+# 매니저가 제외(REMOVED)한 팀에 팀 코드로 다시 가입 — POST /teams/join. 스스로 나간(LEFT) 사람은 다시 들어올 수 있다
+RemovedFromTeam = _error(403, "REMOVED_FROM_TEAM", "매니저가 제외한 팀이에요. 매니저에게 문의해 주세요.")
 # 그 일정에 참석하지 않은 사람이 피어 설문 조회 — GET /events/{id}/post-game-survey
 NotAttendee = _error(403, "NOT_ATTENDEE", "이 일정에 참석한 사람만 볼 수 있어요.")
-# 남이 등록한 게스트를 등록자도 매니저도 아닌 플레이어가 수정·삭제 — 게스트 기능 설계
+# 남이 등록한 게스트를 등록자도 매니저도 아닌 플레이어가 수정·삭제 — 게스트 기능 설계.
+# 팀원 제외에서도 쓴다: 팀장이 아닌 매니저가 매니저를 제외하거나, 누가 팀장을 제외하려 할 때 (문구를 바꿔 던진다)
 ForbiddenNotOwner = _error(403, "FORBIDDEN_NOT_OWNER", "이 게스트를 등록한 사람만 수정할 수 있어요.")
 # 일정 종료 시각 전에 피어 투표 후보 조회·제출 — 피어 투표 설계 (종료 시각이 지나면 자동 오픈)
 SurveyNotOpen = _error(403, "SURVEY_NOT_OPEN", "일정이 끝나면 투표할 수 있어요.")
@@ -167,6 +174,8 @@ AlreadyAdopted = _error(409, "ALREADY_ADOPTED", "이미 확정한 팀 배정이 
 IdentityAlreadyLinked = _error(409, "IDENTITY_ALREADY_LINKED", "다른 계정에 이미 연결된 카카오 계정이에요.")
 # merged_into_player_id 가 이미 채워진 게스트를 또 병합 — POST /players/{id}:merge
 AlreadyMerged = _error(409, "ALREADY_MERGED", "이미 기록을 이어 준 게스트예요.")
+# 같은 행을 두 요청이 동시에 만들거나 바꿈 (DB 유니크 위반 · 교착) — 아래 install_error_handlers 가 IntegrityError 에서 바꾼다
+Conflict = _error(409, "CONFLICT", "동시에 처리된 요청이 있어요. 다시 시도해 주세요.")
 
 # ---------------------------------------------------------------------------
 # 422 — 형식은 맞지만 도메인 규칙에 걸림.
@@ -185,6 +194,8 @@ CannotDemoteLastManager = _error(422, "CANNOT_DEMOTE_LAST_MANAGER", "매니저�
 PlayerNotInTeam = _error(422, "PLAYER_NOT_IN_TEAM", "이 팀에 없는 사람이 섞여 있어요.")
 # 전술 자리 배치에 그날 그 팀(블랙/화이트/레드)이 아닌 선수를 앉힘 — PUT /events/{id}/tactics/{play_key}/slots
 PlayerNotInSquad = _error(422, "PLAYER_NOT_IN_SQUAD", "이 팀에 배정되지 않은 사람이 섞여 있어요.")
+# 쿼터 기록이 있는 일정에서 배정 실행 · 확정 · 수정 — 기록이 그날 편성을 근거로 하므로 (POST /events/{id}/assignments 등)
+AssignmentLocked = _error(422, "ASSIGNMENT_LOCKED", "경기 기록이 있는 일정은 팀을 다시 짤 수 없어요. 쿼터 기록을 먼저 지워 주세요.")
 # 직접 만든 전술이 재생 가능성 검사(docs/07 FR-41)를 통과하지 못함 — details[] 에 "N단계: …" 문장
 PlayNotPlayable = _error(422, "PLAY_NOT_PLAYABLE", "이대로는 전술판에서 재생할 수 없어요.")
 # 병합 방향이 게스트 → 회원이 아님 (회원끼리, 게스트끼리 등) — POST /players/{id}:merge
@@ -228,6 +239,21 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _app_error(_: Request, exc: AppError) -> JSONResponse:
         body = ErrorResponse(code=exc.code, message=exc.message, details=exc.details)
         return JSONResponse(status_code=exc.status_code, content=body.model_dump())
+
+    @app.exception_handler(DBAPIError)
+    async def _db_error(request: Request, exc: DBAPIError) -> JSONResponse:
+        # 검사 → 저장 사이에 다른 요청이 같은 행을 먼저 만든 경우(유니크 위반)나 교착이 500 으로 새지 않게.
+        # 세션 롤백은 get_db 가 한다 (app/db/session.py)
+        state = getattr(exc.orig, "sqlstate", None)
+        if state == "23514":  # CHECK 위반 — 스키마 검증을 빠져나온 값
+            err: AppError = ValidationError()
+        elif state in _CONFLICT_STATES:
+            err = Conflict()
+        else:
+            return await _unexpected(request, exc)
+        logging.getLogger("hooply").warning("DB 충돌 %s %s: %s %s", request.method, request.url.path, state, type(exc.orig).__name__)
+        body = ErrorResponse(code=err.code, message=err.message, details=[])
+        return JSONResponse(status_code=err.status_code, content=body.model_dump())
 
     @app.exception_handler(Exception)
     async def _unexpected(request: Request, exc: Exception) -> JSONResponse:

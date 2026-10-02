@@ -14,7 +14,17 @@
 
 from datetime import date, datetime, time
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, String, Text, Time, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, BigPK, TimestampMixin
@@ -31,10 +41,15 @@ class Event(TimestampMixin, Base):
     __tablename__ = "events"
 
     # 일정 목록·실력 재계산이 모두 "팀으로 좁혀 날짜순" 이라 복합 인덱스로 정렬까지 인덱스가 맡게 한다
-    __table_args__ = (Index("ix_events_team_date", "team_id", "event_date", "id"),)
+    # team_id 단독 조회도 이 인덱스(team_id 가 맨 앞)가 맡는다 — 단독 인덱스는 0025 에서 지웠다
+    __table_args__ = (
+        Index("ix_events_team_date", "team_id", "event_date", "id"),
+        # 자정을 넘기는 일정은 받지 않는다 (event_service 와 같은 규칙). 시각이 하나라도 비면 검사하지 않는다
+        CheckConstraint("start_time IS NULL OR end_time IS NULL OR end_time > start_time", name="ck_events_time_order"),
+    )
 
     id: Mapped[BigPK]
-    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(100))  # 없으면 화면에서 날짜로 대체
     event_date: Mapped[date] = mapped_column(Date, nullable=False)  # 모임 날짜 (필수)
     start_time: Mapped[time | None] = mapped_column(Time)  # 시작 시각 (시간대 없는 벽시계 시간)
@@ -66,6 +81,7 @@ class EventAttendance(Base):
         # 한 회차에 한 참가자는 응답 1건. 응답 변경은 UPDATE
         UniqueConstraint("event_id", "player_id", name="uq_event_attendances_player"),
         Index("ix_event_attendances_event_status", "event_id", "status"),  # 6.4절: 참석자 조회
+        Index("ix_event_attendances_lock_request", "team_lock_request_player_id"),
     )
 
     id: Mapped[BigPK]
@@ -79,6 +95,6 @@ class EventAttendance(Base):
     registered_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))  # 게스트 등록자 / 대리 응답한 매니저
     # 게스트 기능 설계: "이 게스트를 이 player 와 같은 팀으로 배정해 달라" 는 **요청**. 게스트 행에만 값이
     # 들어가며 강제 제약이 아니다. 매니저가 S-12 배정 화면에서 "묶기 제안" 으로 보고 승인해야 LOCK 제약이 된다.
-    team_lock_request_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"), index=True)
+    team_lock_request_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
 
     event: Mapped[Event] = relationship(back_populates="attendances")

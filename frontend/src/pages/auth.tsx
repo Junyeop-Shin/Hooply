@@ -2,7 +2,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
-import { ApiError } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
 import { useAuthStore } from '../store/auth'
 import { Alert, Button, Field } from '../components/ui'
 import { Screen } from '../components/layout'
@@ -28,7 +28,7 @@ export async function startKakao(mode: 'login' | 'link', onError: (m: string) =>
     sessionStorage.setItem('kakao_mode', mode)
     window.location.href = url
   } catch (e) {
-    onError(e instanceof ApiError ? e.message : '카카오 로그인을 시작하지 못했어요.')
+    onError(errorMessage(e, '카카오 로그인을 시작하지 못했어요.'))
   }
 }
 
@@ -68,7 +68,7 @@ export function KakaoCallbackPage() {
         const pair = await authApi.kakaoCallback(code, state)
         login(pair)
         nav('/', { replace: true })  // 새 가입자는 홈에서 시작 안내 팝업을 본다
-      } catch (e) { setErr(e instanceof ApiError ? e.message : '카카오 로그인에 실패했어요.') }
+      } catch (e) { setErr(errorMessage(e, '카카오 로그인에 실패했어요.')) }
     })()
   }, [nav, login])
   return (
@@ -102,7 +102,7 @@ export function LoginPage() {
       setTokens(await authApi.login(email, password))
       nav('/', { replace: true })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '로그인에 실패했어요.')
+      setError(errorMessage(err, '로그인에 실패했어요.'))
     } finally {
       setLoading(false)
     }
@@ -156,16 +156,14 @@ export function SignupPage() {
       setTokens(pair)
       nav('/', { replace: true }) // 가입 직후 홈 — 시작 안내 팝업에서 설문·팀 가입으로 안내한다
     } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.code === 'VALIDATION_ERROR') {
-          const fe: Record<string, string> = {}
-          err.details.forEach((d) => {
-            if (d.field) fe[d.field.replace(/^body\./, '')] = d.reason
-          })
-          setFieldErrors(fe)
-        }
-        setError(err.message)
-      } else setError('회원가입에 실패했어요.')
+      if (err instanceof ApiError && err.code === 'VALIDATION_ERROR') {
+        const fe: Record<string, string> = {}
+        err.details.forEach((d) => {
+          if (d.field) fe[d.field.replace(/^body\./, '')] = d.reason
+        })
+        setFieldErrors(fe)
+      }
+      setError(errorMessage(err, '회원가입에 실패했어요.'))
     } finally {
       setLoading(false)
     }
@@ -175,7 +173,8 @@ export function SignupPage() {
     <Screen className="px-6 pb-8">
       <div className="pt-10 pb-6">
         <h1 className="text-2xl font-black text-ink">회원가입</h1>
-        <p className="mt-1 text-sm text-muted">가입 후 2분짜리 실력 설문이 이어져요.</p>
+        {/* 가입하면 홈으로 간다 — 홈의 시작 안내(팝업 → 할 일 목록)가 팀 가입 · 2분짜리 실력 설문을 차례로 안내한다 */}
+        <p className="mt-1 text-sm text-muted">가입하면 홈에서 시작 안내가 떠요. 팀 가입과 2분짜리 실력 설문을 차례로 도와드려요.</p>
       </div>
       <form onSubmit={submit} className="space-y-3">
         <Field label="이메일" type="email" value={form.email} onChange={set('email')} error={fieldErrors.email} required />
@@ -184,7 +183,7 @@ export function SignupPage() {
         <Field label="닉네임 (선택)" value={form.nickname} onChange={set('nickname')} hint="팀원에게 보이는 이름. 비우면 이름을 써요." />
         <Field label="키 (cm)" type="number" inputMode="numeric" value={form.height_cm} onChange={set('height_cm')} placeholder="178" hint="골밑 적성 계산에만 쓰이고 다른 팀원에게 보이지 않아요." error={fieldErrors.height_cm} />
         {error && <Alert>{error}</Alert>}
-        <Button type="submit" full loading={loading} className="mt-2">가입하고 설문 시작</Button>
+        <Button type="submit" full loading={loading} className="mt-2">가입하기</Button>
       </form>
       <p className="mt-6 text-center text-sm text-muted">
         이미 계정이 있나요? <Link to="/login" className="font-semibold text-brand-ink">로그인</Link>
