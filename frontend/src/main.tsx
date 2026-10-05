@@ -8,6 +8,7 @@ import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { ToastHost } from './components/toast'
 import { ConfirmHost } from './components/confirm-sheet'
+import { LoadingHost } from './components/loading'
 import { reloadForNewVersion } from './lib/stale-chunk'
 
 // 미리 불러오기(modulepreload · CSS)가 예전 파일 이름으로 실패할 때도 새 버전을 받는다 (lazy 화면은 App.tsx 에서)
@@ -21,6 +22,7 @@ createRoot(document.getElementById('root')!).render(
           <App />
           <ToastHost />
           <ConfirmHost />
+          <LoadingHost />
         </BrowserRouter>
       </QueryClientProvider>
     </ErrorBoundary>

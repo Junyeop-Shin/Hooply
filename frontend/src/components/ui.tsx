@@ -5,12 +5,12 @@
  *   ghost                = 취소·뒤로 등 눈에 띄지 않아야 하는 액션
  * 터치 영역은 최소 44px (설계서 5.1절).
  */
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 import { useModal } from './use-modal'
 import { API_ORIGIN } from '../api/client'
 import type { ApprovalStatus, SkillGrade, TeamRole, TeamStatus } from '../api/types'
-import { ROTATE_MS, SLOW_AFTER_MS, WAIT_SUBLINE, pickWaitMessage } from '../lib/wait-messages'
+import { useLoadingMark } from '../store/loading'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
@@ -223,33 +223,10 @@ export function Sheet({ label, title, onClose, tall = true, children }: {
   )
 }
 
-/** 5초가 넘게 돌면 서버가 깨는 중일 수 있다 — 농구 문구를 무작위로 띄우고 6초마다 바꾼다 (lib/wait-messages) */
-function useSlowMessage(): string | null {
-  const [msg, setMsg] = useState<string | null>(null)
-  useEffect(() => {
-    let rotate: number | undefined
-    const start = window.setTimeout(() => {
-      setMsg(pickWaitMessage())
-      rotate = window.setInterval(() => setMsg((m) => pickWaitMessage(m)), ROTATE_MS)
-    }, SLOW_AFTER_MS)
-    return () => { window.clearTimeout(start); if (rotate !== undefined) window.clearInterval(rotate) }
-  }, [])
-  return msg
-}
-
+/** 불러오는 중. 빙글빙글은 화면 가운데에 하나만 뜬다(components/loading 의 LoadingHost) — 여기서는 로딩 중이라고 알리고 자리만 잡아 둔다 */
 export function Spinner() {
-  const slow = useSlowMessage()
-  return (
-    <div className="flex flex-col items-center gap-3 py-12">
-      <span className="size-7 animate-spin rounded-full border-[3px] border-brand-line border-t-brand" aria-hidden={slow ? true : undefined} />
-      {slow && (
-        <div role="status" aria-live="polite" className="text-center">
-          <p className="text-sm font-semibold text-ink-2">{slow}</p>
-          <p className="mt-0.5 text-xs text-muted">{WAIT_SUBLINE}</p>
-        </div>
-      )}
-    </div>
-  )
+  useLoadingMark()
+  return <div className="h-24" aria-hidden="true" />
 }
 
 /** 불러오지 못했을 때 — 빈 화면("일정이 없어요")으로 오해하지 않게 오류와 다시 시도 버튼을 보여 준다 */
