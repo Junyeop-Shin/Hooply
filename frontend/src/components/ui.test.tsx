@@ -23,3 +23,13 @@ describe('Avatar', () => {
     expect(screen.getByText('서')).toBeInTheDocument()
   })
 })
+
+describe('Avatar — 주소가 바뀌면 다시 시도한다 (사진을 새로 올린 경우)', () => {
+  it('실패한 뒤 src 가 바뀌면 이미지를 다시 그린다', () => {
+    const { rerender } = render(<Avatar name="서장훈" src="/api/v1/users/9/avatar?v=old" />)
+    fireEvent.error(screen.getByRole('presentation', { hidden: true }))
+    expect(screen.getByText('서')).toBeInTheDocument()
+    rerender(<Avatar name="서장훈" src="/api/v1/users/9/avatar?v=new" />)
+    expect(screen.getByRole('presentation', { hidden: true }).getAttribute('src')).toBe('/api/v1/users/9/avatar?v=new')
+  })
+})

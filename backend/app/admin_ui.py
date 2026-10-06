@@ -1,11 +1,13 @@
 """관리자 콘솔 (S-18) — SQLAdmin 을 `/admin` 에 붙인다 (11.2절 · 11.4절 "관리자 화면을 만들지 않는다").
 
 - 로그인: 이메일/비밀번호 + `users.global_role = ADMIN` 인 계정만. 세션 쿠키는 JWT 비밀키로 서명한다.
-  로그인 시도는 API 로그인과 같은 제한(IP · 이메일, core/ratelimit)을 받고, bcrypt · DB 조회는 스레드에서 돌린다
-  (이벤트 루프를 0.2초씩 막지 않게).
-- 조회·수정: 사용자·팀만 고칠 수 있다. 사용자 수정(특히 global_role)은 audit_logs 에 남긴다.
-  참가자 · 일정 · 참석 · 쿼터는 읽기 전용 — 지표 재계산 · 팀 상태 같은 서비스 규칙을 건너뛰고 바뀌면 안 되기 때문.
-  지표 보정은 이력을 남기는 API(`PATCH /api/v1/admin/players/{id}/rating`)로만.
+  로그인 시도는 API 로그인과 같은 제한(IP 분당 10회 + (IP, 이메일) 쌍 실패 10분 10회, core/ratelimit)을 받고,
+  bcrypt · DB 조회는 스레드에서 돌린다 (이벤트 루프를 0.2초씩 막지 않게).
+  세션에는 로그인 당시의 토큰 세대(`users.token_version`)도 담아 두고 매 요청마다 대조한다 — 비밀번호를 바꾸거나
+  재설정하면(세대가 오른다) 콘솔 세션도 함께 끝난다.
+- 조회·수정: 사용자·팀만 고칠 수 있다. 사용자 수정(특히 global_role)은 audit_logs 에 남기고, 이메일은 저장 전에 소문자로
+  맞춘다 (ck_users_email_lower). 참가자 · 일정 · 참석 · 쿼터 · 배정 · 투표 · 정렬은 읽기 전용 — 지표 재계산 · 팀 상태
+  같은 서비스 규칙을 건너뛰고 바뀌거나 지워지면 안 되기 때문. 지표 보정은 이력을 남기는 API(`PATCH /api/v1/admin/players/{id}/rating`)로만.
 - 프론트(nginx)는 /api 만 프록시하므로 콘솔은 백엔드 주소(예: http://localhost:8000/admin)로 직접 연다.
 """
 
@@ -53,13 +55,16 @@ class AdminAuth(AuthenticationBackend):
         email, password = normalize_email(str(form.get("username", ""))), str(form.get("password", ""))
         try:
             ratelimit.ADMIN_LOGIN(request)
-            ratelimit.ADMIN_LOGIN.by_email(email)
+            ratelimit.ADMIN_LOGIN_FAIL.guard(request, email)
         except errors.RateLimited:
             return False
-        uid = await run_in_threadpool(_check_admin_login, email, password)
-        if uid is None:
+        found = await run_in_threadpool(_check_admin_login, email, password)
+        if found is None:
+            ratelimit.ADMIN_LOGIN_FAIL.failed(request, email)
             return False
-        request.session.update({"admin_user_id": uid})
+        ratelimit.ADMIN_LOGIN_FAIL.succeeded(request, email)
+        uid, version = found
+        request.session.update({"admin_user_id": uid, "admin_token_version": version})
         return True
 
     async def logout(self, request: Request) -> bool:
@@ -70,11 +75,11 @@ class AdminAuth(AuthenticationBackend):
         uid = request.session.get("admin_user_id")
         if not uid:
             return False
-        return await run_in_threadpool(_is_admin, uid)
+        return await run_in_threadpool(_is_admin, uid, request.session.get("admin_token_version"))
 
 
-def _check_admin_login(email: str, password: str) -> int | None:
-    """ADMIN 계정이고 비밀번호가 맞으면 user id. 없는 계정도 가짜 해시로 검증해 시간이 같게 (auth_service.login 과 같은 규칙)."""
+def _check_admin_login(email: str, password: str) -> tuple[int, int] | None:
+    """ADMIN 계정이고 비밀번호가 맞으면 (user id, 토큰 세대). 없는 계정도 가짜 해시로 검증해 시간이 같게 (auth_service.login 과 같은 규칙)."""
     from app.services.auth_service import _dummy_password_hash
 
     with SessionLocal() as db:
@@ -84,13 +89,14 @@ def _check_admin_login(email: str, password: str) -> int | None:
             return None
         if not verify_password(password, user.password_hash) or user.global_role != GlobalRole.ADMIN:
             return None
-        return user.id
+        return user.id, user.token_version or 0
 
 
-def _is_admin(uid: int) -> bool:
+def _is_admin(uid: int, version: int | None) -> bool:
+    """세션의 계정이 아직 ADMIN 이고, 로그인 당시의 토큰 세대와 같은가 (비밀번호 변경 · 재설정 뒤의 세션은 거부)."""
     with SessionLocal() as db:
         user = db.get(User, uid)
-        return bool(user and user.global_role == GlobalRole.ADMIN and user.deleted_at is None)
+        return bool(user and user.global_role == GlobalRole.ADMIN and user.deleted_at is None and (user.token_version or 0) == (version or 0))
 
 
 # 사용자 수정 때 감사 로그에 남기는 필드 (비밀번호 해시는 폼에서 빠져 있다)
@@ -120,8 +126,15 @@ class UserAdmin(ModelView, model=User):
     column_default_sort = (User.id, True)
 
     async def on_model_change(self, data: dict, model: Any, is_created: bool, request: Request) -> None:
+        from app.services.auth_service import normalize_email
+
         # 바뀌기 전 값을 요청에 붙여 둔다 (after_model_change 에서 비교)
         request.state.user_before = None if is_created else _snapshot(model)
+        # 이메일은 소문자로만 저장한다 (ck_users_email_lower) — 폼에서 대문자로 적어도 CHECK 에 걸리지 않게
+        if data.get("email"):
+            data["email"] = normalize_email(str(data["email"]))
+        elif "email" in data:
+            data["email"] = None
 
     async def after_model_change(self, data: dict, model: Any, is_created: bool, request: Request) -> None:
         before = getattr(request.state, "user_before", None)
@@ -213,31 +226,31 @@ class LineupAdmin(ModelView, model=QuarterLineup):
 
 class RunAdmin(ModelView, model=AssignmentRun):
     name, name_plural, icon = "배정 실행", "배정 실행", "fa-solid fa-shuffle"
-    can_create = can_edit = False
+    can_create = can_edit = can_delete = False  # 확정된 편성은 쿼터 기록의 근거 — 지우기는 API(재배정 · 쿼터 삭제)로만
     column_list = [AssignmentRun.id, AssignmentRun.event_id, AssignmentRun.executed_by, AssignmentRun.team_count, AssignmentRun.created_at]
 
 
 class CandidateAdmin(ModelView, model=AssignmentCandidate):
     name, name_plural, icon = "배정 후보안", "배정 후보안", "fa-solid fa-table-list"
-    can_create = can_edit = False
+    can_create = can_edit = can_delete = False
     column_list = [AssignmentCandidate.id, AssignmentCandidate.run_id, AssignmentCandidate.strategy, AssignmentCandidate.total_score, AssignmentCandidate.is_adopted]
 
 
 class SurveyAdmin(ModelView, model=PostGameSurvey):
     name, name_plural, icon = "피어 투표 제출", "피어 투표 제출", "fa-solid fa-square-poll-horizontal"
-    can_create = can_edit = False
+    can_create = can_edit = can_delete = False  # 지우면 선호 조합(chemistry_scores)을 다시 계산해야 한다 — 서비스 밖에서 지우지 않는다
     column_list = [PostGameSurvey.id, PostGameSurvey.event_id, PostGameSurvey.respondent_player_id, PostGameSurvey.submitted_at]
 
 
 class VoteAdmin(ModelView, model=PostGameVote):
     name, name_plural, icon = "피어 투표 항목", "피어 투표 항목", "fa-solid fa-thumbs-up"
-    can_create = can_edit = False
+    can_create = can_edit = can_delete = False
     column_list = [PostGameVote.id, PostGameVote.survey_id, PostGameVote.target_player_id, PostGameVote.vote_type, PostGameVote.target_side, PostGameVote.reason_tag]
 
 
 class RankingAdmin(ModelView, model=ManagerRanking):
     name, name_plural, icon = "매니저 실력 정렬", "매니저 실력 정렬", "fa-solid fa-arrow-down-1-9"
-    can_create = can_edit = False
+    can_create = can_edit = can_delete = False  # 활성 정렬을 지우면 사전값 재계산이 빠진다 — 새 정렬 저장으로 대체
     column_list = [ManagerRanking.id, ManagerRanking.team_id, ManagerRanking.ranked_by, ManagerRanking.is_active, ManagerRanking.created_at]
 
 

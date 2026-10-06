@@ -1,7 +1,7 @@
 /** S-05 팀 생성 · S-06 팀 가입 · S-07 팀 상세 · S-08 팀원 관리 (FR-04 ~ FR-07). */
 import { useState, type FormEvent } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, errorMessage as errMsg } from '../api/client'
 import { teamsApi } from '../api/teams'
 import { eventsApi } from '../api/events'
@@ -12,7 +12,7 @@ import { AdoptedSummary } from '../components/adopted'
 import { surveyApi } from '../api/survey'
 import { localISODate, type PlayerCard, type PlayerCardDetailed, type TeamDetail } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, LoadError, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
-import { BottomAction, Content, Screen, TopBar } from '../components/layout'
+import { BottomAction, Content, Screen, TopBar, useFinish } from '../components/layout'
 import { RecordsTab } from '../components/records'
 import { TacticsTab } from '../components/tactics'
 
@@ -44,7 +44,8 @@ export function TeamCreatePage() {
   const [created, setCreated] = useState<{ id: number; team_code: string } | null>(null)
   const m = useMutation({
     mutationFn: () => teamsApi.create({ name: form.name, description: form.description || undefined, home_court: form.home_court || undefined }),
-    onSuccess: (res) => { setCreated(res); qc.invalidateQueries({ queryKey: ['me', 'teams'] }) },
+    // 'me' 접두어 — 내 팀 목록과 함께 시작 안내 단계(['me', 'tutorial'])와 기본 팀이 적힌 내 정보(['me'])도 새로 받는다
+    onSuccess: (res) => { setCreated(res); qc.invalidateQueries({ queryKey: ['me'] }) },
     meta: { inlineError: true },
   })
 
@@ -113,7 +114,8 @@ export function TeamJoinPage() {
   const [code, setCode] = useState(() => (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().slice(0, 8))  // 초대 링크 ?code= 미리 채움
   const m = useMutation({
     mutationFn: () => teamsApi.join(code.trim().toUpperCase()),
-    onSuccess: (team) => { qc.invalidateQueries({ queryKey: ['me', 'teams'] }); qc.invalidateQueries({ queryKey: ['profile'] }); nav(`/teams/${team.id}/self-rank`, { replace: true, state: { from: `/teams/${team.id}` } }) },
+    // 'me' 접두어 — 내 팀 목록 · 시작 안내 단계 · 기본 팀이 적힌 내 정보를 함께 새로 받는다
+    onSuccess: (team) => { qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['profile'] }); nav(`/teams/${team.id}/self-rank`, { replace: true, state: { from: `/teams/${team.id}` } }) },
     meta: { inlineError: true },  // 아래 Alert 가 서버 문구(제외된 팀 재가입 403 등)를 그대로 보여 준다
   })
   const err = m.error instanceof ApiError ? m.error : null
@@ -177,8 +179,10 @@ export function TeamDetailPage() {
   const nextAdoptedId = sortedEvents.find((e) => e.adopted_candidate_id && e.event_date >= today)?.id
   const upcomingCount = upcomingList.length
 
-  if (team.isLoading) return <Screen><TopBar title="팀" back="/" /><Spinner /></Screen>
+  if (team.isLoading) return <Screen><TopBar title="팀" back="/" /><Spinner page /></Screen>
   if (team.isError || !team.data) {
+    // 내 팀이 아니거나 없는 팀 — 팀을 나간 뒤 뒤로 가기로 되돌아온 경우가 대부분이라 머물 이유가 없다. 홈으로 바꿔치기
+    if (team.error instanceof ApiError && (team.error.status === 403 || team.error.status === 404)) return <Navigate to="/" replace />
     return <Screen><TopBar title="팀" back="/" /><Content><Alert>{errMsg(team.error, '팀을 불러오지 못했어요.')}</Alert></Content></Screen>
   }
   const t = team.data
@@ -255,9 +259,14 @@ export function TeamDetailPage() {
                     {e.id === nextAdoptedId && <AdoptedSummary eventId={e.id} isManager={isManager} />}
                   </div>
                 ))}
-                {/* 마지막 쪽까지 봤는데 서버에 더 오래된 일정이 남아 있으면 다음 묶음을 받는다 */}
+                {/* 마지막 쪽까지 봤는데 서버에 더 오래된 일정이 남아 있으면 다음 묶음을 받는다. 못 받았으면 쪽을 넘기지 않고 알린다 (빈 쪽이 되지 않게) */}
                 {events.hasNextPage && (page + 1) * EVENTS_PAGE >= sortedEvents.length && (
-                  <Button variant="ghost" full loading={events.isFetchingNextPage} onClick={() => events.fetchNextPage().then(() => setPage(page + 1))}>지난 일정 더 불러오기</Button>
+                  <Button variant="ghost" full loading={events.isFetchingNextPage} onClick={async () => {
+                    const before = events.data?.pages.length ?? 0
+                    const r = await events.fetchNextPage()
+                    if (!r.isError && (r.data?.pages.length ?? 0) > before) setPage((p) => p + 1)
+                    else toast(errMsg(r.error, '지난 일정을 더 불러오지 못했어요.'), 'error')
+                  }}>지난 일정 더 불러오기</Button>
                 )}
               </div>
             ) : (
@@ -337,7 +346,7 @@ export function MembersPage() {
   const nav = useNavigate()
   const team = useQuery({ queryKey: ['team', id], queryFn: () => teamsApi.get(id) })
   const t = team.data
-  if (team.isLoading) return <Screen><TopBar title="팀원 관리" back={`/teams/${id}`} /><Spinner /></Screen>
+  if (team.isLoading) return <Screen><TopBar title="팀원 관리" back={`/teams/${id}`} /><Spinner page /></Screen>
   if (!t) {
     return (
       <Screen>
@@ -364,6 +373,7 @@ export function MembersPage() {
 function MembersManager({ team: t }: { team: TeamDetail }) {
   const id = t.id
   const nav = useNavigate()
+  const finish = useFinish()
   const qc = useQueryClient()
   const players = useQuery({ queryKey: ['team', id, 'players', 'skill'], queryFn: () => teamsApi.players(id, 'skill') })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['team', id] }); qc.invalidateQueries({ queryKey: ['me', 'teams'] }) }  // 'team', id 프리픽스로 players·merge-candidates 도 함께 갱신
@@ -376,7 +386,7 @@ function MembersManager({ team: t }: { team: TeamDetail }) {
     onSuccess: (_, v) => {
       refresh(); setOpen(null)
       toast(v.role === 'MANAGER' ? '매니저로 지정했어요.' : '매니저 권한을 해제했어요.')
-      if (v.pid === t.my_player_id && v.role === 'PLAYER') nav(`/teams/${id}`, { replace: true })  // 본인 해제 → 이 화면을 볼 수 없다
+      if (v.pid === t.my_player_id && v.role === 'PLAYER') finish(`/teams/${id}`, 1)  // 본인 해제 → 이 화면을 볼 수 없다. 들어온 팀 화면으로 되감는다
     },
     onError: (e) => toast(errMsg(e, '권한을 바꾸지 못했어요.'), 'error'),
   })

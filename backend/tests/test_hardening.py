@@ -1,13 +1,17 @@
-"""하드닝 묶음 (0025 · 0026): 동시성 409 · 요청 제한 · 토큰 세대 · 운영 키 · 요청 크기 · 관리자 보정 오프셋 ·
-배정 잠금 · 쿼터 점수 상한 · 탈퇴 비식별화 · 이메일 소문자 · 활성 정렬 하나 · 팀 전술 FK · 쿼터 기록의 팀 번호."""
+"""하드닝 묶음 (0025 ~ 0027): 동시성 409 · 요청 제한 · 토큰 세대 · 운영 키 · 요청 크기 · 관리자 보정 오프셋 ·
+배정 잠금 · 쿼터 점수 상한 · 탈퇴 비식별화 · 이메일 소문자 · 활성 정렬 하나 · 팀 전술 FK · 쿼터 기록의 팀 번호 ·
+팀 잠금 순서(B1) · 로그인 실패 제한(B3) · 관리자 보정 이력(B4) · 콘솔 읽기 전용 · 세대(B5 · B6) · 프록시 헤더(B7) ·
+DB 오류 코드(B8) · 자정 넘김 일정(B11) · 검사 결과의 잠금(B13) · 감사 로그 개인정보(B14)."""
 
+import re
 import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.core import errors, ratelimit
@@ -43,7 +47,8 @@ class _Orig(Exception):
         self.sqlstate = sqlstate
 
 
-# 검증: DB 유니크 위반 · 교착은 500 이 아니라 409 CONFLICT, CHECK 위반은 400
+# 검증: DB 유니크 위반은 409 CONFLICT, 교착 · 직렬화 실패는 같은 코드에 "잠시 뒤 다시" 문구, 외래키 위반은 400 REFERENCE_NOT_FOUND,
+# CHECK 위반은 400 VALIDATION_ERROR — 어느 것도 500 으로 새지 않는다
 def test_db_errors_map_to_409_and_400():
     app = FastAPI()
     errors.install_error_handlers(app)
@@ -53,9 +58,13 @@ def test_db_errors_map_to_409_and_400():
         raise IntegrityError("INSERT …", {}, _Orig(state))
 
     c = TestClient(app, raise_server_exceptions=False)
-    for state in ("23505", "23503", "40P01"):
+    r = c.get("/23505")
+    assert r.status_code == 409 and r.json()["code"] == "CONFLICT" and r.json()["message"] == errors.Conflict.message
+    for state in ("40P01", "40001"):
         r = c.get(f"/{state}")
-        assert r.status_code == 409 and r.json()["code"] == "CONFLICT"
+        assert r.status_code == 409 and r.json()["code"] == "CONFLICT" and r.json()["message"] == errors.RETRY_MESSAGE
+    r = c.get("/23503")
+    assert r.status_code == 400 and r.json()["code"] == "REFERENCE_NOT_FOUND"
     r = c.get("/23514")
     assert r.status_code == 400 and r.json()["code"] == "VALIDATION_ERROR"
     assert c.get("/XX000").status_code == 500
@@ -131,14 +140,26 @@ class _Req:
         self.client = type("C", (), {"host": host})()
 
 
-# 검증: Cloudflare 가 넣는 CF-Connecting-IP 를 믿고, 꾸밀 수 있는 X-Forwarded-For 의 첫 값은 믿지 않는다
-def test_client_ip_prefers_cloudflare_header():
-    assert ratelimit.client_ip(_Req({"cf-connecting-ip": "1.2.3.4", "x-forwarded-for": "9.9.9.9"})) == "1.2.3.4"
+# 검증: 운영 같은 환경에서만 Cloudflare 의 CF-Connecting-IP(설정 trusted_proxy_header)를 믿는다. 그 밖에는 X-Forwarded-For 의
+# **마지막** 값(바로 앞 프록시가 덧붙인 것) → 소켓 주소. 꾸밀 수 있는 첫 값과, 프록시 없는 환경의 CF 헤더는 믿지 않는다
+def test_client_ip_trusts_proxy_header_only_in_production(monkeypatch):
+    s = get_settings()
+    assert not s.is_production_like
+    assert ratelimit.client_ip(_Req({"cf-connecting-ip": "1.2.3.4", "x-forwarded-for": "9.9.9.9, 2.2.2.2"})) == "2.2.2.2"
+    assert ratelimit.client_ip(_Req({"cf-connecting-ip": "1.2.3.4"})) == "10.0.0.1"
+    assert ratelimit.client_ip(_Req({"x-forwarded-for": "9.9.9.9, 1.1.1.1"})) == "1.1.1.1"
+    assert ratelimit.client_ip(_Req({})) == "10.0.0.1"
+    monkeypatch.setattr(s, "app_env", "production")
+    assert s.is_production_like
+    assert ratelimit.client_ip(_Req({"cf-connecting-ip": "1.2.3.4", "x-forwarded-for": "9.9.9.9, 2.2.2.2"})) == "1.2.3.4"
+    assert ratelimit.client_ip(_Req({"true-client-ip": "5.6.7.8"})) == "10.0.0.1"  # 설정한 헤더가 아니면 무시
+    monkeypatch.setattr(s, "trusted_proxy_header", "true-client-ip")
     assert ratelimit.client_ip(_Req({"true-client-ip": "5.6.7.8"})) == "5.6.7.8"
-    assert ratelimit.client_ip(_Req({"x-forwarded-for": "9.9.9.9, 1.1.1.1"})) == "10.0.0.1"
+    monkeypatch.setattr(s, "trusted_proxy_header", "")
+    assert ratelimit.client_ip(_Req({"cf-connecting-ip": "1.2.3.4", "x-forwarded-for": "3.3.3.3"})) == "3.3.3.3"
 
 
-# 검증: 창이 지난 키는 훑어 지우고, 키가 너무 많으면 오래된 것부터 버린다 (메모리가 계속 늘지 않게)
+# 검증: 창이 지난 키는 훑어 지우고, 키가 너무 많으면 오래된 것부터 버려 90% 로 줄인다. 넘쳐도 1초에 한 번만 훑는다 (요청마다 전체를 훑지 않게)
 def test_ratelimit_store_is_bounded(monkeypatch):
     get_settings().rate_limit_enabled = True
     now = [1000.0]
@@ -152,22 +173,59 @@ def test_ratelimit_store_is_bounded(monkeypatch):
     assert set(ratelimit._hits) == {"fresh"}
     monkeypatch.setattr(ratelimit, "MAX_KEYS", 10)
     for i in range(30):
-        now[0] += 0.001
+        now[0] += 0.001  # 1초 안에 몰려 들어오면 훑지 않는다 (직전 스윕이 방금 돌았다)
         ratelimit.check(f"x{i}", 5, 60)
-    assert len(ratelimit._hits) <= 11
+    assert len(ratelimit._hits) == 31
+    now[0] += ratelimit.MIN_SWEEP_INTERVAL
+    ratelimit.check("late", 5, 60)  # 1초가 지나 훑는다 — 가장 오래된 키부터 버려 MAX_KEYS 의 90%(9개)로 줄인 뒤 이번 키를 넣는다
+    assert len(ratelimit._hits) == 10 and "late" in ratelimit._hits and "fresh" not in ratelimit._hits and "x29" in ratelimit._hits
 
 
-# 검증: 비밀번호 찾기 · 가입도 이메일 기준으로 센다 — IP 를 바꿔도 같은 이메일은 막힌다
-def test_forgot_and_signup_limited_by_email(client):
+# 검증: 비밀번호 찾기는 이메일마다 한 시간에 메일 5통 — 넘으면 429 가 아니라 **조용히** 보내지 않고 202 (남의 이메일로 그 사람의
+# 비밀번호 찾기를 막을 수 없게). IP 제한(분당 5회)은 그대로. 가입은 IP 로만 센다 (같은 이메일은 어차피 409)
+def test_forgot_silent_mail_cap_and_signup_ip_only(client, signup, monkeypatch):
+    from app.services import mail_service
+
+    signup("target@example.com")
+    sent: list[str] = []
+    monkeypatch.setattr(mail_service, "send_password_reset", lambda to, link: sent.append(to) or True)
     get_settings().rate_limit_enabled = True
-    codes = [
-        client.post(f"{API}/auth/password/forgot", json={"email": "Target@Example.com"}, headers={"cf-connecting-ip": f"7.7.7.{i}"}).status_code
-        for i in range(ratelimit.PASSWORD.limit + 1)
-    ]
+    ip = lambda i: {"x-forwarded-for": f"7.7.7.{i}"}  # 프록시가 덧붙인 마지막 값 — 요청마다 다른 IP
+    codes = [client.post(f"{API}/auth/password/forgot", json={"email": "Target@Example.com"}, headers=ip(i)).status_code for i in range(ratelimit.FORGOT_MAIL.limit + 3)]
+    assert codes == [202] * (ratelimit.FORGOT_MAIL.limit + 3)
+    assert len(sent) == ratelimit.FORGOT_MAIL.limit  # 상한을 넘은 요청은 메일을 보내지 않았다
+    # 같은 IP 에서 연달아 보내면 IP 제한에 걸린다
+    codes = [client.post(f"{API}/auth/password/forgot", json={"email": f"other{i}@example.com"}, headers=ip(99)).status_code for i in range(ratelimit.PASSWORD.limit + 1)]
     assert codes[:-1] == [202] * ratelimit.PASSWORD.limit and codes[-1] == 429
     body = {"email": "dup@example.com", "password": "password123", "name": "x"}
-    codes = [client.post(f"{API}/auth/signup", json=body, headers={"cf-connecting-ip": f"8.8.8.{i}"}).status_code for i in range(ratelimit.SIGNUP.limit + 1)]
-    assert codes[0] == 201 and codes[-1] == 429
+    codes = [client.post(f"{API}/auth/signup", json=body, headers={"x-forwarded-for": f"8.8.8.{i}"}).status_code for i in range(ratelimit.SIGNUP.limit + 1)]
+    assert codes[0] == 201 and all(c == 409 for c in codes[1:])  # 이메일로는 세지 않는다
+    codes = [client.post(f"{API}/auth/signup", json={**body, "email": f"n{i}@example.com"}, headers={"x-forwarded-for": "8.8.8.8"}).status_code for i in range(ratelimit.SIGNUP.limit + 1)]
+    assert codes[:-1] == [201] * ratelimit.SIGNUP.limit and codes[-1] == 429
+
+
+# 검증: 로그인은 (IP, 이메일) 쌍의 **실패**만 센다 — 공격자 IP 가 남의 이메일로 10번 틀려도 본인은 자기 IP 에서 들어오고,
+# 성공하면 그 쌍의 실패 기록이 비워진다. 같은 쌍은 실패 상한을 넘으면 맞는 비밀번호도 429
+def test_login_failures_counted_per_ip_email_pair(client, signup):
+    signup("victim@example.com")
+    get_settings().rate_limit_enabled = True
+    attacker, victim = {"x-forwarded-for": "6.6.6.6"}, {"x-forwarded-for": "9.9.9.9"}
+    bad = {"email": "victim@example.com", "password": "wrong-password"}
+    good = {"email": "victim@example.com", "password": "password123"}
+    assert [client.post(f"{API}/auth/login", json=bad, headers=attacker).status_code for _ in range(ratelimit.LOGIN_FAIL.limit)] == [401] * ratelimit.LOGIN_FAIL.limit
+    ratelimit.clear("login:ip:6.6.6.6")  # IP 분당 상한이 아니라 (IP, 이메일) 실패 상한이 막는지 본다
+    r = client.post(f"{API}/auth/login", json=good, headers=attacker)
+    assert r.status_code == 429 and r.json()["code"] == "RATE_LIMITED"  # 공격자 IP 에서는 맞아도 막힌다
+    assert client.post(f"{API}/auth/login", json=good, headers=victim).status_code == 200  # 본인은 다른 IP 에서 그대로
+    # 성공은 세지 않는다 — 같은 IP 에서 여러 번 로그인해도 429 가 아니다 (IP 분당 상한 안에서)
+    assert [client.post(f"{API}/auth/login", json=good, headers=victim).status_code for _ in range(ratelimit.LOGIN.limit - 2)] == [200] * (ratelimit.LOGIN.limit - 2)
+    # 실패 → 성공 → 실패 기록이 비워져 다시 상한까지 틀릴 수 있다
+    ratelimit.reset()
+    for _ in range(ratelimit.LOGIN_FAIL.limit - 1):
+        assert client.post(f"{API}/auth/login", json=bad, headers=victim).status_code == 401
+    assert client.post(f"{API}/auth/login", json=good, headers=victim).status_code == 200
+    ratelimit.clear("login:ip:9.9.9.9")  # IP 분당 상한은 이 검증의 대상이 아니다
+    assert client.post(f"{API}/auth/login", json=bad, headers=victim).status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +533,8 @@ def test_admin_console_login_and_audit(client, signup):
     from app.models import AuditLog
 
     _make_admin(client, signup)
-    assert admin_ui._check_admin_login("admin@hooply.com", "password123") is not None
+    found = admin_ui._check_admin_login("admin@hooply.com", "password123")
+    assert found is not None and found[1] == 0  # (user id, 토큰 세대)
     assert admin_ui._check_admin_login("admin@hooply.com", "wrong") is None
     assert admin_ui._check_admin_login("nobody@hooply.com", "password123") is None
 
@@ -492,23 +551,258 @@ def test_admin_console_login_and_audit(client, signup):
 
     auth = admin_ui.AdminAuth(secret_key="x")
     req = _FakeRequest({"username": "  ADMIN@hooply.com ", "password": "password123"})
-    assert asyncio.run(auth.login(req)) is True and req.session["admin_user_id"]
+    assert asyncio.run(auth.login(req)) is True and req.session["admin_user_id"] and req.session["admin_token_version"] == 0
+    assert asyncio.run(auth.authenticate(req)) is True
+    # 비밀번호를 바꾸면(세대가 오르면) 로그인해 둔 콘솔 세션도 끝난다
+    admin_h = client.post(f"{API}/auth/login", json={"email": "admin@hooply.com", "password": "password123"}).json()
+    assert client.post(f"{API}/me/password", json={"current_password": "password123", "new_password": "password456"}, headers={"Authorization": f"Bearer {admin_h['access_token']}"}).status_code == 200
+    assert asyncio.run(auth.authenticate(req)) is False
     get_settings().rate_limit_enabled = True
-    results = [asyncio.run(auth.login(_FakeRequest({"username": "admin@hooply.com", "password": "bad"}))) for _ in range(ratelimit.ADMIN_LOGIN.limit + 1)]
-    assert results == [False] * (ratelimit.ADMIN_LOGIN.limit + 1)
-    assert asyncio.run(auth.login(_FakeRequest({"username": "admin@hooply.com", "password": "password123"}))) is False  # 막힌 동안은 맞아도 거부
+    results = [asyncio.run(auth.login(_FakeRequest({"username": "admin@hooply.com", "password": "bad"}))) for _ in range(ratelimit.ADMIN_LOGIN_FAIL.limit)]
+    assert results == [False] * ratelimit.ADMIN_LOGIN_FAIL.limit
+    assert asyncio.run(auth.login(_FakeRequest({"username": "admin@hooply.com", "password": "password456"}))) is False  # 실패 상한을 넘으면 맞아도 거부
 
-    for view in (admin_ui.PlayerAdmin, admin_ui.EventAdmin, admin_ui.AttendanceAdmin, admin_ui.QuarterAdmin):
-        assert not (view.can_create or view.can_edit or view.can_delete)
+    for view in (admin_ui.PlayerAdmin, admin_ui.EventAdmin, admin_ui.AttendanceAdmin, admin_ui.QuarterAdmin, admin_ui.LineupAdmin, admin_ui.ProfileAdmin,
+                 admin_ui.RunAdmin, admin_ui.CandidateAdmin, admin_ui.SurveyAdmin, admin_ui.VoteAdmin, admin_ui.RankingAdmin, admin_ui.HistoryAdmin, admin_ui.AuditAdmin):
+        assert not (view.can_create or view.can_edit or view.can_delete), view
 
     with SessionLocal() as db:
         target = db.scalar(select(User).where(User.email == "admin@hooply.com"))
     view = admin_ui.UserAdmin()
     req = _FakeRequest({})
     req.session["admin_user_id"] = target.id
-    asyncio.run(view.on_model_change({}, target, False, req))
+    data = {"email": "  Admin@Hooply.COM ", "name": "관리자"}
+    asyncio.run(view.on_model_change(data, target, False, req))
+    assert data["email"] == "admin@hooply.com"  # 폼의 이메일은 저장 전에 소문자로 (ck_users_email_lower)
     target.global_role = "USER"
     asyncio.run(view.after_model_change({}, target, False, req))
     with SessionLocal() as db:
         log = db.scalar(select(AuditLog).where(AuditLog.target_type == "user"))
         assert log.action == "USER_ROLE_CHANGE" and log.before == {"global_role": "ADMIN"} and log.after == {"global_role": "USER"}
+
+
+# ---------------------------------------------------------------------------
+# B1 팀 잠금 순서
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _capture_sql():
+    """엔진에 흐르는 SQL 문장을 순서대로 모은다 (BEGIN/COMMIT 은 커서 문장이 아니라 잡히지 않는다)."""
+    from sqlalchemy import event as sa_event
+
+    from app.db.session import engine
+
+    log: list[str] = []
+
+    def before(conn, cursor, statement, parameters, context, executemany):
+        log.append(statement)
+
+    sa_event.listen(engine, "before_cursor_execute", before)
+    try:
+        yield log
+    finally:
+        sa_event.remove(engine, "before_cursor_execute", before)
+
+
+def _assert_lock_before_first_write(log: list[str], label: str) -> None:
+    writes = [i for i, s in enumerate(log) if re.match(r"\s*(INSERT|UPDATE|DELETE)\b", s, re.IGNORECASE)]
+    locks = [i for i, s in enumerate(log) if "pg_advisory_xact_lock" in s]
+    assert writes, f"{label}: 쓰기 문장이 없다"
+    assert locks, f"{label}: 팀 잠금을 걸지 않았다"
+    assert locks[0] < writes[0], f"{label}: 잠금({locks[0]}) 전에 쓰기({writes[0]})가 있다 — {log[writes[0]][:80]}"
+
+
+# 검증: 팀 지표를 다시 계산하는 모든 쓰기 경로가 **첫 쓰기 전에** 팀 잠금(pg_advisory_xact_lock)을 건다.
+# 행을 먼저 쓰고 재계산 안에서 잠그면, 잠금을 먼저 잡은 다른 요청과 서로를 기다려 교착(40P01 → 409)이 났다
+def test_team_lock_taken_before_first_write(client, club, signup):
+    m, tid = club["manager"], club["team_id"]
+    admin = _make_admin(client, signup)
+    eid, (gid, _) = _event_with_attendance(client, club, guests=2)
+    cand = client.post(f"{API}/events/{eid}/assignments", json={"team_count": 2}, headers=m).json()["candidates"][0]
+    assert client.post(f"{API}/assignments/candidates/{cand['id']}:adopt", headers=m).status_code == 200
+    lu = _lineups(club, TOP5, BOT5)
+    q = {"quarter_no": 1, "black_score": 10, "white_score": 8, "lineups": lu}
+    paths = {
+        "쿼터 추가": lambda: client.post(f"{API}/events/{eid}/quarters", json=q, headers=m),
+        "쿼터 일괄 저장": lambda: client.put(f"{API}/events/{eid}/quarters", json={"quarters": [q, {**q, "quarter_no": 2}]}, headers=m),
+        "쿼터 수정": lambda: client.patch(f"{API}/quarters/{client.get(f'{API}/events/{eid}/quarters', headers=m).json()['items'][0]['id']}", json={"black_score": 12}, headers=m),
+        "쿼터 삭제": lambda: client.delete(f"{API}/quarters/{client.get(f'{API}/events/{eid}/quarters', headers=m).json()['items'][-1]['id']}", headers=m),
+        "매니저 정렬": lambda: client.post(f"{API}/teams/{tid}/rankings", json={"player_ids": list(club["pid"].values())}, headers=m),
+        "자기 위치": lambda: client.put(f"{API}/teams/{tid}/self-rank", json={"level": "TOP10"}, headers=club["members"][3]),
+        "게스트 등급": lambda: client.patch(f"{API}/events/{eid}/guests/{gid}", json={"skill_grade": 5}, headers=m),
+        "일정 날짜 변경": lambda: client.patch(f"{API}/events/{eid}", json={"event_date": "2026-09-14"}, headers=m),
+        "경기 후 투표": lambda: client.post(f"{API}/events/{eid}/post-game-survey", json={"votes": [{"target_player_id": club["pid"][TOP5[1]], "vote_type": "PLAY_AGAIN"}]}, headers=club["members"][0]),
+        "게스트 병합": lambda: client.post(f"{API}/players/{gid}:merge", json={"into_player_id": club["pid"][BOT5[4]]}, headers=m),
+        "관리자 보정": lambda: client.patch(f"{API}/admin/players/{club['pid'][TOP5[0]]}/rating", json={"skill_overall": 3.0, "reason": "확인"}, headers=admin),
+    }
+    for label, call in paths.items():
+        with _capture_sql() as log:
+            r = call()
+        assert r.status_code in (200, 201, 204), (label, r.status_code, r.text)
+        _assert_lock_before_first_write(log, label)
+
+
+# 검증: 같은 팀의 두 일정에 쿼터를 동시에 저장해도 교착(409)이 나지 않는다 — 잠금을 먼저 걸어 차례로 처리된다
+def test_concurrent_quarter_saves_same_team(client, club):
+    m = club["manager"]
+    lu = _lineups(club, TOP5, BOT5)
+    eids = [_event(client, club, d) for d in ("2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08")]
+    codes: list[int] = []
+    barrier = threading.Barrier(len(eids))
+
+    def save(eid, i):
+        body = {"quarters": [{"quarter_no": n, "black_score": 10 + i, "white_score": 8, "lineups": lu} for n in (1, 2, 3)]}
+        barrier.wait()
+        codes.append(client.put(f"{API}/events/{eid}/quarters", json=body, headers=m).status_code)
+
+    threads = [threading.Thread(target=save, args=(eid, i)) for i, eid in enumerate(eids)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert codes == [200] * len(eids), codes
+
+
+# ---------------------------------------------------------------------------
+# B4 관리자 보정 이력
+# ---------------------------------------------------------------------------
+
+
+# 검증: 보정 한 번에 대상의 이력은 ADMIN_ADJUST 한 줄뿐이고(RESIDUAL "경기 기록 반영" 이 덧붙지 않는다), 여파로 바뀐 다른 선수에게는
+# "관리자 보정(선수 N) 재계산" 이력이 남으며, 감사 로그에 그 인원수가 적힌다
+def test_admin_adjust_history_bookkeeping(client, signup, club):
+    from app.models import AuditLog, SkillRatingHistory
+
+    admin = _make_admin(client, signup)
+    m = club["manager"]
+    for d in ("2026-09-05", "2026-09-06", "2026-09-07"):
+        eid = _event(client, club, d)
+        assert client.post(f"{API}/events/{eid}/quarters", json={"quarter_no": 1, "black_score": 20, "white_score": 5, "lineups": _lineups(club, TOP5, BOT5)}, headers=m).status_code == 201
+    pid = club["pid"][TOP5[0]]
+    with SessionLocal() as db:
+        n_before = db.scalar(select(func.count()).select_from(SkillRatingHistory).where(SkillRatingHistory.player_id == pid))
+    assert client.patch(f"{API}/admin/players/{pid}/rating", json={"skill_overall": 4.0, "reason": "실력 확인"}, headers=admin).status_code == 200
+    with SessionLocal() as db:
+        mine = db.scalars(select(SkillRatingHistory).where(SkillRatingHistory.player_id == pid).order_by(SkillRatingHistory.id)).all()[n_before:]
+        assert [h.source for h in mine] == ["ADMIN_ADJUST"] and mine[0].reason == "실력 확인"
+        others = db.scalars(select(SkillRatingHistory).where(SkillRatingHistory.ref_type == "admin_adjust")).all()
+        assert others and all(o.ref_id == pid and o.player_id != pid and o.reason.startswith(f"관리자 보정(선수 {pid}) 재계산") for o in others)
+        log = db.scalar(select(AuditLog).where(AuditLog.action == "ADMIN_RATING_ADJUST").order_by(AuditLog.id.desc()))
+        assert log.after["affected_players"] == len({o.player_id for o in others})
+
+
+# ---------------------------------------------------------------------------
+# B10 요청 크기 · 중복 선택지
+# ---------------------------------------------------------------------------
+
+
+# 검증: 설문 응답의 같은 선택지는 하나로(순서 유지), 선택지 · 전술 단계 동작 수에 상한
+def test_survey_dedupe_and_step_action_cap():
+    from app.schemas.survey import SurveyAnswerIn
+    from app.tactics.play import Step
+
+    assert SurveyAnswerIn(question_id=1, selected_option_ids=[3, 1, 3, 2, 1]).selected_option_ids == [3, 1, 2]
+    with pytest.raises(ValueError):
+        SurveyAnswerIn(question_id=1, selected_option_ids=list(range(21)))
+    move = {"slot": 1, "type": "move", "to": {"x": 0.5, "y": 0.5}}
+    assert len(Step(caption="x", actions=[move] * 20).actions) == 20
+    with pytest.raises(ValueError):
+        Step(caption="x", actions=[move] * 21)
+
+
+# ---------------------------------------------------------------------------
+# B11 자정을 넘기는 일정
+# ---------------------------------------------------------------------------
+
+
+# 검증: 22:00~00:30 일정이 저장되고(CHECK · 서비스 검증 없음), 종료 시각은 다음 날 00:30 으로 해석돼 투표도 그때 열린다
+def test_event_crossing_midnight(client, club, monkeypatch):
+    from datetime import date, time
+    from zoneinfo import ZoneInfo
+
+    from app.models import Event
+    from app.services import event_service, peer_service
+
+    m, tid = club["manager"], club["team_id"]
+    r = client.post(f"{API}/teams/{tid}/events", json={"event_date": "2026-09-12", "start_time": "22:00", "end_time": "00:30"}, headers=m)
+    assert r.status_code == 201, r.text
+    eid = r.json()["id"]
+    assert r.json()["end_time"].startswith("00:30")
+    assert client.patch(f"{API}/events/{eid}", json={"end_time": "22:00"}, headers=m).status_code == 200  # 시작 = 종료도 다음 날로
+    assert client.patch(f"{API}/events/{eid}", json={"end_time": "00:30"}, headers=m).status_code == 200
+    tz = ZoneInfo(get_settings().timezone)
+    with SessionLocal() as db:
+        ev = db.get(Event, eid)
+        assert event_service.ends_at(ev) == datetime(2026, 9, 13, 0, 30, tzinfo=tz)
+        assert peer_service.opens_at(ev) == event_service.ends_at(ev)
+        ev.end_time = time(23, 0)
+        assert event_service.ends_at(ev) == datetime(2026, 9, 12, 23, 0, tzinfo=tz)  # 넘기지 않으면 그날
+        ev.end_time = None
+        assert event_service.ends_at(ev).date() == date(2026, 9, 12)
+    for h in club["members"]:
+        client.put(f"{API}/events/{eid}/attendance", json={"status": "ATTEND"}, headers=h)
+    fixed = datetime(2026, 9, 13, 0, 10, tzinfo=tz)  # 자정은 넘겼지만 00:30 전 — 아직 안 열린다
+
+    class _Now(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
+
+    monkeypatch.setattr(peer_service, "datetime", _Now)
+    assert client.get(f"{API}/events/{eid}/post-game-survey", headers=club["members"][1]).json()["code"] == "SURVEY_NOT_OPEN"
+    fixed = datetime(2026, 9, 13, 0, 31, tzinfo=tz)
+    assert client.get(f"{API}/events/{eid}/post-game-survey", headers=club["members"][1]).json()["open"] is True
+
+
+# ---------------------------------------------------------------------------
+# B13 검사 결과의 잠금
+# ---------------------------------------------------------------------------
+
+
+# 검증: 쿼터 기록이 있는 일정의 프리플라이트는 422 를 내지 않고 violations 에 ASSIGNMENT_LOCKED 를 담아 feasible=false
+def test_validate_reports_assignment_locked(client, club):
+    m = club["manager"]
+    eid, _ = _event_with_attendance(client, club, guests=0)
+    assert client.post(f"{API}/events/{eid}/assignments:validate", json={"team_count": 2}, headers=m).json()["feasible"] is True
+    assert client.post(f"{API}/events/{eid}/quarters", json={"quarter_no": 1, "black_score": 5, "white_score": 3, "lineups": _lineups(club, TOP5, BOT5)}, headers=m).status_code == 201
+    r = client.post(f"{API}/events/{eid}/assignments:validate", json={"team_count": 2}, headers=m)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["feasible"] is False and [v["code"] for v in body["violations"]] == ["ASSIGNMENT_LOCKED"]
+    assert body["violations"][0]["message"] == errors.AssignmentLocked.message
+
+
+# ---------------------------------------------------------------------------
+# B14 감사 로그 개인정보
+# ---------------------------------------------------------------------------
+
+
+# 검증: 탈퇴 30일이 지난 계정을 대상으로 한 감사 로그의 이메일 · 이름 · 닉네임이 가려진다. 30일 전이거나 살아 있는 계정은 그대로. 여러 번 돌려도 같다
+def test_audit_log_pii_purged_after_30_days(client, signup):
+    from datetime import timedelta
+
+    from app.models import AuditLog
+    from app.services import auth_service
+
+    old = signup("old@example.com", name="옛사람")
+    recent = signup("recent@example.com", name="최근사람")
+    alive = signup("alive@example.com", name="산사람")
+    ids = {e: client.get(f"{API}/me", headers=h).json()["id"] for e, h in (("old", old), ("recent", recent), ("alive", alive))}
+    with SessionLocal() as db:
+        for key, uid in ids.items():
+            db.add(AuditLog(actor_user_id=None, action="USER_UPDATE", target_type="user", target_id=uid,
+                            before={"email": f"{key}@example.com", "name": "이름", "global_role": "USER"}, after={"nickname": "별명", "global_role": "ADMIN"}))
+        db.add(AuditLog(actor_user_id=None, action="ADMIN_RATING_ADJUST", target_type="player", target_id=1, before={"name": "선수"}, after=None))
+        db.commit()
+    for h in (old, recent):
+        assert client.delete(f"{API}/me", headers=h).status_code == 204
+    with SessionLocal() as db:
+        db.execute(text("UPDATE users SET deleted_at = :t WHERE id = :i"), {"t": datetime.now(UTC) - timedelta(days=31), "i": ids["old"]})
+        db.commit()
+        assert auth_service.purge_deleted_user_pii(db) == 1
+        assert auth_service.purge_deleted_user_pii(db) == 0  # 두 번째는 할 일이 없다
+        rows = {r.target_id: r for r in db.scalars(select(AuditLog).where(AuditLog.target_type == "user")).all()}
+        assert rows[ids["old"]].before == {"email": "***", "name": "***", "global_role": "USER"} and rows[ids["old"]].after == {"nickname": "***", "global_role": "ADMIN"}
+        assert rows[ids["recent"]].before["email"] == "recent@example.com" and rows[ids["alive"]].before["email"] == "alive@example.com"
+        assert db.scalar(select(AuditLog.before).where(AuditLog.target_type == "player")) == {"name": "선수"}

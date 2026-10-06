@@ -69,7 +69,7 @@ class Action(BaseModel):
 
 class Step(BaseModel):
     caption: str = Field(min_length=1, max_length=80)  # 전술판 아래 단계 설명 한 줄
-    actions: list[Action] = Field(min_length=1)
+    actions: list[Action] = Field(min_length=1, max_length=20)  # 한 단계에 5명이 한 동작씩 — 20이면 넉넉하다 (요청 크기 상한)
 
 
 class Play(BaseModel):

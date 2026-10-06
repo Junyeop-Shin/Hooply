@@ -10,22 +10,23 @@
 - 목록: `{ items: [...] }` (ItemList) 또는 `{ items, meta: { page, size, total, has_next } }` (Page).
 - 오류: 모든 4xx/5xx 본문은 `ErrorResponse { code, message, details[]{field, reason} }`. 프론트는 `code` 로 분기하고 `message` 를 그대로 노출한다.
 - 액션형 경로는 `:동사` 접미사를 쓴다 (`/teams/{id}/code:regenerate`, `/assignments/candidates/{id}:adopt`, `/events/{id}/rsvp:close`).
-- 요청 제한(429)의 IP 는 `CF-Connecting-IP` → `True-Client-IP` → 접속 주소 순으로 정한다. 클라이언트가 꾸밀 수 있는 `X-Forwarded-For` 는 믿지 않는다.
+- 요청 제한(429)은 메모리 안의 슬라이딩 윈도우다(단일 인스턴스 전제). 로그인은 IP 당 분당 10회에 더해 **(IP, 이메일) 쌍마다 10분에 실패 10회**(성공하면 그 쌍의 실패 기록을 비운다 — 남의 이메일로 틀린 비밀번호를 보내 그 사람을 다른 IP 에서까지 잠그지 못하게), 관리자 콘솔 로그인도 같다. 가입은 IP 당 분당 5회(이메일로는 세지 않는다 — 같은 이메일은 어차피 409). 비밀번호 찾기는 IP 당 분당 5회에 더해 이메일마다 한 시간에 메일 5통 — 넘으면 429 없이 **조용히** 보내지 않고 202. 비밀번호 재설정은 IP 당 분당 5회. AI 호출 · 전술 댓글은 사용자당 분당 10회.
+- 요청 제한의 IP 는 운영 같은 환경에서만 프록시 헤더(`TRUSTED_PROXY_HEADER`, 기본 `cf-connecting-ip` — Cloudflare 가 자기가 본 접속 IP 로 덮어쓴다)를 믿고, 그 밖에는 `X-Forwarded-For` 의 **마지막** 값 → 접속 주소 순으로 정한다. 첫 값은 클라이언트가 꾸밀 수 있어 믿지 않는다.
 - CORS 는 쿠키를 싣지 않는다(`allow_credentials=False`) — 인증은 Bearer 헤더뿐이다.
-- 목록 · 문자열 필드에는 길이 상한이 있다 (배정 전략 1~3개, 묶기 · 갈라놓기 그룹 30개 · 그룹당 30명, 사전 배치 60명, 정렬 100명, 일정 메모 1000자 등). 넘으면 `400 VALIDATION_ERROR`.
-- 관리자 콘솔(SQLAdmin)은 API 가 아닌 서버 페이지 `/admin` 이다. 로그인은 API 로그인과 같은 요청 제한을 받고, 참가자 · 일정 · 참석 · 쿼터는 읽기 전용이다(지표 재계산 같은 서비스 규칙을 건너뛰지 않게). 사용자 수정은 `audit_logs` 에 남는다.
+- 목록 · 문자열 필드에는 길이 상한이 있다 (배정 전략 1~3개, 묶기 · 갈라놓기 그룹 30개 · 그룹당 30명, 사전 배치 60명, 정렬 100명, 일정 메모 1000자, 전술 한 단계의 동작 20개, 설문 한 문항의 선택지 20개 — 같은 선택지를 두 번 보내면 하나로 센다 등). 넘으면 `400 VALIDATION_ERROR`.
+- 관리자 콘솔(SQLAdmin)은 API 가 아닌 서버 페이지 `/admin` 이다. 로그인은 API 로그인과 같은 요청 제한을 받고, 세션은 로그인 당시의 토큰 세대(`users.token_version`)를 담아 비밀번호를 바꾸거나 재설정하면 함께 끝난다. 참가자 · 일정 · 참석 · 쿼터 · 배정 실행 · 후보안 · 투표 · 정렬은 지우기까지 읽기 전용이다(지표 재계산 같은 서비스 규칙을 건너뛰지 않게). 사용자 수정은 `audit_logs` 에 남고 이메일은 소문자로 맞춰 저장한다.
 
 ## 2. HTTP 상태와 에러 코드
 
 | HTTP | code | 상황 |
 | --- | --- | --- |
-| 400 | VALIDATION_ERROR, INVALID_LINEUP_SIZE, SELF_VOTE_NOT_ALLOWED, TOKEN_INVALID_OR_EXPIRED | 형식·범위 위반 |
+| 400 | VALIDATION_ERROR, INVALID_LINEUP_SIZE, SELF_VOTE_NOT_ALLOWED, TOKEN_INVALID_OR_EXPIRED, REFERENCE_NOT_FOUND | 형식·범위 위반. `REFERENCE_NOT_FOUND` 는 요청이 가리킨 행(선수 · 일정 …)이 검사와 저장 사이에 지워진 경우(DB 외래키 위반) — "존재하지 않는 항목을 가리켜요. 화면을 새로고침해 주세요." |
 | 401 | INVALID_CREDENTIALS, TOKEN_EXPIRED, KAKAO_AUTH_FAILED | 인증 실패 |
 | 403 | FORBIDDEN_ROLE, NOT_A_MEMBER, NOT_ATTENDEE, SURVEY_NOT_OPEN, FORBIDDEN_NOT_OWNER, REMOVED_FROM_TEAM | 권한 부족·아직 열리지 않음·매니저가 제외한 팀에 코드로 재가입 |
 | 404 | NOT_FOUND, TEAM_CODE_NOT_FOUND, NOT_ADOPTED_YET, NO_RANKING | 리소스 없음 |
-| 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED, CONFLICT | 상태 충돌. `CONFLICT` 는 동시에 들어온 요청이 같은 행을 먼저 만들거나 바꾼 경우(DB 유니크 · 외래키 위반, 교착) — "동시에 처리된 요청이 있어요. 다시 시도해 주세요." (DB CHECK 위반은 400 VALIDATION_ERROR) |
+| 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED, CONFLICT | 상태 충돌. `CONFLICT` 는 동시에 들어온 요청이 같은 행을 먼저 만든 경우(DB 유니크 위반) — "동시에 처리된 요청이 있어요. 다시 시도해 주세요." 교착 · 직렬화 실패도 같은 코드지만 문구는 "잠시 뒤 다시 시도해 주세요."(같은 요청을 그대로 다시 보내면 된다). (DB 외래키 위반은 400 REFERENCE_NOT_FOUND, CHECK 위반은 400 VALIDATION_ERROR) |
 | 422 | TEAM_NOT_ACTIVE, NOT_ENOUGH_PLAYERS, RSVP_CLOSED, INVALID_SWAP, CANNOT_DEMOTE_LAST_MANAGER, PLAYER_NOT_IN_TEAM, PLAYER_NOT_IN_SQUAD, PLAY_NOT_PLAYABLE, MERGE_KIND_MISMATCH, LOCK_GROUP_TOO_LARGE, CONSTRAINT_CONFLICT, SEPARATE_INFEASIBLE, LOCK_PARTITION_INFEASIBLE, SQUAD_OVERFLOW, ASSIGNMENT_LOCKED | 도메인 규칙 위반 (배정 제약 오류는 details 에 문제 인원 포함). `ASSIGNMENT_LOCKED` 는 쿼터 기록이 있는 일정에서 배정 실행 · 수정 · 초기화 · 확정 |
-| 429 | RATE_LIMITED | 요청이 너무 많음 — 로그인 · 가입 · 비밀번호 찾기 · 재설정(IP, 로그인 · 가입 · 비밀번호 찾기는 이메일로도), AI 호출 · 전술 댓글(사용자당 분당 10회) |
+| 429 | RATE_LIMITED | 요청이 너무 많음 — 로그인(IP 분당 10회 + (IP, 이메일) 실패 10분 10회) · 관리자 콘솔 로그인(같음) · 가입(IP 분당 5회) · 비밀번호 찾기 · 재설정(IP 분당 5회), AI 호출 · 전술 댓글(사용자당 분당 10회). 비밀번호 찾기 메일의 이메일당 상한(한 시간 5통)은 429 가 아니라 조용히 202 |
 | 500 | INTERNAL_ERROR | 서버 오류 |
 
 ## 3. 공통 스키마 (`components/schemas`, `$ref` 재사용)
@@ -66,7 +67,7 @@
 | POST | `/auth/kakao/link` | 기존 계정에 카카오 연결 | 200 · 401 · 409 |
 | POST | `/auth/refresh` | 토큰 갱신 | 200 · 401 |
 | POST | `/auth/logout` | refresh 토큰 폐기 (토큰이 무효해도 204) | 204 |
-| POST | `/auth/password/forgot` | 비밀번호 재설정 요청 (메일은 응답 뒤 백그라운드로) | 202 |
+| POST | `/auth/password/forgot` | 비밀번호 재설정 요청 (메일은 응답 뒤 백그라운드로, 이메일당 한 시간 5통을 넘으면 보내지 않고 그대로 202) | 202 |
 | POST | `/auth/password/reset` | 비밀번호 재설정 (모든 기기의 로그인을 끊는다) | 200 · 400 |
 | GET | `/me` | 내 정보 조회 | 200 |
 | PATCH | `/me` | 내 프로필 수정 | 200 |
@@ -92,10 +93,10 @@
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
 | POST | `/teams` | 팀 생성 | 201 |
-| POST | `/teams/join` | 팀 코드로 가입 — 스스로 나간 팀은 다시 들어올 수 있고, 매니저가 제외한 팀이면 403 `REMOVED_FROM_TEAM` | 200 · 403 · 404 · 409 |
+| POST | `/teams/join` | 팀 코드로 가입 — 스스로 나간 팀은 다시 들어올 수 있고, 매니저가 제외한 팀이면 코드 재발급 전까지 403 `REMOVED_FROM_TEAM`(재발급하면 새 코드로 돌아올 수 있다) | 200 · 403 · 404 · 409 |
 | GET | `/teams/{team_id}` | 팀 상세 조회 | 200 · 403 |
 | PATCH | `/teams/{team_id}` | 팀 정보 수정 | 200 · 403 |
-| POST | `/teams/{team_id}/code:regenerate` | 팀 코드 재발급 | 200 · 403 |
+| POST | `/teams/{team_id}/code:regenerate` | 팀 코드 재발급 — 옛 코드는 즉시 무효, 제외된(REMOVED) 팀원은 LEFT 로 풀려 새 코드로 돌아올 수 있다 | 200 · 403 |
 | GET | `/teams/{team_id}/players` | 팀원 목록 조회 | 200 |
 | PATCH | `/teams/{team_id}/players/{player_id}/role` | 매니저 권한 부여/회수 | 200 · 403 |
 | DELETE | `/teams/{team_id}/players/{player_id}` | 팀원 제외 — 매니저는 팀장(또는 ADMIN)만 제외, 팀장은 누구도 제외할 수 없음(`FORBIDDEN_NOT_OWNER`), 마지막 매니저면 422 | 204 · 403 · 422 |
@@ -126,7 +127,7 @@
 
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
-| POST | `/teams/{team_id}/events` | 일정 등록 | 201 |
+| POST | `/teams/{team_id}/events` | 일정 등록 — 종료 시각이 시작 시각 이하면 자정을 넘기는 일정(다음 날로 해석) | 201 |
 | GET | `/teams/{team_id}/events` | 일정 목록 조회 | 200 |
 | GET | `/events/{event_id}` | 일정 상세 조회 | 200 |
 | PATCH | `/events/{event_id}` | 일정 수정 | 200 |
@@ -147,7 +148,7 @@
 | GET | `/events/{event_id}/assignment/suggestions` | 게스트 묶기 제안 목록 | 200 · 403 |
 | POST | `/events/{event_id}/assignments` | 팀 배정 실행 — `team_count` 2(완전 탐색) · 3(지역 탐색, 15명 이상). 쿼터 기록이 있으면 `ASSIGNMENT_LOCKED` | 201 · 422 |
 | GET | `/events/{event_id}/assignments` | 배정 실행 이력 | 200 |
-| POST | `/events/{event_id}/assignments:validate` | 배정 제약 실현가능성 검사 | 200 |
+| POST | `/events/{event_id}/assignments:validate` | 배정 제약 실현가능성 검사. 쿼터 기록이 있는 일정이면 422 대신 200 으로 `violations[]` 에 `ASSIGNMENT_LOCKED` 하나만 담아 `feasible=false` | 200 |
 | GET | `/events/{event_id}/assignments/last-constraints` | 직전 회차 제약 불러오기 | 200 · 404 |
 | GET | `/assignments/runs/{run_id}` | 배정 실행 결과 조회 | 200 |
 | PATCH | `/assignments/candidates/{candidate_id}` | 후보안 선수 교체 — 3팀 일방 이동은 `exchanges[].to_squad_no` 또는 `moves[].to_squad_no`. swaps → moves → exchanges 를 한 번에 저장(하나라도 422 면 아무것도 안 바뀜) | 200 · 409 · 422 |
@@ -213,7 +214,7 @@
 | --- | --- | --- | --- |
 | GET | `/admin/users` | 전체 사용자 검색 | 200 |
 | GET | `/admin/players/{player_id}/raw` | 선수 원시 데이터 열람 | 200 · 403 |
-| PATCH | `/admin/players/{player_id}/rating` | 실력 지표 수동 보정 — 재계산 출발점에 더하는 오프셋 `admin_adjust`(±50)로 저장해 설문 · 정렬 · 쿼터 재계산 뒤에도 남는다 | 200 · 400 · 403 |
+| PATCH | `/admin/players/{player_id}/rating` | 실력 지표 수동 보정 — 재계산 출발점에 더하는 오프셋 `admin_adjust`(±50)로 저장해 설문 · 정렬 · 쿼터 재계산 뒤에도 남는다. 대상에는 `ADMIN_ADJUST` 이력 한 줄, 여파로 바뀐 다른 선수에게는 "관리자 보정(선수 N) 재계산" 이력, 감사 로그 `after.affected_players` 에 그 인원수 | 200 · 400 · 403 |
 | GET | `/admin/audit-logs` | 감사 로그 조회 | 200 |
 | GET | `/admin/teams` | 팀 목록 (승인 대기 우선) | 200 |
 | POST | `/admin/teams/{team_id}:approve` | 팀 승인 | 200 |

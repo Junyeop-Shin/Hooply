@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { STATIC_QUERY } from '../queryClient'
 import { surveyApi } from '../api/survey'
 import { errorMessage, errorMessageWithDetails } from '../api/client'
@@ -40,7 +40,7 @@ export function SurveyPage() {
   const me = useMe()
   const tpl = useQuery({ queryKey: ['survey', 'template'], queryFn: surveyApi.template, ...STATIC_QUERY })
   if (me.data?.onboarding_completed) return <Navigate to="/" replace />
-  if (me.isLoading || tpl.isLoading) return <Screen><TopBar title="실력 설문" /><Spinner /></Screen>
+  if (me.isLoading || tpl.isLoading) return <Screen><TopBar title="실력 설문" /><Spinner page /></Screen>
   if (!tpl.data) return <Screen><TopBar title="실력 설문" back="/" /><Content><LoadError message={errorMessage(tpl.error, '설문을 불러오지 못했어요.')} onRetry={() => tpl.refetch()} retrying={tpl.isFetching} /></Content></Screen>
   return <SurveyForm questions={tpl.data.questions} templateId={tpl.data.template_id} />
 }
@@ -205,13 +205,18 @@ export function SelfRankPage() {
   const id = Number(teamId)
   const goBack = useGoBack()
   const nav = useNavigate()
+  const loc = useLocation()
+  // 팀 가입 직후(가입 화면이 이 화면으로 바뀌어 state.from 에 팀이 적혀 있다)면 그 팀으로 — 히스토리를 되감으면 홈으로 가 버린다.
+  // 프로필 · 팀 화면에서 왔으면 들어온 화면으로 되감는다. 어느 쪽이든 뒤로가 이 화면으로 돌아오지 않는다
+  const from = (loc.state as { from?: string } | null)?.from
+  const done = () => (from ? nav(from, { replace: true }) : goBack(`/teams/${id}`))
   const qc = useQueryClient()
   const profile = useQuery({ queryKey: ['profile'], queryFn: surveyApi.myProfile })
   const mine = profile.data?.teams.find((t) => t.team_id === id)
   const [picked, setPicked] = useState<SelfRankLevel | null>(null)
   const m = useMutation({
     mutationFn: (level: SelfRankLevel) => surveyApi.setSelfRank(id, level),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['team', id] }); goBack(`/teams/${id}`) },  // 프로필에서 왔으면 프로필로, 팀에서 왔으면 팀으로
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['team', id] }); qc.invalidateQueries({ queryKey: ['me', 'tutorial'] }); done() },  // 시작 안내의 "내 위치" 단계도
     meta: { inlineError: true },
   })
   const current = picked ?? mine?.self_rank_level ?? null
@@ -240,7 +245,7 @@ export function SelfRankPage() {
         {m.isError && <Alert>{errorMessage(m.error, '저장하지 못했어요.')}</Alert>}
       </Content>
       <BottomAction>
-        <Button variant="ghost" full onClick={() => nav(`/teams/${id}`)}>나중에 할게요</Button>
+        <Button variant="ghost" full onClick={done}>나중에 할게요</Button>
       </BottomAction>
     </Screen>
   )

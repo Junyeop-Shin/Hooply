@@ -16,7 +16,7 @@ docker-compose 의 postgres) 에서 읽는다. 설계서 11.2절: PostgreSQL 16 
     통제해 "언제 DB에 반영됐는지" 를 읽기 쉽게 하기 위함이다.
   - expire_on_commit=False : commit 후에도 객체 속성이 만료되지 않아, 응답 직렬화 시 추가
     SELECT(lazy load) 가 발생하지 않는다. 대신 commit 뒤의 값은 DB와 다를 수 있음을 염두에 둔다.
-  - pool_pre_ping=True : 풀에서 커넥션을 꺼낼 때 살아 있는지 먼저 확인한다. 배포 환경(Railway 등)
+  - pool_pre_ping=True : 풀에서 커넥션을 꺼낼 때 살아 있는지 먼저 확인한다. 배포 환경(Render 등)
     에서 유휴 커넥션이 끊겼을 때 첫 요청이 실패하는 것을 막는다.
 """
 
@@ -59,6 +59,12 @@ def lock_team_stats(db: Session, team_id: int) -> None:
     두 요청이 같은 팀을 동시에 다시 계산하면 서로의 미완성 결과 위에 덮어쓰거나, 같은 페어의 chemistry_scores 행을
     둘 다 INSERT 해 유니크 위반(500)이 났다. 잠금은 트랜잭션이 끝날 때(commit/rollback) 풀리고, 같은 트랜잭션
     안에서 여러 번 걸어도 된다 (재진입). 실력 · 선호를 한 키로 잠그므로 둘을 함께 부르는 경로도 교착이 생기지 않는다.
+
+    **잠금 순서 규칙:** 재계산(rating_service.recompute_team · peer_service.recompute_team_chemistry)에 이르는 모든
+    쓰기 경로는 **자기 첫 쓰기(INSERT/UPDATE/DELETE) 전에** 이 잠금을 먼저 건다. 행을 먼저 쓰고 나서 재계산 안에서
+    잠그면, 잠금을 먼저 잡고 같은 행(player_profiles · quarter_lineups …)을 쓰려는 다른 요청과 서로를 기다려
+    교착(40P01 → 409 CONFLICT)이 났다. 쿼터 저장 · 설문/정렬 사전값 재계산 · 게스트 등급 · 일정 날짜 변경 ·
+    병합 · 투표 제출이 그 경로다 (tests/test_hardening.py 가 순서를 검사한다).
     """
     from sqlalchemy import text
 

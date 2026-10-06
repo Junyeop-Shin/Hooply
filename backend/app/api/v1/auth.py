@@ -21,7 +21,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response, status
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser
@@ -65,11 +65,10 @@ def signup(db: DB, body: SignupRequest):
       저장한다. 동시에 `auth_identities`에 `LOCAL` 로그인 수단을 연결하고
       access/refresh 토큰 쌍을 돌려준다. 온보딩 설문은 아직 미완료 상태다.
     - **오류:** `409 EMAIL_DUPLICATED` — 이미 가입된 이메일. `400 VALIDATION_ERROR` — 형식 위반.
-      `429 RATE_LIMITED` — 같은 IP 또는 같은 이메일로 분당 5회 초과.
+      `429 RATE_LIMITED` — 같은 IP 로 분당 5회 초과 (이메일로는 세지 않는다 — 같은 이메일은 어차피 409).
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증, FR-01 · FR-02, 11.5절 (bcrypt 해시).
     """
-    ratelimit.SIGNUP.by_email(body.email)
     return auth_service.signup(db, body)
 
 
@@ -77,7 +76,7 @@ def signup(db: DB, body: SignupRequest):
     "/auth/login", dependencies=[Depends(ratelimit.LOGIN)], response_model=TokenPair,
     responses=errors(_401="INVALID_CREDENTIALS"), summary="이메일 로그인",
 )
-def login(db: DB, body: LoginRequest):
+def login(db: DB, body: LoginRequest, request: Request):
     """이메일/비밀번호를 검증하고 토큰 쌍을 발급한다.
 
     - **권한:** 비회원 (인증 불필요).
@@ -86,12 +85,20 @@ def login(db: DB, body: LoginRequest):
       성공하면 access 30분 / refresh 14일 JWT를 발급한다.
     - **오류:** `401 INVALID_CREDENTIALS` — 이메일 또는 비밀번호 불일치 (어느 쪽이 틀렸는지
       구분하지 않는다. 없는 계정도 같은 시간이 걸리도록 가짜 해시로 검증한다).
-      `429 RATE_LIMITED` — 같은 IP 또는 같은 이메일로 분당 10회 초과.
+      `429 RATE_LIMITED` — 같은 IP 로 분당 10회 초과, 또는 같은 IP 에서 같은 이메일로 10분 안에 **실패** 10회.
+      성공한 로그인은 세지 않고 그 (IP, 이메일) 쌍의 실패 기록을 비운다 — 남의 이메일로 틀린 비밀번호를 보내
+      그 사람을 다른 IP 에서까지 잠그는 일(계정 잠금 DoS)이 없게 (core/ratelimit.py).
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증, FR-01, 11.5절.
     """
-    ratelimit.LOGIN.by_email(body.email)
-    return auth_service.login(db, body)
+    ratelimit.LOGIN_FAIL.guard(request, body.email)
+    try:
+        pair = auth_service.login(db, body)
+    except E.InvalidCredentials:
+        ratelimit.LOGIN_FAIL.failed(request, body.email)
+        raise
+    ratelimit.LOGIN_FAIL.succeeded(request, body.email)
+    return pair
 
 
 @router.get("/auth/kakao/login-url", response_model=KakaoLoginUrl, responses=errors(_401="KAKAO_AUTH_FAILED"), summary="카카오 인가 URL 생성")
@@ -197,11 +204,14 @@ def forgot_password(db: DB, body: ForgotPasswordRequest, background: BackgroundT
       원문 토큰을 담은 링크(`FRONTEND_BASE_URL/password/reset?token=…`)를 메일로 보낸다(Resend, 키가 없으면 서버 로그).
       계정이 없으면 아무것도 하지 않는다. 응답이 계정 존재 여부에 따라 달라지면 계정 탐색 통로가 되므로 항상 202.
       메일은 응답을 보낸 뒤 백그라운드로 보낸다 (발송 시간으로 계정 존재 여부가 드러나지 않게).
-    - **오류:** `400 VALIDATION_ERROR` — 이메일 형식 위반. `429 RATE_LIMITED` — 같은 IP 또는 같은 이메일로 분당 5회 초과.
+      같은 이메일로는 한 시간에 메일 5통까지만 — 넘으면 토큰도 메일도 만들지 않고 그대로 202 (이메일 기준 429 를 내면
+      남의 이메일로 그 사람의 비밀번호 찾기를 막을 수 있어서 조용히 건너뛴다).
+    - **오류:** `400 VALIDATION_ERROR` — 이메일 형식 위반. `429 RATE_LIMITED` — 같은 IP 로 분당 5회 초과.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 인증 (항상 202), 7.4절 설계 원칙, 6.2절 `password_reset_tokens`, 11.5절.
     """
-    ratelimit.PASSWORD.by_email(body.email)
+    if not ratelimit.FORGOT_MAIL.allow_email(body.email):
+        return {"accepted": True}
     found = auth_service.forgot_password(db, body.email)
     if found is not None:
         from app.services import mail_service

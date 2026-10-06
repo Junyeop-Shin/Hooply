@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core import errors
+from app.db.session import lock_team_stats
 from app.models import (
     AssignmentCandidate,
     AssignmentConstraint,
@@ -83,8 +84,7 @@ def create_event(db: Session, team: Team, by: User, body: EventCreate) -> Event:
         if team.approval_status != ApprovalStatus.APPROVED:
             raise errors.TeamNotActive("관리자 승인이 끝나면 일정을 만들 수 있어요.")
         raise errors.TeamNotActive()
-    if body.start_time and body.end_time and body.end_time <= body.start_time:
-        raise errors.ValidationError("종료 시각은 시작 시각보다 뒤여야 합니다.")
+    # 종료 ≤ 시작은 자정을 넘기는 일정(22:00~00:30)으로 받는다 — ends_at 이 다음 날로 해석한다
     event = Event(team_id=team.id, created_by=by.id, **body.model_dump())
     db.add(event)
     db.flush()
@@ -105,12 +105,12 @@ def close_rsvp(db: Session, event: Event) -> Event:
 
 def update_event(db: Session, event: Event, body: EventUpdate) -> Event:
     old_date = event.event_date
+    if "event_date" in body.model_fields_set and body.event_date is not None and body.event_date != old_date:
+        lock_team_stats(db, event.team_id)  # 날짜가 바뀌면 지표를 다시 재생한다 — 일정 행을 쓰기 전에 잠근다 (잠금 순서)
     for k, v in body.model_dump(exclude_unset=True).items():
         if k == "event_date" and v is None:
             continue  # 날짜는 비울 수 없다 (None = 변경 없음)
         setattr(event, k, v)
-    if event.start_time and event.end_time and event.end_time <= event.start_time:
-        raise errors.ValidationError("종료 시각은 시작 시각보다 뒤여야 합니다.")
     if event.event_date != old_date:
         # 쿼터 재생 순서(첫 2회 게이트 포함)가 날짜에 따라 달라지므로 다시 계산
         from app.services import rating_service
@@ -139,6 +139,8 @@ def delete_event(db: Session, event: Event) -> None:
         ).all()
     )
     had_votes = db.scalar(select(PostGameSurvey.id).where(PostGameSurvey.event_id == event.id).limit(1)) is not None
+    if had_votes:
+        lock_team_stats(db, team_id)  # 투표가 지워지면 선호 조합을 다시 계산한다 — 지우기 전에 잠근다 (잠금 순서)
     db.execute(delete(Event).where(Event.id == event.id))
     db.expire_all()  # 지운 일정·참석 행이 세션에 남아 있지 않게
     for gid in guest_ids:
@@ -169,6 +171,25 @@ def _delete_guest_if_unused(db: Session, player_id: int) -> None:
         return
     db.delete(guest)  # 프로필·포지션·실력 이력·케미·본인 확인 기록은 CASCADE, 초대 이력은 SET NULL
     db.flush()
+
+
+def ends_at(event: Event) -> datetime:
+    """일정이 끝나는 시각 (서비스 시간대, `Settings.timezone`). 경기 후 투표가 열리는 시각이기도 하다 (peer_service.opens_at).
+
+    - end_time 이 없으면 그날 23:59.
+    - end_time 이 start_time 보다 같거나 빠르면 자정을 넘기는 일정(22:00~00:30)이므로 **다음 날**의 그 시각.
+    컨테이너 로컬 시간대(보통 UTC)로 해석하면 한국 12:00 종료가 21:00 에 열리는 버그가 생기므로 명시적으로 변환한다.
+    """
+    from datetime import time, timedelta
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import get_settings
+
+    t = event.end_time or time(23, 59)
+    d = event.event_date
+    if event.end_time is not None and event.start_time is not None and event.end_time <= event.start_time:
+        d = d + timedelta(days=1)
+    return datetime.combine(d, t, tzinfo=ZoneInfo(get_settings().timezone))
 
 
 def rsvp_open(event: Event) -> bool:

@@ -23,6 +23,20 @@ export function useGoBack() {
   }
 }
 
+/**
+ * 흐름이 끝나 상위 화면으로 돌아갈 때(확정 · 저장 · 지우기 뒤) — 거쳐 온 화면 depth 개를 히스토리에서 되감는다.
+ * 그 화면으로 새로 이동(push · replace)하면 거쳐 온 화면이 히스토리에 남아, 뒤로가 조건 설정 · 수정 화면으로 되돌아가거나
+ * 같은 화면이 두 번 나온다. 되감을 히스토리가 없으면(새로고침 · 딥링크) 경로로 바꿔치기한다.
+ */
+export function useFinish() {
+  const nav = useNavigate()
+  return (fallback: string, depth: number) => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0
+    if (idx >= depth) nav(-depth)
+    else nav(fallback, { replace: true })
+  }
+}
+
 export function TopBar({
   title,
   back,

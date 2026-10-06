@@ -10,6 +10,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   retries: process.env.CI ? 1 : 0,
+  workers: 1,  // 스펙들이 한 DB 를 같이 쓴다 — 동시에 돌면 다른 스펙이 만든 전술 · 확정이 섞여 개수가 어긋난다
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
     baseURL: process.env.BASE_URL ?? 'http://localhost:5173',

@@ -76,14 +76,24 @@ def start_value(prof: PlayerProfile | None) -> float:
     return float(prof.prior_overall or 0) + float(prof.admin_adjust or 0)
 
 
-def recompute_team(db: Session, team_id: int, *, start_override: dict[int, float] | None = None, dry_run: bool = False) -> dict[str, Any]:
+def recompute_team(
+    db: Session, team_id: int, *, start_override: dict[int, float] | None = None, dry_run: bool = False,
+    cause: str | None = None, cause_player_id: int | None = None,
+) -> dict[str, Any]:
     """팀의 모든 쿼터를 시간순으로 재생해 skill_overall·quarters_played·cumulative_residual·신뢰도를 다시 쓴다.
 
     부수 효과: player_profiles UPDATE, 값이 바뀐 사람마다 skill_rating_history(source=RESIDUAL). flush 까지.
-    반환: {"quarters": 전체 쿼터 수, "rated": 지표에 반영된 쿼터 수, "warmup_events": 게이트로 제외된 회차 수}
+    반환: {"quarters": 전체 쿼터 수, "rated": 지표에 반영된 쿼터 수, "warmup_events": 게이트로 제외된 회차 수,
+    "changed_players": 이력 행을 남긴(값이 바뀐) 사람 수 — 관리자 보정 재계산에서는 대상 본인을 뺀 수}
 
     `dry_run=True` 면 아무것도 쓰지 않고 {"r": player_id → 반올림 전 최종값} 만 돌려준다. `start_override` 로 일부 선수의
     출발점을 바꿔 볼 수 있다 — 관리자 보정이 원하는 최종값이 되도록 admin_adjust 를 푸는 데 쓴다 (admin_adjust_for).
+
+    `cause="admin_adjust"` + `cause_player_id` 는 관리자 보정이 부르는 재계산이다. 보정 대상 본인은 호출자가 ADMIN_ADJUST
+    이력을 따로 남기므로 여기서는 RESIDUAL 행을 만들지 않고(한 번의 보정에 이력이 두 줄 생기지 않게), 그 여파로 값이
+    바뀐 다른 사람에게는 ref_type="admin_adjust" · ref_id=대상 선수 · "관리자 보정(선수 N) 재계산" 으로 원인을 남긴다.
+
+    잠금: 첫 줄에서 팀 잠금을 건다. 쓰기 경로는 **자기 첫 쓰기 전에** 같은 잠금을 먼저 걸어야 한다 (quarter_service 모듈 docstring).
     """
     settings = get_settings()
     lock_team_stats(db, team_id)  # 같은 팀을 동시에 재생하지 않게 (트랜잭션 끝까지)
@@ -182,6 +192,12 @@ def recompute_team(db: Session, team_id: int, *, start_override: dict[int, float
     if changed:
         db.execute(update(QuarterLineup), changed)
 
+    if cause == "admin_adjust" and cause_player_id is not None:
+        ref_type, ref_id = "admin_adjust", cause_player_id
+        why = f"관리자 보정(선수 {cause_player_id}) 재계산"
+    else:
+        ref_type, ref_id, why = "team_recompute", team_id, "경기 기록 반영"
+    changed_players = 0
     for p in players:
         prof = p.profile
         if prof is None or p.merged_into_player_id:  # 병합된 게스트의 기록은 회원 쪽에 합산됐다
@@ -200,15 +216,18 @@ def recompute_team(db: Session, team_id: int, *, start_override: dict[int, float
             conf = min(CONF_MAX, _base_confidence(prof, p.kind) + CONF_PER_QUARTER * n_rated[p.id])
             prof.skill_confidence = Decimal(str(round(conf, 2)))
         if before != after and n_rated[p.id] > 0:
+            if cause == "admin_adjust" and p.id == cause_player_id:
+                continue  # 보정 대상의 이력은 호출자가 ADMIN_ADJUST 로 남긴다
+            changed_players += 1
             db.add(
                 SkillRatingHistory(
                     player_id=p.id, source=RatingSource.RESIDUAL, before_value=before, after_value=after,
-                    delta=after - (before or Decimal(0)), ref_type="team_recompute", ref_id=team_id,
-                    reason=f"경기 기록 반영 (쿼터 {n_rated[p.id]}개)",
+                    delta=after - (before or Decimal(0)), ref_type=ref_type, ref_id=ref_id,
+                    reason=f"{why} (쿼터 {n_rated[p.id]}개)",
                 )
             )
     db.flush()
-    return {"quarters": len(quarters), "rated": rated, "warmup_events": len(warmup)}
+    return {"quarters": len(quarters), "rated": rated, "warmup_events": len(warmup), "changed_players": changed_players}
 
 
 ADMIN_ADJUST_LIMIT = 50.0  # 관리자 보정 오프셋 상한 (점). 이보다 크게 밀어야 닿는 값은 경기 기록과 너무 어긋난다

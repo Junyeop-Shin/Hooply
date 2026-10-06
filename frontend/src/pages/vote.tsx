@@ -41,7 +41,7 @@ export function VotePage() {
   })
 
   const back = `/events/${id}`
-  if (ev.isLoading || t.isLoading) return <Screen><TopBar title="경기 후 투표" back={back} /><Spinner /></Screen>
+  if (ev.isLoading || t.isLoading) return <Screen><TopBar title="경기 후 투표" back={back} /><Spinner page /></Screen>
 
   // 종료 전 / 비참석자 — 폼을 노출하지 않고 안내만 (스펙 6절)
   if (t.isError) {
@@ -54,7 +54,7 @@ export function VotePage() {
           <EmptyState
             title={notOpen ? '일정이 끝나면 투표할 수 있어요' : errorMessage(err, '투표 명단을 불러오지 못했어요.')}
             desc={notOpen && ev.data ? `${fmtEvent(ev.data)} 종료 후 자동으로 열려요.` : undefined}
-            action={<Button variant="ghost" onClick={() => nav(back)}>일정으로 돌아가기</Button>}
+            action={<Button variant="ghost" onClick={() => nav(back, { replace: true })}>일정으로 돌아가기</Button>}
           />
         </Content>
       </Screen>
@@ -104,7 +104,7 @@ export function VotePage() {
             )}
           </section>
         </Content>
-        <BottomAction><Button variant="secondary" full onClick={() => nav(back)}>일정으로 돌아가기</Button></BottomAction>
+        <BottomAction><Button variant="secondary" full onClick={() => nav(back, { replace: true })}>일정으로 돌아가기</Button></BottomAction>
       </Screen>
     )
   }

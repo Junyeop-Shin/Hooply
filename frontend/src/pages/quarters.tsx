@@ -13,7 +13,7 @@
  * - 3팀(v1.7): 쿼터 카드 위에 작게 "대진"(첫째 칸 팀 vs 둘째 칸 팀)을 고른다. 두 칸은 그 쿼터에 뛴 두 팀이 되고,
  *   명단·색·득점 칸 이름이 그 팀을 따른다. 결과 화면은 칸 합계 대신 팀별 쿼터 · 득실 · 승패를 보여 준다.
  */
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { errorMessage, errorMessageWithDetails as errMsg } from '../api/client'
@@ -24,7 +24,7 @@ import { quartersApi } from '../api/quarters'
 import { teamsApi } from '../api/teams'
 import type { PlayerCard, QuarterIn, Side, SquadTally } from '../api/types'
 import { squadName, squadStyle } from '../lib/squads'
-import { MAX_SCORE, isPristineQuarter, lineupSig } from '../lib/quarter-draft'
+import { MAX_SCORE, draftMatchesServer, isPristineQuarter, lineupSig } from '../lib/quarter-draft'
 import { invalidateEvent } from '../lib/invalidate'
 import { Alert, Badge, Button, Card, LoadError, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
@@ -113,20 +113,44 @@ export function QuartersPage() {
   const serverBase = useMemo(() => JSON.stringify((saved.data?.items ?? []).map((q) => [
     q.quarter_no, q.black_score, q.white_score, q.duration_min, q.home_squad_no, q.away_squad_no, q.lineups.map((l) => `${l.player_id}${l.side}`).sort(),
   ])), [saved.data])
+  const fromServer: Draft[] = useMemo(() => (saved.data?.items ?? []).map((q) => ({ quarter_no: q.quarter_no, black_score: q.black_score, white_score: q.white_score, duration_min: q.duration_min, home: q.home_squad_no ?? 1, away: q.away_squad_no ?? 2, black: q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.player_id), white: q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.player_id) })), [saved.data])
+  // 초안을 만들 때의 서버 기록 — 임시 저장의 base 는 이 값이다. 뒤에서 서버 기록이 바뀌어도(다른 기기에서 저장) 초안의 바탕은 그대로
+  const base = useRef<{ key: string; drafts: Draft[] } | null>(null)
+  // 초안을 만든 뒤 서버 기록이 달라졌는데 매니저가 이미 고치고 있던 경우 — 저장을 막고 다시 불러오게 한다
+  const [conflict, setConflict] = useState(false)
+  const adoptServer = useCallback((next: Draft[]) => {
+    base.current = { key: serverBase, drafts: fromServer }
+    setQuarters(next); setConflict(false)
+  }, [serverBase, fromServer])
 
-  // 초기값: 이 서버 기록을 고치던 로컬 임시 저장 > 서버 기록 > (기록 없음) 로컬 임시 저장 > 빈 쿼터 1개 (배정 팀원 5명씩 미리 체크)
+  /** 기록이 없을 때 미리 만들어 두는 빈 쿼터 1개 — 배정 팀원 5명씩 미리 체크 */
+  const seeded = useCallback((): Draft => {
+    const b = hasAssignment ? (squadIds[1] ?? []).slice(0, 5) : []
+    const w = hasAssignment ? (squadIds[2] ?? []).slice(0, 5) : []
+    return { quarter_no: 1, black_score: 0, white_score: 0, duration_min: DEFAULT_DURATION, black: b, white: w, home: 1, away: 2, seed: lineupSig({ black: b, white: w, home: 1, away: 2 }) }
+  }, [hasAssignment, squadIds])
+
+  // 초기값: 이 서버 기록을 고치던 로컬 임시 저장 > 서버 기록 > (기록 없음) 로컬 임시 저장 > 빈 쿼터 1개
+  // 초안이 생긴 뒤 서버 기록이 달라지면(다른 기기에서 저장 · 뒤늦은 재조회): 아직 안 고쳤으면 조용히 새 기록으로 바꿔 끼우고,
+  // 고치고 있었으면 알리고 저장을 막는다 (저장은 전체 교체라 다른 기기의 기록을 덮어쓴다)
   useEffect(() => {
     // 서버 기록을 못 받았으면 초안을 만들지 않는다 — 빈 초안을 저장하면 전체 교체(PUT)라 서버 쿼터가 지워진다
-    if (quarters || !saved.isSuccess || adopted.isLoading) return
-    const hasSaved = !!saved.data && saved.data.items.length > 0
-    const fromServer: Draft[] = (saved.data?.items ?? []).map((q) => ({ quarter_no: q.quarter_no, black_score: q.black_score, white_score: q.white_score, duration_min: q.duration_min, home: q.home_squad_no ?? 1, away: q.away_squad_no ?? 2, black: q.lineups.filter((l) => l.side === 'BLACK').map((l) => l.player_id), white: q.lineups.filter((l) => l.side === 'WHITE').map((l) => l.player_id) }))
+    if (!saved.isSuccess || adopted.isLoading) return
+    if (quarters) {
+      if (!base.current || base.current.key === serverBase) return
+      if (draftMatchesServer(quarters, base.current.drafts)) adoptServer(fromServer.length ? fromServer : [seeded()])
+      else setConflict(true)
+      return
+    }
+    const hasSaved = fromServer.length > 0
+    base.current = { key: serverBase, drafts: fromServer }
     try {
       const raw = localStorage.getItem(draftKey(id))
       if (raw) {
         const parsed = JSON.parse(raw) as Draft[] | { quarters: Draft[]; extra?: Extra & { black?: number[]; white?: number[] }; base?: string }
         const qs = (Array.isArray(parsed) ? parsed : parsed.quarters)?.map((q) => ({ ...q, home: q.home ?? 1, away: q.away ?? 2 }))  // 예전 형식(배열 · 대진 없음)도 읽는다
-        const base = Array.isArray(parsed) ? undefined : parsed.base
-        if (qs?.length && (!hasSaved || (base === serverBase && JSON.stringify(qs) !== JSON.stringify(fromServer)))) {
+        const draftBase = Array.isArray(parsed) ? undefined : parsed.base
+        if (qs?.length && (!hasSaved || (draftBase === serverBase && JSON.stringify(qs) !== JSON.stringify(fromServer)))) {
           setQuarters(qs)
           if (!Array.isArray(parsed) && parsed.extra) {
             const e = parsed.extra
@@ -137,17 +161,14 @@ export function QuartersPage() {
         }
       }
     } catch { /* 저장소 없음 */ }
-    if (hasSaved) { setQuarters(fromServer); return }
-    const b = hasAssignment ? (squadIds[1] ?? []).slice(0, 5) : []
-    const w = hasAssignment ? (squadIds[2] ?? []).slice(0, 5) : []
-    setQuarters([{ quarter_no: 1, black_score: 0, white_score: 0, duration_min: DEFAULT_DURATION, black: b, white: w, home: 1, away: 2, seed: lineupSig({ black: b, white: w, home: 1, away: 2 }) }])
-  }, [quarters, saved.data, saved.isSuccess, adopted.isLoading, hasAssignment, squadIds, id, serverBase])
+    setQuarters(hasSaved ? fromServer : [seeded()])
+  }, [quarters, saved.isSuccess, adopted.isLoading, fromServer, serverBase, id, seeded, adoptServer])
 
-  // 임시 저장 — 누를 때마다 쓰지 않고 입력이 0.3초 멈추면 한 번. 바탕이 된 서버 기록(base)을 같이 적는다
+  // 임시 저장 — 누를 때마다 쓰지 않고 입력이 0.3초 멈추면 한 번. 바탕이 된 서버 기록(base)을 같이 적는다 — 초안을 만들 때의 것
   useEffect(() => {
     if (!quarters || !isManager) return
     const t = setTimeout(() => {
-      try { localStorage.setItem(draftKey(id), JSON.stringify({ quarters, extra, base: serverBase })) } catch { /* ignore */ }
+      try { localStorage.setItem(draftKey(id), JSON.stringify({ quarters, extra, base: base.current?.key ?? serverBase })) } catch { /* ignore */ }
     }, 300)
     return () => clearTimeout(t)
   }, [quarters, extra, id, isManager, serverBase])
@@ -163,6 +184,7 @@ export function QuartersPage() {
     },
     onSuccess: () => {
       try { localStorage.removeItem(draftKey(id)) } catch { /* ignore */ }
+      base.current = null  // 저장한 것이 곧 서버 기록 — 뒤따르는 재조회를 "다른 기기의 변경" 으로 보지 않는다
       // 이 일정(쿼터 · 상태 · 쿼터 수)과 팀 일정 목록 · 리더보드 기간, 실력이 바뀐 팀원 · 프로필 · 기록
       invalidateEvent(qc, id, teamId)
       qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] })
@@ -180,7 +202,7 @@ export function QuartersPage() {
       </Screen>
     )
   }
-  if (ev.isLoading || att.isLoading || saved.isLoading || !quarters || !ev.data) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Spinner /></Screen>
+  if (ev.isLoading || att.isLoading || saved.isLoading || !quarters || !ev.data) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Spinner page /></Screen>
   const total = quarters.reduce((a, q) => ({ black: a.black + q.black_score, white: a.white + q.white_score }), { black: 0, white: 0 })
   const invalid = quarters.filter((q) => q.black.length !== 5 || q.white.length !== 5)
   const update = (i: number, patch: Partial<Draft>) => setQuarters((qs) => qs!.map((q, j) => (j === i ? { ...q, ...patch } : q)))
@@ -255,6 +277,14 @@ export function QuartersPage() {
         <FirstTimeTip id="quarters" />
         <p className="px-1 text-xs text-muted">경기 후 한 번에 입력하세요. 저장 전 내용은 이 기기에 임시 보관돼요.</p>
         {restored && <Alert kind="info">저장하지 않은 입력을 되살렸어요.</Alert>}
+        {conflict && (
+          <Alert kind="warn">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0 flex-1">다른 기기에서 기록이 바뀌었어요. 지금 입력을 저장하면 그 기록을 덮어써요 — 다시 불러온 뒤 고쳐 주세요.</span>
+              <button type="button" onClick={() => { setRestored(false); adoptServer(fromServer.length ? fromServer : [seeded()]) }} className="-my-2 min-h-11 shrink-0 px-2 text-sm font-semibold underline underline-offset-2">다시 불러오기</button>
+            </div>
+          </Alert>
+        )}
         {!hasAssignment && <Alert kind="warn">확정된 팀 배정이 없어 참석자 전원이 양쪽에 보여요. 팀마다 5명씩 골라 주세요.</Alert>}
         {three && <p className="px-1 text-xs text-muted">세 팀이에요. 쿼터마다 위의 <b>대진</b>에서 뛴 두 팀을 골라 주세요.</p>}
         {msg && <Alert>{msg}</Alert>}
@@ -351,7 +381,7 @@ export function QuartersPage() {
       <BottomAction>
         {/* 서버 기록을 지금 받은 상태일 때만 저장한다 (불러오기에 실패한 채로 저장하면 서버 쿼터를 덮어쓴다) */}
         {saved.isError && <div className="mb-2"><LoadError message="저장된 기록을 다시 확인하지 못했어요. 다시 불러온 뒤 저장할 수 있어요." onRetry={() => saved.refetch()} retrying={saved.isFetching} /></div>}
-        <Button full loading={save.isPending} disabled={invalid.length > 0 || quarters.length === 0 || !saved.isSuccess} onClick={() => save.mutate()}>
+        <Button full loading={save.isPending} disabled={invalid.length > 0 || quarters.length === 0 || !saved.isSuccess || conflict} onClick={() => save.mutate()}>
           {saved.data && saved.data.summary.quarter_count > 0 ? '기록 수정 저장' : '경기 후 한 번에 저장'} ({quarters.length}쿼터)
         </Button>
       </BottomAction>

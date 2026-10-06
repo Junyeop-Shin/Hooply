@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core import errors
 from app.core.errors import ErrorDetail
+from app.db.session import lock_team_stats
 from app.models import (
     Player,
     PlayerPosition,
@@ -425,7 +426,10 @@ def recompute_team_priors(db: Session, team_id: int) -> int:
     - admin_adjust 는 읽기만 한다 — 관리자 보정이 설문 · 정렬 재계산에 지워지지 않게.
     - 값이 바뀐 사람만 skill_rating_history 를 남긴다.
     부수 효과: flush 까지. commit 은 호출자 책임.
+    첫 줄에서 팀 잠금(lock_team_stats)을 건다 — player_profiles 를 먼저 쓰고 나서 안쪽 recompute_team 이 잠금을 걸면
+    잠금을 먼저 잡은 다른 요청과 교착이 났다 (quarter_service 모듈 docstring 의 잠금 순서).
     """
+    lock_team_stats(db, team_id)
     rows = members_with_features(db, team_id)
     n = len(rows)
     survey_z: dict[int, float] = {}
@@ -582,6 +586,7 @@ def ordered_positions(player: Player) -> list[Position]:
 
 def set_self_rank(db: Session, player: Player, level: SelfRankLevel) -> None:
     """팀 가입 후 "이 동호회에서 내 실력 위치" 를 저장하고 팀 prior 를 재계산한다. commit 포함."""
+    lock_team_stats(db, player.team_id)  # 프로필을 쓰기 전에 (잠금 순서)
     prof = player.profile or PlayerProfile(player_id=player.id)
     if player.profile is None:
         player.profile = prof

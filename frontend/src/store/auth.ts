@@ -4,6 +4,7 @@
  */
 import { create } from 'zustand'
 import { API_ORIGIN } from '../lib/env'
+import { clearDrafts } from '../lib/drafts'
 import { persist } from 'zustand/middleware'
 import type { TokenPair } from '../api/types'
 import { queryClient } from '../queryClient'
@@ -15,7 +16,7 @@ interface AuthState {
   accessToken: string | null
   refreshToken: string | null
   setTokens: (pair: TokenPair) => void
-  /** 로그인 — 캐시를 비우고 토큰을 넣는다 (다른 계정의 데이터가 남지 않게) */
+  /** 로그인 — 캐시와 화면 초안(lib/drafts)을 비우고 토큰을 넣는다 (다른 계정의 데이터 · 입력이 남지 않게) */
   login: (pair: TokenPair) => void
   logout: () => void
 }
@@ -26,14 +27,14 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       setTokens: (pair) => set({ accessToken: pair.access_token, refreshToken: pair.refresh_token }),
-      login: (pair) => { queryClient.clear(); set({ accessToken: pair.access_token, refreshToken: pair.refresh_token }) },
+      login: (pair) => { queryClient.clear(); clearDrafts(); set({ accessToken: pair.access_token, refreshToken: pair.refresh_token }) },
       logout: () => {
         const refresh = useAuthStore.getState().refreshToken
         if (refresh) {
           // api() 를 쓰면 client ↔ store 순환 import 라 fetch 를 직접 쓴다. keepalive: 화면을 닫아도 요청은 끝까지 간다
           fetch(`${API_ORIGIN}/api/v1/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: refresh }), keepalive: true }).catch(() => {})
         }
-        queryClient.clear(); set({ accessToken: null, refreshToken: null })
+        queryClient.clear(); clearDrafts(); set({ accessToken: null, refreshToken: null })
       },
     }),
     { name: AUTH_STORAGE_KEY },

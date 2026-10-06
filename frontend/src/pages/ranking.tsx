@@ -69,7 +69,7 @@ export function RankingPage() {
               : '카드를 누르면 집어요. 그다음 놓을 자리를 누르면 옮겨져요.'}
           </p>
         )}
-        {!order && players.isError ? <LoadError message={errorMessage(players.error, '팀원을 불러오지 못했어요.')} onRetry={() => players.refetch()} retrying={players.isFetching} /> : !order ? <Spinner /> : (
+        {!order && players.isError ? <LoadError message={errorMessage(players.error, '팀원을 불러오지 못했어요.')} onRetry={() => players.refetch()} retrying={players.isFetching} /> : !order ? <Spinner page /> : (
           <div className="space-y-1.5">
             {order.map((p, i) => (
               <Card

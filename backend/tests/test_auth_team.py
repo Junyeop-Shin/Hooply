@@ -141,6 +141,14 @@ def test_team_create_join_activate(client, signup):
     assert client.get(f"/api/v1/teams/{team_id}", headers=new_manager).json()["code"] == "NOT_A_MEMBER"
     r = client.post("/api/v1/teams/join", json={"team_code": code}, headers=new_manager)
     assert r.status_code == 403 and r.json()["code"] == "REMOVED_FROM_TEAM"
+    # 코드를 재발급하면 제외가 풀린다 — 옛 코드는 무효, 새 코드를 받은 사람은 PLAYER 로 돌아온다
+    new_code = client.post(f"/api/v1/teams/{team_id}/code:regenerate", headers=owner).json()["team_code"]
+    assert client.post("/api/v1/teams/join", json={"team_code": code}, headers=new_manager).json()["code"] == "TEAM_CODE_NOT_FOUND"
+    r = client.post("/api/v1/teams/join", json={"team_code": new_code}, headers=new_manager)
+    assert r.status_code == 200
+    assert client.get(f"/api/v1/teams/{team_id}", headers=new_manager).json()["my_role"] == "PLAYER"
+    assert client.post(f"/api/v1/teams/{team_id}:leave", headers=new_manager).status_code == 204  # 아래 시나리오는 4명 기준
+    code = new_code
 
     # 스스로 나간(LEFT) 사람은 코드로 돌아온다: 기존 players 행이 되살아나(새 행 없음) 기록은 승계되지만,
     # 역할은 PLAYER로 초기화된다 (나가기 전 MANAGER였던 사람이 코드만으로 매니저 권한을 되찾으면 안 된다)

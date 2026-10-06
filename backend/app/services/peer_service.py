@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -69,12 +69,12 @@ BEST_WINDOW_DAYS = 90  # peer_vote_score(표시 전용) 집계 기간
 
 
 def opens_at(event: Event) -> datetime:
-    """투표가 열리는 시각 = 일정 종료 시각 (end_time 없으면 그날 자정). 서비스 시간대(settings.timezone) 기준.
+    """투표가 열리는 시각 = 일정 종료 시각 (event_service.ends_at — end_time 없으면 그날 23:59, 자정을 넘기면 다음 날)."""
+    from app.services import (
+        event_service,  # 순환 import 회피 (event_service 가 이 모듈을 함수 안에서 부른다)
+    )
 
-    컨테이너 로컬 시간대(보통 UTC)로 해석하면 한국 12:00 종료가 21:00 에 열리는 버그가 생기므로 명시적으로 변환한다.
-    """
-    t = event.end_time or time(23, 59)
-    return datetime.combine(event.event_date, t, tzinfo=ZoneInfo(get_settings().timezone))
+    return event_service.ends_at(event)
 
 
 def is_open(event: Event) -> bool:
@@ -200,6 +200,7 @@ def submit(db: Session, event: Event, me: Player, body: PostGameSurveyIn) -> Pos
             raise errors.ValidationError(f"최대 {2 * MAX_PER_SIDE}명까지 고를 수 있어요.")
         if side is not None and n > MAX_PER_SIDE:
             raise errors.ValidationError(f"{'같은 팀' if side == TargetSide.SAME_TEAM else '상대 팀'}에서는 최대 {MAX_PER_SIDE}명까지 고를 수 있어요.")
+    lock_team_stats(db, event.team_id)  # 투표 행을 쓰기 전에 (잠금 순서 — recompute_team_chemistry 가 다시 걸어도 재진입)
     survey = PostGameSurvey(event_id=event.id, respondent_player_id=respondent.id, submitted_at=datetime.now(UTC))
     for v in body.votes:
         survey.votes.append(PostGameVote(target_player_id=v.target_player_id, vote_type=v.vote_type, target_side=side_of(v.target_player_id), reason_tag=v.reason_tag))

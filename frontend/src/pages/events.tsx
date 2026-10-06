@@ -2,7 +2,7 @@
  * S-09 일정 등록 · S-10 일정 상세/RSVP · S-11 참석자 현황·게스트 등록 (F4, F13, guest-feature-spec 6절).
  * 게스트 등록 바텀시트는 플레이어(S-10)와 매니저(S-11)가 같은 컴포넌트를 쓴다.
  */
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { errorMessage as errMsg } from '../api/client'
@@ -12,9 +12,10 @@ import { announceShare, shareText } from '../lib/kakao'
 import { POSITIONS, localISODate, type AttendanceView, type EventGuestInput, type EventGuestUpdate, type EventView, type GuestPreset, type PlayerCard, type Position } from '../api/types'
 import { invalidateEvent } from '../lib/invalidate'
 import { confirm } from '../store/feedback'
+import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
 import { fmtEvent } from '../lib/format'
 import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, LoadError, Sheet, Spinner } from '../components/ui'
-import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
+import { BottomAction, Content, Screen, TopBar, useFinish, useGoBack } from '../components/layout'
 import { EventTactics } from '../components/tactics'
 import { AdoptedSection } from '../components/adopted'
 
@@ -46,6 +47,7 @@ export function EventCreatePage() {
   const existing = useQuery({ queryKey: ['events', editId], queryFn: () => eventsApi.get(editId!), enabled: editId !== null })
   const id = editId !== null ? (existing.data?.team_id ?? 0) : Number(teamId)
   const nav = useNavigate()
+  const finish = useFinish()
   const qc = useQueryClient()
   const [f, setF] = useState(EMPTY_EVENT)
   const [prefilled, setPrefilled] = useState(false)
@@ -116,7 +118,13 @@ export function EventCreatePage() {
   })
   const m = useMutation({
     mutationFn: () => (editId !== null ? eventsApi.update(editId, payload()) : eventsApi.create(id, payload())),
-    onSuccess: (ev) => { invalidateEvent(qc, ev.id, ev.team_id); nav(`/events/${ev.id}`, { replace: true }) },
+    // 등록은 새 화면으로 바꿔치기, 수정은 들어온 일정 화면으로 한 칸 되감는다 — 뒤로가 수정 화면이나 같은 일정으로 가지 않게
+    onSuccess: (ev) => {
+      invalidateEvent(qc, ev.id, ev.team_id)
+      if (editId !== null) { finish(`/events/${ev.id}`, 1); return }
+      qc.invalidateQueries({ queryKey: ['me', 'tutorial'] })  // 시작 안내 "첫 일정 만들기" 단계가 바로 끝난 것으로
+      nav(`/events/${ev.id}`, { replace: true })
+    },
     meta: { inlineError: true },
   })
 
@@ -179,7 +187,9 @@ export function EventDetailPage() {
   const refresh = () => invalidateEvent(qc, id, ev.data?.team_id)
 
   // 참석 응답은 누르는 즉시 바뀐 것처럼 보여 준다 (체육관 통신이 느려도). 실패하면 원래대로 돌린다
+  const rsvpKey = ['rsvp', id]
   const respond = useMutation({
+    mutationKey: rsvpKey,
     mutationFn: (status: 'ATTEND' | 'ABSENT') => eventsApi.respond(id, status),
     scope: { id: `rsvp-${id}` },  // 연달아 눌러도 순서대로 보낸다
     onMutate: async (status) => {
@@ -196,12 +206,16 @@ export function EventDetailPage() {
       if (ctx?.prev) qc.setQueryData(['events', id], ctx.prev)
       setMsg(errMsg(e, '응답하지 못했어요.'))
     },
-    onSettled: refresh,
+    // 연달아 누르면 아직 보낼 응답이 남아 있다(자기 자신도 센다) — 마지막 것만 다시 받아 화면이 번갈아 깜빡이지 않게
+    onSettled: () => { if (qc.isMutating({ mutationKey: rsvpKey }) <= 1) refresh() },
   })
+  // 지운 일정의 캐시는 화면을 떠난 뒤에 버린다 — 떠 있는 채로 지우면 이 화면이 빈 데이터로 다시 그려진다
+  const deleted = useRef(false)
+  useEffect(() => () => { if (deleted.current) qc.removeQueries({ queryKey: ['events', id] }) }, [qc, id])
   const remove = useMutation({
     mutationFn: () => eventsApi.remove(id),
-    // 지운 일정을 다시 불러오지 않도록 먼저 나가고, 이 일정의 캐시는 버린다
-    onSuccess: () => { goBack('/'); qc.removeQueries({ queryKey: ['events', id] }); refresh() },
+    // 먼저 나가고 팀 일정 목록만 다시 받는다 (지운 일정 자체는 다시 부르지 않는다)
+    onSuccess: () => { deleted.current = true; goBack('/'); qc.invalidateQueries({ queryKey: ev.data?.team_id ? ['events', 'team', ev.data.team_id] : ['events', 'team'] }) },
     onError: (e) => setMsg(errMsg(e, '일정을 지우지 못했어요.')),
   })
   const closeRsvp = useMutation({ mutationFn: () => eventsApi.closeRsvp(id), onSuccess: refresh, onError: (e) => setMsg(errMsg(e, '마감하지 못했어요.')) })
@@ -216,7 +230,7 @@ export function EventDetailPage() {
     onError: (e) => setMsg(errMsg(e, '참석 상태를 바꾸지 못했어요.')),
   })
 
-  if (ev.isLoading) return <Screen><TopBar title="일정" back="/" /><Spinner /></Screen>
+  if (ev.isLoading) return <Screen><TopBar title="일정" back="/" /><Spinner page /></Screen>
   if (!ev.data) return <Screen><TopBar title="일정" back="/" /><Content><LoadError message={errMsg(ev.error, '일정을 불러오지 못했어요.')} onRetry={() => ev.refetch()} retrying={ev.isFetching} /></Content></Screen>
   const e = ev.data
   const isManager = e.my_role === 'MANAGER'
@@ -261,7 +275,7 @@ export function EventDetailPage() {
           {isManager && e.rsvp_open && (
             <div className="mt-1 flex justify-end">
               <button
-                onClick={async () => { if (await confirm({ title: '참석 응답을 지금 마감할까요?', body: '팀원은 더 이상 응답을 바꿀 수 없어요. 매니저는 대신 바꿀 수 있어요.', confirmLabel: '마감하기' })) closeRsvp.mutate() }}
+                onClick={async () => { if (await confirm(CLOSE_RSVP_CONFIRM)) closeRsvp.mutate() }}
                 disabled={closeRsvp.isPending}
                 className="-mr-2 min-h-11 px-2 text-xs font-semibold text-ink-2 disabled:opacity-50"
               >
@@ -530,8 +544,9 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
         {similar ? (
           <div className="space-y-2">
             <Alert kind="info">같은 이름의 게스트가 이미 있어요. 지난번에 온 분이면 골라 주세요.</Alert>
+            {/* 보내는 동안은 다시 눌러도 무시 — 같은 게스트가 두 번 등록되지 않게 */}
             {similar.map((p) => (
-              <Card key={p.id} onClick={() => create.mutate({ existing_player_id: p.id })} className="flex items-center gap-3 py-3">
+              <Card key={p.id} onClick={() => { if (!busy) create.mutate({ existing_player_id: p.id }) }} className={`flex items-center gap-3 py-3 ${busy ? 'opacity-50' : ''}`}>
                 <Avatar name={p.display_name} src={p.profile_image_url} />
                 <div className="flex-1"><p className="font-semibold text-ink">{p.display_name}</p><p className="text-xs text-muted">{p.playable_positions.join(' · ') || '포지션 미입력'}</p></div>
                 {showGrade && <GradeDot grade={p.skill_grade} />}

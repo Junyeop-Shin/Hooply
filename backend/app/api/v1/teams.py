@@ -76,7 +76,7 @@ def join_team(db: DB, user: CurrentUser, body: TeamJoinRequest):
     - **권한:** 로그인 사용자.
     - **처리:** 코드를 대문자로 정규화해 팀을 찾는다 (`ARCHIVED` 팀은 없는 것으로 취급).
       이미 `ACTIVE`로 소속돼 있으면 거부하고, 스스로 나간(`LEFT`) 이력이 있으면 그 행을
-      다시 `ACTIVE`로 되살린다(과거 기록 승계, 역할은 PLAYER). 매니저가 제외한(`REMOVED`) 사람은 코드로 돌아올 수 없다. 가입 후 활성 회원이 5명 이상이 되면 팀을
+      다시 `ACTIVE`로 되살린다(과거 기록 승계, 역할은 PLAYER). 매니저가 제외한(`REMOVED`) 사람은 코드가 재발급되기 전까지 돌아올 수 없다. 가입 후 활성 회원이 5명 이상이 되면 팀을
       `ACTIVE`로 전환한다 (FR-06). 응답은 팀 상세 + 이 팀에서의 내 `player_id`·`role`.
     - **오류:** `404 TEAM_CODE_NOT_FOUND` — 존재하지 않거나 보관된 팀의 코드.
       `409 ALREADY_MEMBER` — 이미 소속된 팀. `403 REMOVED_FROM_TEAM` — 매니저가 제외한 팀.
@@ -137,7 +137,8 @@ def regenerate_code(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_t
 
     - **권한:** 팀 매니저 또는 ADMIN.
     - **처리:** 새 8자리 코드를 중복 없이 생성해 `teams.team_code`를 교체한다. 코드가 원치 않는
-      곳에 퍼졌을 때 쓴다. 기존 팀원의 소속에는 영향이 없다.
+      곳에 퍼졌을 때 쓴다. 기존 팀원의 소속에는 영향이 없다. 제외됐던(`REMOVED`) 사람은 `LEFT` 로
+      풀려, 새 코드를 받으면 다시 가입할 수 있다(옛 코드는 무효).
     - **오류:** `404 NOT_FOUND`, `403 NOT_A_MEMBER`, `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 (`POST /teams/{team_id}/code:regenerate`), 3.2절 팀 매니저 기능.
@@ -266,7 +267,7 @@ def remove_player(db: DB, me: TeamManager, user: CurrentUser, team: Annotated[Te
     - **처리:** 물리 삭제가 아니라 `players.status=REMOVED`로 바꾼다. 과거 쿼터 기록·배정·투표는
       `player_id`를 그대로 참조하므로 유지된다. 제외 후 활성 회원이 5명 미만이 되면 팀 상태를
       `PENDING`으로 되돌린다. 제외된 회원은 팀 코드로 다시 가입할 수 없다(`403 REMOVED_FROM_TEAM`) —
-      스스로 나간 사람(LEFT)만 코드로 돌아올 수 있다.
+      스스로 나간 사람(LEFT)만 코드로 돌아올 수 있다. 매니저가 코드를 재발급하면 제외가 풀려 새 코드로는 돌아올 수 있다.
     - **오류:** `404 NOT_FOUND` — 팀 또는 팀원 없음. `403 FORBIDDEN_ROLE` — 매니저가 아님.
       `403 FORBIDDEN_NOT_OWNER` — 팀장이 아닌 매니저가 매니저를 제외, 또는 팀장을 제외하려 함.
       `422 CANNOT_DEMOTE_LAST_MANAGER` — 마지막 매니저 제외.

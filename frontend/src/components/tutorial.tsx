@@ -9,11 +9,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { authApi, ME_STALE } from '../api/auth'
+import { errorMessage } from '../api/client'
 import { tutorialApi } from '../api/tutorial'
 import type { TutorialUpdate, UserDetail } from '../api/types'
 import { FLOW, SPOTLIGHT, TIPS, type TipId } from '../lib/tutorial-content'
 import { Spotlight } from './spotlight'
-import { Button, Card, Spinner } from './ui'
+import { Button, Card, LoadError, Spinner } from './ui'
 import { useModal } from './use-modal'
 
 function useTutorialUpdate() {
@@ -103,7 +104,9 @@ export function TutorialCard({ me }: { me: UserDetail }) {
       </div>
     )
   }
-  if (q.isLoading || !v) return <Card><Spinner /></Card>
+  if (q.isLoading) return <Card><Spinner /></Card>
+  // 못 받았으면 빙글빙글을 계속 돌리지 않고 다시 시도 버튼을 (안내 없이도 홈은 쓸 수 있다)
+  if (!v) return <Card><LoadError message={errorMessage(q.error, '시작 안내를 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} /></Card>
 
   // 다 마침 — 앞으로의 흐름을 한 번 보여 주고 끝
   if (v.all_done) {

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors
 from app.core.errors import ErrorDetail
+from app.db.session import lock_team_stats
 from app.models import ManagerRanking, ManagerRankingEntry, Player, Team, User
 from app.models.enums import PlayerStatus
 from app.schemas.team import RankingEntryView, RankingView
@@ -69,6 +70,7 @@ def create(db: Session, team: Team, by: User, player_ids: list[int]) -> RankingV
     bad = [pid for pid in player_ids if pid not in valid]
     if bad:
         raise errors.PlayerNotInTeam(details=[ErrorDetail(field="player_ids", reason=f"이 팀에 없는 사람이 {len(bad)}명 있어요.")])
+    lock_team_stats(db, team.id)  # 정렬을 쓰기 전에 — 뒤따르는 사전값 · 지표 재계산과 잠금 순서를 맞춘다
     for old in db.scalars(select(ManagerRanking).where(ManagerRanking.team_id == team.id, ManagerRanking.is_active.is_(True))).all():
         old.is_active = False
     db.flush()  # 팀당 활성 버전은 하나 (uq_manager_rankings_active) — 새 버전을 넣기 전에 이전 것을 먼저 끈다

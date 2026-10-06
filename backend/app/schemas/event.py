@@ -25,7 +25,7 @@ class EventCreate(BaseModel):
     title: str | None = Field(default=None, max_length=100, description="비우면 프론트가 날짜로 표시")
     event_date: date = Field(description="모임 날짜")
     start_time: time | None = None
-    end_time: time | None = None
+    end_time: time | None = Field(default=None, description="종료 시각. 시작 시각보다 같거나 빠르면 자정을 넘긴 것으로 보고 다음 날로 해석한다 (22:00~00:30)")
     venue: str | None = Field(default=None, max_length=100, description="장소. 팀의 home_court와 다를 수 있다")
     rsvp_deadline: datetime | None = Field(
         default=None, description="참석 응답 마감 시각. 지나면 본인 응답은 422 RSVP_CLOSED (매니저 대리 응답은 가능)"

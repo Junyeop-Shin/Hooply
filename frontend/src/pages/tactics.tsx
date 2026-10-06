@@ -49,7 +49,7 @@ export function TacticBoardPage() {
     return (
       <Screen>
         <TopBar title="전술" back="/" />
-        {loading ? <Spinner /> : <Content><Alert>없는 전술이에요.</Alert></Content>}
+        {loading ? <Spinner page /> : <Content><Alert>없는 전술이에요.</Alert></Content>}
       </Screen>
     )
   }

@@ -1,39 +1,29 @@
 /**
- * 화면에 하나뿐인 로딩 표시.
- * 섹션마다 놓인 <Spinner /> 는 "지금 불러오는 중" 이라고 알리기만 하고(자리만 차지), 실제 빙글빙글은 여기서 화면 전체를 흐리게 덮고 가운데에 하나만 그린다.
- * 섹션이 여럿인 화면(홈 · 팀)에서 로딩 표시와 기다림 문구가 섹션 수만큼 겹쳐 보이지 않게 하려는 것이다.
- * 5초가 넘게 돌면 서버가 깨는 중일 수 있어 농구 문구를 무작위로 띄우고 6초마다 바꾼다 (lib/wait-messages).
+ * 화면 전체를 덮는 로딩 표시 — 두 층 중 "화면 전체" 쪽 (store/loading).
+ *   <Spinner page />  화면이 통째로 비어 있을 때. 0.15초 뒤 화면을 살짝 흐리게 덮고 가운데에 링 하나
+ *   <Spinner />       섹션 하나만 불러올 때. 그 자리에 작은 링만 그리고(ui.tsx) 여기서는 아무것도 덮지 않는다 —
+ *                     이미 보이는 내용이 흐려지지 않게
+ * 어느 쪽이든 5초(SLOW_AFTER_MS)를 넘게 이어지면 서버가 깨는 중일 수 있어, 여기서 전체 덮개와 농구 문구로 넘겨받는다
+ * (섹션 링은 그때 숨는다 — 로딩 표시와 문구는 화면에 하나만). 문구는 6초마다 바뀐다 (store 가 고른다, lib/wait-messages).
+ * 쌓임 순서(z-20): 내용 · TopBar(z-10) 위, 안내 팝업(z-30) · 시트 · 스포트라이트(z-40) · 토스트(z-50) 아래.
+ * 시트가 열려 있는 동안은 흐림 덮개를 빼고 링과 문구만 — 시트 뒤 화면을 두 겹으로 어둡게 하지 않는다.
  */
-import { useEffect, useState } from 'react'
-import { useIsLoading } from '../store/loading'
-import { pickWaitMessage, ROTATE_MS, SLOW_AFTER_MS, WAIT_SUBLINE } from '../lib/wait-messages'
-
-/** 로딩이 이어지는 동안의 기다림 문구. 5초 전에는 null */
-function useSlowMessage(active: boolean): string | null {
-  const [msg, setMsg] = useState<string | null>(null)
-  useEffect(() => {
-    if (!active) return
-    let rotate: number | undefined
-    const start = window.setTimeout(() => {
-      setMsg(pickWaitMessage())
-      rotate = window.setInterval(() => setMsg((m) => pickWaitMessage(m)), ROTATE_MS)
-    }, SLOW_AFTER_MS)
-    return () => { window.clearTimeout(start); if (rotate !== undefined) window.clearInterval(rotate); setMsg(null) }
-  }, [active])
-  return msg
-}
+import { isOverlayActive, useLoadingState } from '../store/loading'
+import { WAIT_SUBLINE } from '../lib/wait-messages'
+import { useModalOpen } from './use-modal'
 
 export function LoadingHost() {
-  const active = useIsLoading()
-  const slow = useSlowMessage(active)
-  if (!active) return null
-  // 화면 전체를 살짝 흐리게 덮는다. 0.15초 뒤에 나타나므로 금방 끝나는 로딩에서는 번쩍이지 않는다. 터치는 막지 않는다(뒤로 가기는 눌린다)
+  const state = useLoadingState()
+  const modalOpen = useModalOpen()
+  if (!isOverlayActive(state)) return null
+  const msg = state.waitMessage
+  // 터치는 막지 않는다(뒤로 가기는 눌린다). 0.15초 뒤에 나타나므로 금방 끝나는 로딩에서는 번쩍이지 않는다
   return (
-    <div className="pointer-events-none fixed inset-0 z-50 flex animate-[loading-in_200ms_ease-out_150ms_both] flex-col items-center justify-center gap-3 bg-canvas/70 px-6 backdrop-blur-[3px]">
-      <span className="size-8 animate-spin rounded-full border-[3px] border-brand-line border-t-brand" aria-hidden={slow ? true : undefined} />
-      {slow && (
+    <div className={`pointer-events-none fixed inset-0 z-20 flex animate-[loading-in_200ms_ease-out_150ms_both] flex-col items-center justify-center gap-3 px-6 ${modalOpen ? '' : 'bg-canvas/70 backdrop-blur-[3px]'}`}>
+      <span className="size-8 animate-spin rounded-full border-[3px] border-brand-line border-t-brand" aria-hidden={msg ? true : undefined} />
+      {msg && (
         <div role="status" aria-live="polite" className="text-center">
-          <p className="text-sm font-semibold text-ink">{slow}</p>
+          <p className="text-sm font-semibold text-ink">{msg}</p>
           <p className="mt-0.5 text-xs text-ink-2">{WAIT_SUBLINE}</p>
         </div>
       )}

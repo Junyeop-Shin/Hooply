@@ -26,3 +26,16 @@ describe('auth store', () => {
     expect(clear).not.toHaveBeenCalled()
   })
 })
+
+describe('auth store — 화면 초안', () => {
+  it('로그인 · 로그아웃은 초안을 지우고, 토큰 갱신은 남긴다 (경기 기록 입력 중 토큰이 바뀌어도)', () => {
+    localStorage.setItem('quarters-draft-1', '{}')
+    useAuthStore.getState().setTokens({ access_token: 'b', refresh_token: 'r2', token_type: 'bearer' })
+    expect(localStorage.getItem('quarters-draft-1')).toBe('{}')
+    useAuthStore.getState().logout()
+    expect(localStorage.getItem('quarters-draft-1')).toBeNull()
+    sessionStorage.setItem('assign-draft-1', '{}')
+    useAuthStore.getState().login({ access_token: 'a', refresh_token: 'r', token_type: 'bearer' })
+    expect(sessionStorage.getItem('assign-draft-1')).toBeNull()
+  })
+})

@@ -14,7 +14,7 @@ import { MarginTrend, QuarterList } from '../components/stats'
 import { surveyApi } from '../api/survey'
 import { POSITIONS, SELF_RANK_LABEL, type Position, type UserDetail } from '../api/types'
 import { useAuthStore } from '../store/auth'
-import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, SectionTitle, Spinner } from '../components/ui'
+import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, LoadError, SectionTitle, Spinner } from '../components/ui'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { startKakao } from './auth'
 
@@ -36,7 +36,9 @@ export function ProfilePage() {
     <Screen>
       <TopBar title="내 프로필" />
       <Content>
-        {!u ? <Spinner /> : (
+        {me.isLoading ? <Spinner page /> : !u ? (
+          <LoadError message={errorMessage(me.error, '내 정보를 불러오지 못했어요.')} onRetry={() => me.refetch()} retrying={me.isFetching} />
+        ) : (
           <>
             <Card className="flex items-center gap-4">
               <AvatarEditor user={u} />
@@ -240,7 +242,9 @@ function RecordsSection({ teamName, playerId, many }: { teamName: string; player
   return (
     <section>
       <SectionTitle>기록{many ? ` · ${teamName}` : ''}</SectionTitle>
-      {q.isLoading || !s ? <Spinner /> : s.quarters_played === 0 ? (
+      {q.isLoading ? <Spinner /> : !s ? (
+        <LoadError message={errorMessage(q.error, '기록을 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} />
+      ) : s.quarters_played === 0 ? (
         <EmptyState title="아직 경기 기록이 없어요" desc={`참석 ${s.events_attended}회 · 매니저가 쿼터를 기록하면 여기에 나와요.`} />
       ) : (
         <div className="space-y-2">

@@ -133,8 +133,9 @@ def join_team(db: Session, user: User, team_code: str) -> Team:
     `players`에는 `UNIQUE (team_id, user_id)` 제약이 있어 같은 사람의 행을 두 번 만들 수
     없다. 그래서 이 사람의 `Player` 행이 이미 있으면 상태로 분기한다:
     - `ACTIVE`  → 이미 소속됨. `409 ALREADY_MEMBER`.
-    - `REMOVED` → 매니저가 제외한 사람. 팀 코드만으로는 돌아올 수 없다 — `403 REMOVED_FROM_TEAM`.
-      (팀 코드는 카카오톡으로 퍼져 있어, 막지 않으면 제외가 의미가 없다)
+    - `REMOVED` → 매니저가 제외한 사람. 지금 코드로는 돌아올 수 없다 — `403 REMOVED_FROM_TEAM`.
+      (팀 코드는 카카오톡으로 퍼져 있어, 막지 않으면 제외가 의미가 없다.) 매니저가 코드를
+      **재발급하면** 제외 상태가 `LEFT` 로 풀려(`regenerate_code`), 새 코드를 받은 사람만 돌아올 수 있다.
     - `LEFT` → 스스로 나간 사람. **기존 행을 되살린다** (status를 ACTIVE로, `joined_at` 갱신).
       새 행을 만들지 않으므로 그 행에 묶인 `PlayerProfile`·쿼터 기록·투표 이력이
       그대로 승계된다. "나갔다 돌아온 사람의 실력 데이터가 0으로 리셋되지 않는다"는
@@ -227,10 +228,15 @@ def regenerate_code(db: Session, team: Team) -> Team:
     코드가 외부에 퍼져 원치 않는 가입이 생길 때 쓴다. 이전 코드는 즉시 무효가 되며
     (같은 컬럼을 덮어쓰므로) 이력은 남지 않는다. 기존 팀원에게는 영향이 없다.
 
+    제외(`REMOVED`)는 "옛 코드로는 못 돌아온다"는 뜻이므로, 새 코드가 생기면 제외된 사람을
+    `LEFT` 로 풀어 준다 — 새 코드를 알려 받은 사람은 `join_team` 으로 돌아올 수 있다(역할은 PLAYER).
+
     부수 효과: `db.commit()`. 권한 검사(매니저인지)는 라우터의 의존성에서 끝난 상태로
     들어온다.
     """
     team.team_code = _unique_code(db)
+    for p in db.scalars(select(Player).where(Player.team_id == team.id, Player.status == PlayerStatus.REMOVED)).all():
+        p.status = PlayerStatus.LEFT
     db.commit()
     return team
 

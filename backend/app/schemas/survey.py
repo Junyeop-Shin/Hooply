@@ -12,7 +12,7 @@ DB 에서 내려주고 프론트는 `answer_type` 에 따라 위젯을 고른다
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.enums import AnswerType, Position, SelfRankLevel
 from app.schemas.common import ORMModel, SkillGrade
@@ -58,15 +58,21 @@ class SurveyAnswerIn(BaseModel):
 
     question_id: int
     selected_option_ids: list[int] = Field(
-        default=[], description="선택형 문항. MULTI_CHIP 은 1개 이상, 그 외는 정확히 1개"
+        default=[], max_length=20, description="선택형 문항. MULTI_CHIP 은 1개 이상, 그 외는 정확히 1개. 같은 선택지를 두 번 보내면 하나로 센다"
     )
     numeric_value: Decimal | None = Field(default=None, description="STEPPER(A1 키 cm) 전용")
+
+    @field_validator("selected_option_ids")
+    @classmethod
+    def _dedupe(cls, v: list[int]) -> list[int]:
+        """같은 선택지를 두 번 보내도 하나로 (순서는 처음 나온 대로 — D1 은 순서가 선호 순위다)."""
+        return list(dict.fromkeys(v))
 
 
 class SurveyResponseIn(BaseModel):
     """설문 제출 — `POST /surveys/onboarding/responses` (로그인 사용자, FR-03).
 
-    15문항 전부 필수. 이미 제출했으면 409 ALREADY_SUBMITTED (1인 1회).
+    12문항(설문 v2) 전부 필수. 이미 제출했으면 409 ALREADY_SUBMITTED (1인 1회).
     """
 
     template_id: int | None = Field(default=None, description="생략 가능. 보내면 활성 템플릿과 일치해야 한다")

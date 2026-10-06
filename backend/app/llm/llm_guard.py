@@ -343,6 +343,17 @@ def _invoke(runner: Any, messages: Any, deadline_box: list[float], timeout: floa
 
 
 def run(db: Session, call: ChainCall, *, user_id: int | None) -> GuardOutcome:
+    """체인 하나를 캐시 → single-flight → 모델 호출 → 가드레일 → 저장 순으로 돌린다.
+
+    **계약: 부를 때 세션에 미완료 변경(new · dirty · deleted)이 없어야 한다.** 모델을 기다리는 동안 DB 연결을 붙잡지 않으려고
+    중간에 `db.commit()` 을 하는데, 호출자가 저장할지 말지 정하지 않은 변경이 세션에 남아 있으면 그게 의도와 상관없이
+    함께 커밋된다. 호출자는 먼저 commit 하거나(배정 설명 · 전술 추천은 읽기만 한 뒤 부른다) rollback 한 뒤 불러야 한다.
+    /docs 가 열린 환경(로컬 · CI, `Settings.docs_enabled`)에서는 어기면 AssertionError 로 바로 드러나고, 운영에서는 지금처럼
+    커밋한다 (설명 카드 하나 때문에 요청을 실패시키지 않는다).
+    """
+    assert not (get_settings().docs_enabled and (db.new or db.dirty or db.deleted)), (
+        "llm_guard.run 전에 미완료 변경이 있으면 안 된다 — 먼저 commit 또는 rollback 할 것"
+    )
     key = cache_key(call.chain, call.key_parts)
     hit = _cached(db, key)
     if hit is not None:

@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core import errors
+from app.db.session import lock_team_stats
 from app.models import Player, PlayerPosition, PlayerProfile, SkillRatingHistory, Team, User
 from app.models.enums import (
     GlobalRole,
@@ -101,6 +102,11 @@ def grade_to_prior(db: Session, team_id: int, grade: int) -> Decimal:
 
 
 def apply_guest_grade(db: Session, guest: Player, grade: int | None, by_user_id: int | None) -> None:
+    """게스트 등급(1~5, None = 팀 평균)을 사전값으로 바꾼다. 쿼터가 있으면 팀 전체를 다시 재생한다.
+
+    첫 줄에서 팀 잠금을 건다 — 프로필을 먼저 쓰고 재계산에서 잠그면 교착이 났다 (quarter_service 모듈 docstring).
+    """
+    lock_team_stats(db, guest.team_id)
     prof = guest.profile or PlayerProfile(player_id=guest.id)
     if guest.profile is None:
         guest.profile = prof
@@ -233,6 +239,7 @@ def merge(db: Session, guest: Player, into_player_id: int) -> Player:
     target = db.get(Player, into_player_id)
     if target is None or target.team_id != guest.team_id or target.kind != PlayerKind.MEMBER:
         raise errors.MergeKindMismatch()
+    lock_team_stats(db, guest.team_id)  # 쓰기 전에 (잠금 순서)
     guest.merged_into_player_id = target.id
     guest.status = PlayerStatus.LEFT
     db.add(
@@ -254,6 +261,7 @@ def merge(db: Session, guest: Player, into_player_id: int) -> Player:
 def unmerge(db: Session, guest: Player) -> Player:
     if guest.merged_into_player_id is None:
         raise errors.NotFound("병합된 게스트가 아닙니다.")
+    lock_team_stats(db, guest.team_id)  # 쓰기 전에 (잠금 순서)
     guest.merged_into_player_id = None
     guest.status = PlayerStatus.ACTIVE
     db.flush()

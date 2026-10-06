@@ -3,6 +3,10 @@
 기록은 매니저가 **경기 후** 한 번에 입력한다 (2.5절). 쿼터마다 양 팀 출전 5명과 스코어만 받고,
 서버가 출전 10명의 코트 마진을 계산해 저장한다. 저장·수정·삭제 뒤에는 rating_service 가 팀 전체를
 다시 계산하므로 "삭제하면 마진이 롤백된다" 가 자동으로 성립한다 (13.2절 2항).
+
+잠금 순서: 쓰기 경로(추가 · 일괄 저장 · 수정 · 삭제)는 **첫 쓰기 전에** 팀 잠금(lock_team_stats)을 건다.
+쿼터 · 출전 행을 먼저 쓰고 나서 재계산에서 잠금을 걸면, 잠금을 먼저 잡고 같은 행을 다시 쓰려는 다른 요청과
+서로를 기다려 교착(40P01 → 409)이 났다. 잠금은 재진입이라 안쪽 recompute_team 이 다시 걸어도 된다.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core import errors
 from app.core.errors import ErrorDetail
+from app.db.session import lock_team_stats
 from app.models import (
     AssignmentCandidate,
     AssignmentRun,
@@ -143,13 +148,15 @@ def _finish(db: Session, event: Event) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _guard(event: Event) -> None:
+def _guard(db: Session, event: Event) -> None:
+    """쓰기 경로 공통 — 취소된 일정 거부, 그리고 첫 쓰기 전에 팀 잠금 (모듈 docstring 의 잠금 순서)."""
     if event.status == EventStatus.CANCELED:
         raise errors.ValidationError("취소된 일정에는 기록을 남길 수 없어요.")
+    lock_team_stats(db, event.team_id)
 
 
 def add_quarter(db: Session, event: Event, by: User, body: QuarterIn) -> Quarter:
-    _guard(event)
+    _guard(db, event)
     if db.scalar(select(Quarter.id).where(Quarter.event_id == event.id, Quarter.quarter_no == body.quarter_no)):
         raise errors.QuarterExists(f"{body.quarter_no}쿼터는 이미 기록했어요. 고치려면 기록 화면에서 저장해 주세요.")
     q = Quarter(event_id=event.id, quarter_no=body.quarter_no, black_score=0, white_score=0, duration_min=body.duration_min, recorded_by=by.id)
@@ -163,7 +170,7 @@ def add_quarter(db: Session, event: Event, by: User, body: QuarterIn) -> Quarter
 
 def bulk_save(db: Session, event: Event, by: User, body: QuarterBulkSave) -> QuarterBulkResult:
     """목록이 그 회차 쿼터의 전체 상태가 된다: quarter_no 기준 있으면 수정, 없으면 생성, 빠지면 삭제."""
-    _guard(event)
+    _guard(db, event)
     nos = [q.quarter_no for q in body.quarters]
     if len(set(nos)) != len(nos):
         raise errors.ValidationError("같은 쿼터 번호가 두 번 들어 있어요.")
@@ -193,7 +200,7 @@ def bulk_save(db: Session, event: Event, by: User, body: QuarterBulkSave) -> Qua
 
 def update_quarter(db: Session, q: Quarter, body: QuarterUpdate) -> Quarter:
     event = db.get(Event, q.event_id)
-    _guard(event)
+    _guard(db, event)
     _apply(
         db, q, event,
         black_score=body.black_score if body.black_score is not None else q.black_score,
@@ -209,6 +216,7 @@ def update_quarter(db: Session, q: Quarter, body: QuarterUpdate) -> Quarter:
 
 def delete_quarter(db: Session, q: Quarter) -> None:
     event = db.get(Event, q.event_id)
+    lock_team_stats(db, event.team_id)  # 지우기 전에 (취소된 일정의 기록도 지울 수는 있어야 하므로 _guard 는 쓰지 않는다)
     db.delete(q)
     db.flush()
     _finish(db, event)

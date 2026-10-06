@@ -10,13 +10,14 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { errorMessage } from '../api/client'
 import { peerApi } from '../api/peer'
 import { teamsApi } from '../api/teams'
 import { localISODate, type BadgeGroup, type BadgeTier, type BadgeView, type MarginPoint, type MonthlyMarginEntry } from '../api/types'
 import { SERIES_INFO, SINGLE_PICT, type BadgeFrame, type BadgePict } from './badge-art'
 import { BadgeDefs, BadgeIcon } from './badge-icon'
 import { FirstTimeTip } from './tutorial'
-import { Avatar, Card, EmptyState, SectionTitle, Sheet, Spinner } from './ui'
+import { Avatar, Card, EmptyState, LoadError, SectionTitle, Sheet, Spinner } from './ui'
 
 /** "2026-09" → "9월" (같은 해) / "2025년 12월" (다른 해) */
 function monthLabel(p: string, today = localISODate()) {
@@ -49,7 +50,9 @@ function TrendSection({ playerId }: { playerId: number | null }) {
   return (
     <section>
       <SectionTitle action={s && s.quarters_played > 0 ? <span className="text-xs text-muted">참석 {s.events_attended}회 · 출전 {s.quarters_played}쿼터</span> : undefined}>내 추세</SectionTitle>
-      {playerId === null ? <EmptyState title="팀원만 볼 수 있어요" /> : q.isLoading || !s ? <Spinner /> : s.quarters_played === 0 ? (
+      {playerId === null ? <EmptyState title="팀원만 볼 수 있어요" /> : q.isLoading ? <Spinner /> : !s ? (
+        <LoadError message={errorMessage(q.error, '기록을 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} />
+      ) : s.quarters_played === 0 ? (
         <EmptyState title="아직 경기 기록이 없어요" desc={`참석 ${s.events_attended}회 · 매니저가 쿼터를 기록하면 활동일마다 점이 찍혀요.`} />
       ) : (
         <TrendChart points={s.margin_trend} />
@@ -152,7 +155,9 @@ function MonthlyMarginSection({ teamId, newMonth }: { teamId: number; newMonth: 
             <span className="text-muted">{v ? (top ? <>{monthLabel(period, today)} 1위 <b className="text-ink">{top.player.display_name}</b> <span className="text-ok-ink">{fmtSigned(Number(top.avg_margin))}</span></> : `${monthLabel(period, today)} · 아직 순위가 없어요`) : '…'}</span>
             <span className="text-xs font-semibold text-ink-2">펼치기 ▾</span>
           </button>
-        ) : q.isLoading || !v ? <div className="pb-3"><Spinner /></div> : (
+        ) : periods.isLoading || q.isLoading ? <div className="pb-3"><Spinner /></div> : !v ? (
+          <div className="px-4 pb-4"><LoadError message={errorMessage(q.error, '월간 코트 마진을 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} /></div>
+        ) : (
           <>
             <p className="px-4 text-[11px] text-faint">
               {v.total_quarters === 0

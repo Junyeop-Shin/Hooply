@@ -5537,6 +5537,7 @@ components:
           items:
             $ref: '#/components/schemas/Action'
           type: array
+          maxItems: 20
           minItems: 1
       type: object
       required:
@@ -5556,6 +5557,7 @@ components:
           items:
             type: integer
           type: array
+          maxItems: 20
         numeric_value:
           anyOf:
           - type: number

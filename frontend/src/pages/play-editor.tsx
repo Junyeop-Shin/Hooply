@@ -12,6 +12,8 @@
  *    기본 전술은 이 값이 고정이고, 여기서만 고른다 (v1.7)
  * 6. 미리 보기(상대 수비 포함) · 막히면 · 저장
  * 7. 되돌리기(바로 앞 변경 취소, 50번까지) · 처음으로(이 화면을 열었을 때의 움직임으로) — 시작 위치 · 처음 공 · 단계·동작이 대상
+ * 8. 저장하지 않은 편집은 이 탭에 보관한다(lib/play-draft) — 뒤로 가기 · 제스처 · 새로고침으로 나갔다 돌아오면 이어서 할지 묻는다.
+ *    TopBar 뒤로 · 새로고침은 그 전에 한 번 더 묻는다
  */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -20,12 +22,14 @@ import { ApiError, errorMessage } from '../api/client'
 import { confirm, toast } from '../store/feedback'
 import { teamPlaysApi } from '../api/tactics'
 import type { CourtPoint, OppDefense, Play, PlayAction, PlayActionType, PlayStep, RoleSource, ScreenCall, Situation, TacticRole, TeamPlayIn } from '../api/types'
-import { BottomAction, Content, Screen, TopBar } from '../components/layout'
+import { BottomAction, Content, Screen, TopBar, useFinish } from '../components/layout'
 import { ActionMark, Court, H, OOB_H, R, TONE, TacticBoard, W, sx, sy } from '../components/tactic-board'
 import { CIRCLED } from '../components/tactics'
 import { Alert, Button, Field, SectionTitle, Spinner } from '../components/ui'
 import { ACTION_LABEL, ROLE_LABEL, renderCounter, stepStates } from '../lib/tactics'
 import { useDebounced } from '../lib/typewriter'
+import { clearPlayDraft, playDraftKey, readPlayDraft, writePlayDraft, type PlayDraftBody } from '../lib/play-draft'
+import { useMe } from './home'
 
 const BALL_TYPES: PlayActionType[] = ['dribble', 'pass', 'handoff', 'shot']
 const OFF_TYPES: PlayActionType[] = ['move', 'cut', 'screen']
@@ -45,6 +49,7 @@ export function PlayEditorPage() {
   const teamId = Number(tid)
   const playId = pidParam ? Number(pidParam) : null
   const existing = useQuery({ queryKey: ['tactics', 'team-play', teamId, playId], queryFn: () => teamPlaysApi.get(teamId, playId!), enabled: playId !== null, retry: false })
+  const me = useMe()  // 초안 키에 사용자 번호를 넣는다 — 같은 기기의 다른 계정과 섞이지 않게
   if (existing.data && !existing.data.can_edit) {
     return (
       <Screen>
@@ -57,16 +62,28 @@ export function PlayEditorPage() {
     return (
       <Screen>
         <TopBar title="전술 고치기" back={`/teams/${teamId}`} />
-        {existing.isLoading ? <Spinner /> : <Content><Alert>{errorMessage(existing.error, '전술을 불러오지 못했어요.')}</Alert></Content>}
+        {existing.isLoading ? <Spinner page /> : <Content><Alert>{errorMessage(existing.error, '전술을 불러오지 못했어요.')}</Alert></Content>}
       </Screen>
     )
   }
-  return <Editor key={playId ?? 'new'} teamId={teamId} playId={playId} initial={existing.data?.play ?? null} initialSource={existing.data?.role_source ?? 'RULE'} />
+  if (me.isLoading) return <Screen><TopBar title={playId ? '전술 고치기' : '새 전술 만들기'} back={`/teams/${teamId}`} /><Spinner page /></Screen>
+  return (
+    <Editor
+      key={playId ?? 'new'} teamId={teamId} playId={playId} userId={me.data?.id ?? 0}
+      initial={existing.data?.play ?? null} initialSource={existing.data?.role_source ?? 'RULE'} updatedAt={existing.data?.updated_at ?? null}
+    />
+  )
 }
 
-function Editor({ teamId, playId, initial, initialSource }: { teamId: number; playId: number | null; initial: Play | null; initialSource: RoleSource }) {
+function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
+  teamId: number; playId: number | null; userId: number; initial: Play | null; initialSource: RoleSource
+  /** 서버 전술의 마지막 저장 시각 — 이보다 오래된 초안은 되살리지 않는다 */
+  updatedAt: string | null
+}) {
   const nav = useNavigate()
+  const finish = useFinish()
   const qc = useQueryClient()
+  const draftKey = playDraftKey(userId, teamId, playId)  // 편집 중 내용의 보관 키 (아래 "편집 중 내용을 이 탭에 보관")
   const [name, setName] = useState(initial?.name ?? '')
   const [summary, setSummary] = useState(initial?.summary === '우리 팀이 만든 전술' ? '' : initial?.summary ?? '')
   const [oppDefense, setOppDefense] = useState<OppDefense>(initial?.opp_defense ?? (initial?.defense === 'zone' ? 'zone' : 'man'))
@@ -133,15 +150,26 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
     mutationFn: () => (playId ? teamPlaysApi.update(teamId, playId, body) : teamPlaysApi.create(teamId, body)),
     onSuccess: (v) => {
       leaving.current = true
+      clearPlayDraft(draftKey)
       qc.invalidateQueries({ queryKey: ['tactics', 'team-plays', teamId] })
       qc.setQueryData(['tactics', 'team-play', teamId, v.id], v)
-      nav(`/tactics/team_${v.id}?team=${teamId}`, { replace: true })
+      // 새 전술은 편집기를 전술판으로 바꿔치기, 고치기는 들어온 전술판으로 한 칸 되감는다 (뒤로가 같은 전술판으로 가지 않게)
+      if (playId) finish(`/tactics/team_${v.id}?team=${teamId}`, 1)
+      else nav(`/tactics/team_${v.id}?team=${teamId}`, { replace: true })
     },
     meta: { inlineError: true },
   })
   const remove = useMutation({
     mutationFn: () => teamPlaysApi.remove(teamId, playId!),
-    onSuccess: () => { leaving.current = true; qc.invalidateQueries({ queryKey: ['tactics', 'team-plays', teamId] }); toast('전술을 지웠어요.'); nav(`/teams/${teamId}`, { replace: true }) },
+    onSuccess: () => {
+      leaving.current = true
+      clearPlayDraft(draftKey)
+      qc.invalidateQueries({ queryKey: ['tactics', 'team-plays', teamId] })
+      qc.removeQueries({ queryKey: ['tactics', 'team-play', teamId, playId] })  // 지운 전술판이 캐시로 다시 그려지지 않게
+      qc.invalidateQueries({ queryKey: ['tactics', 'recommend'] })  // 지운 전술이 일정의 추천에 남지 않게
+      toast('전술을 지웠어요.')
+      finish(`/teams/${teamId}`, 2)  // 팀 → 전술판 → 편집기 를 되감아 팀 화면으로
+    },
     onError: (e) => toast(errorMessage(e, '전술을 지우지 못했어요.'), 'error'),
   })
   const leaving = useRef(false)  // 저장 · 삭제로 나갈 때는 묻지 않는다
@@ -186,6 +214,33 @@ function Editor({ teamId, playId, initial, initialSource }: { teamId: number; pl
     return () => window.removeEventListener('beforeunload', onUnload)
   }, [dirty])
   const askLeave = async () => !dirty || confirm({ title: '저장하지 않고 나갈까요?', body: '그린 움직임과 적은 내용이 사라져요.', confirmLabel: '나가기', cancelLabel: '계속 그리기', danger: true })
+
+  // 편집 중 내용을 이 탭에 보관 — 브라우저 뒤로 가기 · 제스처 · 새로고침은 beforeBack · beforeunload 가 못 막으므로, 돌아오면 이어서 할지 묻는다
+  const current: PlayDraftBody = { name, summary, oppDefense, screenCall, situation, counter, start, ball, steps, edited: [...edited], roles, roleSource }
+  const [pendingDraft, setPendingDraft] = useState(() => readPlayDraft(draftKey, {
+    updatedAt, initial: { ...initialMeta, roleSource: initialSource, start: initialShape.start, ball: initialShape.ball, steps: initialShape.steps, edited: [...initialShape.edited] },
+  }))
+  const asked = useRef(false)
+  useEffect(() => {
+    if (!pendingDraft || asked.current) return
+    asked.current = true
+    const d = pendingDraft
+    confirm({ title: '저장하지 않은 편집 내용이 있어요', body: '이어서 할까요? 버리면 이 화면을 열었을 때의 내용으로 시작해요.', confirmLabel: '이어서 하기', cancelLabel: '버리기' }).then((ok) => {
+      if (ok) {
+        setName(d.name); setSummary(d.summary); setOppDefense(d.oppDefense); setScreenCall(d.screenCall); setSituation(d.situation); setCounter(d.counter)
+        setStart(d.start); setBall(d.ball); setSteps(d.steps); setEdited(new Set(d.edited)); setRoles(d.roles); setRoleSource(d.roleSource)
+        setMode('start'); setPending(null); setHistory([])
+      } else clearPlayDraft(draftKey)
+      setPendingDraft(null)
+    })
+  }, [pendingDraft, draftKey])
+  // 고칠 때마다 쓰지 않고 입력이 0.3초 멈추면 한 번. 고친 것이 없으면 초안도 없앤다. 되살릴지 묻는 동안은 덮어쓰지 않는다
+  const currentKey = JSON.stringify(current)
+  useEffect(() => {
+    if (pendingDraft) return
+    const t = window.setTimeout(() => { if (dirty) writePlayDraft(draftKey, JSON.parse(currentKey) as PlayDraftBody); else clearPlayDraft(draftKey) }, 300)
+    return () => window.clearTimeout(t)
+  }, [currentKey, dirty, draftKey, pendingDraft])
 
   const setStep = (i: number, next: PlayStep) => setSteps((ss) => ss.map((s, j) => (j === i ? next : s)))
   const addAction = (a: PlayAction) => {

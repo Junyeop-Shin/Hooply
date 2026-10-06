@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { errorMessage, errorMessageWithDetails as errMsg } from '../api/client'
 import { confirm } from '../store/feedback'
+import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
 import { invalidateEvent } from '../lib/invalidate'
 import { fromConstraintSet, isEmptyDraft, keepAttendees, readAssignDraft, writeAssignDraft } from '../lib/assign-draft'
 import { assignmentsApi } from '../api/assignments'
@@ -21,7 +22,7 @@ import { eventsApi } from '../api/events'
 import { POSITIONS, type AttendanceView, type CandidateView, type ConstraintSet, type SquadView, type Strategy } from '../api/types'
 import { Alert, Button, Card, GradeDot, LoadError, SectionTitle, Spinner } from '../components/ui'
 import { inSameLock, mergeLock } from '../lib/locks'
-import { BottomAction, Content, Screen, TopBar } from '../components/layout'
+import { BottomAction, Content, Screen, TopBar, useFinish } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
 import { AiExplainCard } from '../components/ai-cards'
 import { SquadCard, rosterKey, type Marks } from '../components/adopted'
@@ -71,11 +72,11 @@ export function AssignPage() {
     constraints: { lock_groups: locks, separate_groups: seps, pins: Object.entries(activePins).map(([pid, sq]) => ({ player_id: Number(pid), squad_no: sq })) } as ConstraintSet,
   }), [locks, seps, activePins, teams])
 
-  // 조건을 바꿀 때마다 부르지 않고 0.3초 모아서. 조합마다 캐시에 쌓아 두지 않는다(gcTime 0)
+  // 조건을 바꿀 때마다 부르지 않고 0.3초 모아서. 조합마다 쌓이는 캐시는 1분만 둔다 (조건을 되돌렸을 때 다시 묻지 않게)
   const settledBody = useDebounced(body, 300)
   const validate = useQuery({
     queryKey: ['events', id, 'validate', settledBody], queryFn: () => assignmentsApi.validate(id, settledBody),
-    enabled: attendees.length > 0, gcTime: 0, placeholderData: (prev) => prev,
+    enabled: attendees.length > 0, gcTime: 60_000, placeholderData: (prev) => prev,
   })
   const run = useMutation({
     mutationFn: () => assignmentsApi.run(id, body),
@@ -102,18 +103,22 @@ export function AssignPage() {
 
   useEffect(() => { setSelected((s) => s.filter((pid) => byId.has(pid))) }, [byId])
 
-  // 첫 렌더에서 한 번만 (데이터가 오면) — 렌더 중에 상태를 맞추는 React 의 "이전 렌더 정보로 조정" 방식
+  // 첫 렌더에서 한 번만 (데이터가 오면) — 렌더 중에 상태를 맞추는 React 의 "이전 렌더 정보로 조정" 방식.
+  // 마지막 실행 기록이 늦게 와서 그사이 매니저가 조건을 걸기 시작했으면 덮어쓰지 않는다 (이 탭의 초안은 그 조건 자체라 그대로 쓴다)
   if (!hydrated && att.data) {
     const draft = readAssignDraft(id)
     if (draft || !runs.isLoading) {
       const ids = new Set(attendees.map((a) => a.player.id))
       const last = runs.data?.items[0]
-      const d = draft ? keepAttendees(draft, ids) : last ? keepAttendees(fromConstraintSet(last.constraints, last.team_count), ids) : null
+      const untouched = isEmptyDraft({ locks, seps, pins }) && !threeChosen
+      const d = draft ? keepAttendees(draft, ids) : last && untouched ? keepAttendees(fromConstraintSet(last.constraints, last.team_count), ids) : null
       if (d) { setLocks(d.locks); setSeps(d.seps); setPins(d.pins); setThreeChosen(d.three) }
       if (!draft && d && !isEmptyDraft(d)) setMsg('지난번 팀을 짤 때 걸어 둔 조건을 불러왔어요.')
       setHydrated(true)
     }
   }
+  // 2팀으로 돌아오면(체크 해제 · 참석이 줄어듦) 레드 칸의 사전 배치는 지운다 — 보이지 않는 채 초안과 "설정 초기화" 에 남지 않게
+  if (teams === 2 && Object.values(pins).some((sq) => sq > 2)) setPins(Object.fromEntries(Object.entries(pins).filter(([, sq]) => sq <= 2)) as Record<number, number>)
   // 고칠 때마다 이 탭에 보관 — 결과 화면에 갔다가 돌아와도 남는다
   useEffect(() => {
     if (hydrated) writeAssignDraft(id, { locks, seps, pins, three: threeChosen })
@@ -129,7 +134,7 @@ export function AssignPage() {
   const nextTeam = (sq: number) => (sq % teams) + 1
   const flipPin = (pid: number) => setPins((p) => ({ ...p, [pid]: nextTeam(p[pid]) }))
 
-  if (ev.isLoading || att.isLoading) return <Screen><TopBar title="팀 배정" back={`/events/${id}`} /><Spinner /></Screen>
+  if (ev.isLoading || att.isLoading) return <Screen><TopBar title="팀 배정" back={`/events/${id}`} /><Spinner page /></Screen>
   if (!ev.data) return <Screen><TopBar title="팀 배정" back={`/events/${id}`} /><Content><LoadError message={errorMessage(ev.error, '일정을 불러오지 못했어요.')} onRetry={() => ev.refetch()} retrying={ev.isFetching} /></Content></Screen>
   const GRADE_ORDER: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4 }
   const pool = attendees.filter((a) => !activePins[a.player.id]).sort((x, y) => {  // 등급순 — 게스트도 회원과 같이 섞어 정렬
@@ -164,7 +169,7 @@ export function AssignPage() {
               <p className="text-sm font-semibold text-ink">아직 참석 응답을 받고 있어요</p>
               <p className="text-xs text-muted">지금 마감하면 인원이 확정되고 팀원은 응답을 바꿀 수 없어요.</p>
             </div>
-            <Button variant="secondary" className="min-h-10 shrink-0 whitespace-nowrap text-sm" loading={closeRsvp.isPending} onClick={async () => { if (await confirm({ title: '참석 응답을 지금 마감할까요?', body: '인원이 확정되고 팀원은 응답을 바꿀 수 없어요.', confirmLabel: '마감하기' })) closeRsvp.mutate() }}>응답 마감</Button>
+            <Button variant="secondary" className="min-h-10 shrink-0 whitespace-nowrap text-sm" loading={closeRsvp.isPending} onClick={async () => { if (await confirm(CLOSE_RSVP_CONFIRM)) closeRsvp.mutate() }}>응답 마감</Button>
           </Card>
         )}
         {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 짠 배정안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
@@ -328,7 +333,7 @@ export function AssignPage() {
 export function RunResultPage() {
   const { runId } = useParams()
   const id = Number(runId)
-  const nav = useNavigate()
+  const finish = useFinish()
   const qc = useQueryClient()
   const run = useQuery({ queryKey: ['runs', id], queryFn: () => assignmentsApi.getRun(id) })
   const [tab, setTab] = useState(0)
@@ -342,7 +347,9 @@ export function RunResultPage() {
     if (events && run.data) {
       const eid = run.data.event_id
       invalidateEvent(qc, eid)  // 일정 · 확정 배정 · 팀 일정 목록(내 팀 표시)
-      qc.invalidateQueries({ queryKey: ['tactics', 'recommend', eid] }); qc.invalidateQueries({ queryKey: ['ai', 'message', eid] })  // 바뀐 팀에 맞는 전술 · 한마디
+      // 바뀐 팀에 맞는 전술 추천 · 전술판의 그날 배치 · AI 코치(캐시가 영원히 남는다) · AI 한마디
+      qc.invalidateQueries({ queryKey: ['tactics', 'recommend', eid] }); qc.invalidateQueries({ queryKey: ['tactics', 'event', eid] })
+      qc.invalidateQueries({ queryKey: ['ai', 'tactics', eid] }); qc.invalidateQueries({ queryKey: ['ai', 'message', eid] })
     }
   }
   const exchange = useMutation({
@@ -357,11 +364,11 @@ export function RunResultPage() {
   })
   const adopt = useMutation({
     mutationFn: (cid: number) => assignmentsApi.adopt(cid),
-    onSuccess: () => { refresh(true); nav(`/events/${run.data!.event_id}`, { replace: true }) },
+    onSuccess: () => { refresh(true); finish(`/events/${run.data!.event_id}`, 2) },  // 일정 → 배정 → 배정안 을 되감아 일정으로. 뒤로는 일정 목록
     onError: (e) => setMsg(errMsg(e, '확정하지 못했어요.')),
   })
 
-  if (run.isLoading) return <Screen><TopBar title="배정 결과" back="/" /><Spinner /></Screen>
+  if (run.isLoading) return <Screen><TopBar title="배정 결과" back="/" /><Spinner page /></Screen>
   if (!run.data) return <Screen><TopBar title="배정 결과" back="/" /><Content><LoadError message={errMsg(run.error, '결과를 불러오지 못했어요.')} onRetry={() => run.refetch()} retrying={run.isFetching} /></Content></Screen>
   const r = run.data
   const cand: CandidateView = r.candidates[Math.min(tab, r.candidates.length - 1)]
@@ -455,7 +462,7 @@ export function RunResultPage() {
       </Content>
       <BottomAction>
         {cand.is_adopted ? (
-          <Button full variant="secondary" onClick={() => nav(`/events/${r.event_id}`)}>확정된 결과 보기</Button>
+          <Button full variant="secondary" onClick={() => finish(`/events/${r.event_id}`, 2)}>확정된 결과 보기</Button>
         ) : (
           <Button full loading={adopt.isPending} onClick={async () => { if (await confirm({ title: `[${STRATEGY_LABEL[cand.strategy]}] 배정안으로 확정할까요?`, body: `참석자에게 공개돼요.${adoptedAny ? ' 기존 확정은 해제돼요.' : ''}`, confirmLabel: '확정' })) adopt.mutate(cand.id) }}>
             이 배정안으로 확정

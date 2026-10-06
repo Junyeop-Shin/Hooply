@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     docs_enabled: bool = True  # 운영에서는 False 로 두면 /docs, /openapi.json 이 닫힌다
     rate_limit_enabled: bool = True  # 로그인·가입·비밀번호 경로 요청 제한 (core/ratelimit.py). 테스트에서는 끈다
     admin_cookie_secure: bool = False  # HTTPS 배포에서는 True (SQLAdmin 세션 쿠키 https_only + same_site=lax)
+    # 접속 IP 를 담아 주는 프록시 헤더 (요청 제한의 IP 키, core/ratelimit.client_ip). 운영 같은 환경(is_production_like)에서만 믿는다 —
+    # 프록시 없이 바로 받는 곳에서는 누구나 적어 보낼 수 있기 때문. Cloudflare 는 cf-connecting-ip, 엔터프라이즈는 true-client-ip.
+    # 비우면 어디서든 X-Forwarded-For 의 마지막 값 → 소켓 주소 순으로 본다
+    trusted_proxy_header: str = "cf-connecting-ip"
     # 배포 환경 이름. "production" 이면 운영으로 본다. 비워 둬도 Render(환경 변수 RENDER) · HTTPS 쿠키 · /docs 닫힘이면 운영으로 본다
     app_env: str = ""
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react'
+import { useEffect, useRef, useSyncExternalStore, type RefObject } from 'react'
 
 /* ---------- 모달 공통: 포커스 가두기 · 뒤 화면 스크롤 잠금 · Esc ---------- */
 
@@ -7,6 +7,13 @@ const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([typ
 const modalStack: number[] = []
 let modalSeq = 0
 let savedOverflow = ''
+// 모달이 열려 있는지를 밖(LoadingHost)에서도 읽을 수 있게 — 열고 닫을 때마다 알린다
+const openListeners = new Set<() => void>()
+const subscribeOpen = (fn: () => void) => { openListeners.add(fn); return () => { openListeners.delete(fn) } }
+const notifyOpen = () => openListeners.forEach((fn) => fn())
+
+/** 시트 · 확인 시트 · 안내 팝업 중 하나라도 열려 있는가 */
+export const useModalOpen = () => useSyncExternalStore(subscribeOpen, () => modalStack.length > 0)
 
 /**
  * 모달이 열려 있는 동안: 포커스를 안으로 옮기고(Tab 이 밖으로 나가지 않게), 뒤 화면 스크롤을 막고,
@@ -20,6 +27,7 @@ export function useModal(ref: RefObject<HTMLElement | null>, onClose?: () => voi
     const el = ref.current
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     modalStack.push(id)
+    notifyOpen()
     if (modalStack.length === 1) { savedOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden' }
     // autoFocus 로 이미 안쪽 칸에 포커스가 들어왔으면 그대로 두고, 아니면 시트 자체에
     if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true })
@@ -39,6 +47,7 @@ export function useModal(ref: RefObject<HTMLElement | null>, onClose?: () => voi
       document.removeEventListener('keydown', onKey)
       const at = modalStack.indexOf(id)
       if (at >= 0) modalStack.splice(at, 1)
+      notifyOpen()
       if (modalStack.length === 0) document.body.style.overflow = savedOverflow
       if (opener && opener.isConnected) opener.focus({ preventScroll: true })
     }

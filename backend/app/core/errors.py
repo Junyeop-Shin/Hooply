@@ -31,8 +31,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import DBAPIError
 
-# 409 CONFLICT 로 바꾸는 SQLSTATE — 유니크 위반 · 외래키 위반 · 교착 · 직렬화 실패
-_CONFLICT_STATES = {"23505", "23503", "40P01", "40001"}
+# DB 오류 SQLSTATE → 에러 코드 (install_error_handlers). 유니크 위반은 "같은 것을 동시에 만들었다", 교착 · 직렬화 실패는
+# "잠시 뒤 다시", 외래키 위반은 "가리킨 행이 없다" — 셋은 사용자가 할 일이 달라서 문구를 나눈다
+_UNIQUE_STATES = {"23505"}
+_RETRY_STATES = {"40P01", "40001"}  # 교착 · 직렬화 실패 — 같은 요청을 그대로 다시 보내면 된다
+_FK_STATES = {"23503"}  # 외래키 위반 — 요청이 가리킨 행이 (그 사이) 지워졌다
 
 
 class ErrorDetail(BaseModel):
@@ -117,6 +120,9 @@ InvalidLineupSize = _error(400, "INVALID_LINEUP_SIZE", "쿼터마다 팀당 5명
 SelfVoteNotAllowed = _error(400, "SELF_VOTE_NOT_ALLOWED", "자기 자신은 고를 수 없어요.")
 # 비밀번호 재설정 토큰이 없거나·30분 지났거나·이미 사용됨 — POST /auth/password/reset
 TokenInvalidOrExpired = _error(400, "TOKEN_INVALID_OR_EXPIRED", "이 링크는 만료되었거나 이미 사용했어요. 다시 요청해 주세요.")
+# 요청이 가리킨 행(선수 · 일정 · 팀 …)이 없다 — DB 외래키 위반(23503). 검사와 저장 사이에 그 행이 지워졌을 때.
+# install_error_handlers 가 IntegrityError 에서 바꾼다. 화면은 목록을 새로 읽으면 된다
+ReferenceNotFound = _error(400, "REFERENCE_NOT_FOUND", "존재하지 않는 항목을 가리켜요. 화면을 새로고침해 주세요.")
 
 # ---------------------------------------------------------------------------
 # 401 — 인증 실패. 로그인 화면으로 보내야 하는 종류.
@@ -174,8 +180,10 @@ AlreadyAdopted = _error(409, "ALREADY_ADOPTED", "이미 확정한 팀 배정이 
 IdentityAlreadyLinked = _error(409, "IDENTITY_ALREADY_LINKED", "다른 계정에 이미 연결된 카카오 계정이에요.")
 # merged_into_player_id 가 이미 채워진 게스트를 또 병합 — POST /players/{id}:merge
 AlreadyMerged = _error(409, "ALREADY_MERGED", "이미 기록을 이어 준 게스트예요.")
-# 같은 행을 두 요청이 동시에 만들거나 바꿈 (DB 유니크 위반 · 교착) — 아래 install_error_handlers 가 IntegrityError 에서 바꾼다
+# 같은 행을 두 요청이 동시에 만들거나 바꿈 (DB 유니크 위반 23505) — 아래 install_error_handlers 가 IntegrityError 에서 바꾼다.
+# 교착(40P01) · 직렬화 실패(40001)도 같은 코드지만 문구는 "잠시 뒤 다시 시도해 주세요." (같은 요청을 그대로 다시 보내면 된다)
 Conflict = _error(409, "CONFLICT", "동시에 처리된 요청이 있어요. 다시 시도해 주세요.")
+RETRY_MESSAGE = "잠시 뒤 다시 시도해 주세요."
 
 # ---------------------------------------------------------------------------
 # 422 — 형식은 맞지만 도메인 규칙에 걸림.
@@ -242,13 +250,17 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(DBAPIError)
     async def _db_error(request: Request, exc: DBAPIError) -> JSONResponse:
-        # 검사 → 저장 사이에 다른 요청이 같은 행을 먼저 만든 경우(유니크 위반)나 교착이 500 으로 새지 않게.
+        # 검사 → 저장 사이에 다른 요청이 같은 행을 먼저 만들거나(유니크 위반) 지운(외래키 위반) 경우와 교착이 500 으로 새지 않게.
         # 세션 롤백은 get_db 가 한다 (app/db/session.py)
         state = getattr(exc.orig, "sqlstate", None)
         if state == "23514":  # CHECK 위반 — 스키마 검증을 빠져나온 값
             err: AppError = ValidationError()
-        elif state in _CONFLICT_STATES:
+        elif state in _UNIQUE_STATES:
             err = Conflict()
+        elif state in _RETRY_STATES:  # 교착 · 직렬화 실패 — 같은 요청을 다시 보내면 된다
+            err = Conflict(RETRY_MESSAGE)
+        elif state in _FK_STATES:
+            err = ReferenceNotFound()
         else:
             return await _unexpected(request, exc)
         logging.getLogger("hooply").warning("DB 충돌 %s %s: %s %s", request.method, request.url.path, state, type(exc.orig).__name__)

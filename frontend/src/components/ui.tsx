@@ -10,7 +10,7 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react
 import { useModal } from './use-modal'
 import { API_ORIGIN } from '../api/client'
 import type { ApprovalStatus, SkillGrade, TeamRole, TeamStatus } from '../api/types'
-import { useLoadingMark } from '../store/loading'
+import { useLoadingMark, useOverlayActive } from '../store/loading'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
@@ -166,13 +166,15 @@ export function GradeDot({ grade, small }: { grade: SkillGrade | null; small?: b
 /** 프로필 사진이 있으면 보여 주고, 없거나 불러오지 못하면 이름 첫 글자로 돌아간다 (카카오 CDN 주소는 만료될 수 있다) */
 export function Avatar({ name, src, size = 'md' }: { name: string; src?: string | null; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
   const s = { sm: 'size-8 text-xs', md: 'size-10 text-sm', lg: 'size-14 text-lg', xl: 'size-20 text-2xl' }[size]
-  const [failed, setFailed] = useState(false)
+  // 못 불러온 주소를 기억한다 — 주소가 바뀌면(사진을 새로 올림) 자연히 다시 시도한다
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const failed = failedSrc !== null && failedSrc === src
   // 서버가 주는 주소는 `/api/v1/users/…` 상대경로다. 프론트와 API 도메인이 다르면 API 쪽으로 붙여 준다
   const url = src && !failed ? (src.startsWith('/') ? `${API_ORIGIN}${src}` : src) : null
   return (
     <span className={cx('inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-info-soft font-bold text-info-ink', s)}>
       {url
-        ? <img src={url} alt="" className="size-full object-cover" loading="lazy" onError={() => setFailed(true)} />
+        ? <img src={url} alt="" className="size-full object-cover" loading="lazy" onError={() => setFailedSrc(src ?? null)} />
         : name.slice(0, 1)}
     </span>
   )
@@ -223,10 +225,21 @@ export function Sheet({ label, title, onClose, tall = true, children }: {
   )
 }
 
-/** 불러오는 중. 빙글빙글은 화면 가운데에 하나만 뜬다(components/loading 의 LoadingHost) — 여기서는 로딩 중이라고 알리고 자리만 잡아 둔다 */
-export function Spinner() {
-  useLoadingMark()
-  return <div className="h-24" aria-hidden="true" />
+/**
+ * 불러오는 중 — 두 층 (store/loading · components/loading).
+ *   <Spinner page />  화면이 통째로 비어 있을 때. 자리만 잡고, 빙글빙글은 LoadingHost 가 화면을 덮고 가운데에 하나 그린다
+ *   <Spinner />       섹션 하나만 불러올 때. 그 자리에 작은 링을 그린다 — 이미 보이는 내용은 흐려지지 않는다.
+ *                     전체 덮개가 떠 있는 동안(화면 로딩 · 5초 넘긴 느린 로딩)은 숨어서 로딩 표시가 하나만 보인다
+ */
+export function Spinner({ page = false }: { page?: boolean }) {
+  useLoadingMark(page ? 'page' : 'section')
+  const covered = useOverlayActive()
+  if (page) return <div className="h-24" aria-hidden="true" />
+  return (
+    <div className="flex justify-center py-6" aria-hidden="true">
+      <span className={cx('size-6 animate-spin rounded-full border-[3px] border-brand-line border-t-brand', covered && 'invisible')} />
+    </div>
+  )
 }
 
 /** 불러오지 못했을 때 — 빈 화면("일정이 없어요")으로 오해하지 않게 오류와 다시 시도 버튼을 보여 준다 */

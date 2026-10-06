@@ -25,6 +25,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import DB, AdminUser
 from app.api.v1._docs import errors
 from app.core import errors as E
+from app.db.session import lock_team_stats
 from app.models import (
     AuditLog,
     Player,
@@ -123,6 +124,8 @@ def adjust_rating(db: DB, admin: AdminUser, player_id: int, body: RatingAdjust):
       되게 한다. 사전값 `prior_overall` 은 건드리지 않는다 — 설문 · 정렬 재계산이 사전값을 다시 써도 오프셋은 남고,
       쿼터를 다시 재생해도 출발점에 한 번만 더해진다(두 번 반영되지 않는다). 경기 기록이 쌓이면 다른 사전 정보처럼 실측에
       묻혀 간다. `skill_rating_history(source=ADMIN_ADJUST)` 와 `audit_logs` 에 누가·언제·왜 바꿨는지 남긴다.
+      보정 대상의 이력은 ADMIN_ADJUST 한 줄뿐이고, 재생의 여파로 값이 바뀐 다른 선수에게는 "관리자 보정(선수 N) 재계산"
+      이력이 남는다. 그 인원수는 감사 로그 `after.affected_players` 에 적는다.
     - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`, `400 VALIDATION_ERROR` — 사유 누락, 경기 기록과 너무 멀어
       오프셋이 ±50점을 넘어야 하는 값.
     - **상태:** `구현됨`.
@@ -135,10 +138,14 @@ def adjust_rating(db: DB, admin: AdminUser, player_id: int, body: RatingAdjust):
     before_skill = prof.skill_overall
     before = {"skill_overall": _s(prof.skill_overall), "admin_adjust": _s(prof.admin_adjust)}
     target = round(float(body.skill_overall), 1)
+    lock_team_stats(db, player.team_id)  # 프로필을 쓰기 전에 팀 잠금 (quarter_service 모듈 docstring 의 잠금 순서)
     prof.admin_adjust = rating_service.admin_adjust_for(db, player, target)
     db.flush()
-    rating_service.recompute_team(db, player.team_id)  # 경기 기록이 없으면 skill_overall = prior + admin_adjust
+    # 경기 기록이 없으면 skill_overall = prior + admin_adjust. 대상 본인의 RESIDUAL 이력은 만들지 않고(아래 ADMIN_ADJUST 한 줄만),
+    # 여파로 바뀐 다른 선수에게는 "관리자 보정(선수 N) 재계산" 이력을 남긴다
+    result = rating_service.recompute_team(db, player.team_id, cause="admin_adjust", cause_player_id=player.id)
     after_v = prof.skill_overall
+    affected = result["changed_players"]  # 대상 본인을 뺀, 여파로 값이 바뀐 인원
     db.add(SkillRatingHistory(
         player_id=player.id, source=RatingSource.ADMIN_ADJUST, before_value=before_skill, after_value=after_v,
         delta=(after_v or Decimal(0)) - (before_skill or Decimal(0)), ref_type="admin_user", ref_id=admin.id, reason=body.reason,
@@ -146,7 +153,9 @@ def adjust_rating(db: DB, admin: AdminUser, player_id: int, body: RatingAdjust):
     prof.updated_at = datetime.now(UTC)
     db.add(AuditLog(
         actor_user_id=admin.id, action="ADMIN_RATING_ADJUST", target_type="player", target_id=player.id,
-        before=before, after={"skill_overall": _s(after_v), "admin_adjust": _s(prof.admin_adjust), "requested": str(target)}, reason=body.reason,
+        before=before,
+        after={"skill_overall": _s(after_v), "admin_adjust": _s(prof.admin_adjust), "requested": str(target), "affected_players": affected},
+        reason=body.reason,
     ))
     db.commit()
     db.refresh(player)

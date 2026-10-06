@@ -57,7 +57,7 @@ function GuestOnly() {
 
 export default function App() {
   return (
-    <Suspense fallback={<Spinner />}>
+    <Suspense fallback={<Spinner page />}>
     <Routes>
       <Route path="/auth/kakao/callback" element={<KakaoCallbackPage />} /> {/* 카카오 리다이렉트 (로그인 여부 무관) */}
       <Route path="/password/forgot" element={<ForgotPasswordPage />} />

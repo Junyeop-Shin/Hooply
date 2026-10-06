@@ -22,7 +22,7 @@ export function PlayerDetailPage() {
   const { teamId, playerId } = useParams()
   const pid = Number(playerId)
   const q = useQuery({ queryKey: ['stats', pid], queryFn: () => peerApi.stats(pid), retry: false })
-  if (q.isLoading) return <Screen><TopBar title="실력 자세히 보기" back={`/teams/${teamId}/members`} /><Spinner /></Screen>
+  if (q.isLoading) return <Screen><TopBar title="실력 자세히 보기" back={`/teams/${teamId}/members`} /><Spinner page /></Screen>
   if (!q.data) return <Screen><TopBar title="실력 자세히 보기" back={`/teams/${teamId}/members`} /><Content><Alert>불러오지 못했어요. 매니저만 볼 수 있어요.</Alert></Content></Screen>
   const s = q.data
   const p = s.player

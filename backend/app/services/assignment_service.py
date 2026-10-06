@@ -891,6 +891,13 @@ def explain_player(sc: Scored, positions: dict[int, Position | None]) -> str:
 
 
 def validate(db: Session, event: Event, body: AssignmentRunRequest) -> ValidateResult:
+    """실행 전 프리플라이트 (아무것도 쓰지 않는다). 쿼터 기록이 있는 일정은 `run()` 이 422 ASSIGNMENT_LOCKED 로 막으므로
+    여기서도 같은 코드를 violations 에 담아 실행 버튼을 미리 끈다 — 예외는 던지지 않는다 (검사 결과를 돌려주는 API)."""
+    if is_locked(db, event.id):
+        return ValidateResult(
+            feasible=False,
+            violations=[ConstraintViolation(code="ASSIGNMENT_LOCKED", message=errors.AssignmentLocked.message)],
+        )
     return _validate_prepared(prepare(build_roster(db, event), body))
 
 
@@ -1404,9 +1411,14 @@ def _lock_event(db: Session, event_id: int) -> None:
     db.execute(select(Event.id).where(Event.id == event_id).with_for_update())
 
 
+def is_locked(db: Session, event_id: int) -> bool:
+    """쿼터 기록이 하나라도 있으면 잠김 — 기록(누가 어느 팀으로 뛰었나)이 그 편성을 근거로 한다."""
+    return db.scalar(select(Quarter.id).where(Quarter.event_id == event_id).limit(1)) is not None
+
+
 def ensure_unlocked(db: Session, event_id: int) -> None:
-    """쿼터 기록이 있는 일정은 팀을 다시 짜거나 확정을 바꿀 수 없다 — 기록(누가 어느 팀으로 뛰었나)이 그 편성을 근거로 한다."""
-    if db.scalar(select(Quarter.id).where(Quarter.event_id == event_id).limit(1)) is not None:
+    """쿼터 기록이 있는 일정은 팀을 다시 짜거나 확정을 바꿀 수 없다 (422 ASSIGNMENT_LOCKED). validate() 는 같은 조건을 violations 로 돌려준다."""
+    if is_locked(db, event_id):
         raise errors.AssignmentLocked()
 
 

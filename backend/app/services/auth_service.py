@@ -33,7 +33,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.models import AuthIdentity, Player, RevokedToken, User, UserAvatar
+from app.models import AuditLog, AuthIdentity, Player, RevokedToken, User, UserAvatar
 from app.models.enums import AuthProvider, PlayerKind, PlayerStatus, TeamRole
 from app.schemas.auth import LoginRequest, SignupRequest, TokenPair
 
@@ -193,8 +193,55 @@ def cleanup_expired_tokens(db: Session) -> dict[str, int]:
     return {"revoked_tokens": revoked, "password_reset_tokens": reset}
 
 
+AUDIT_PII_RETENTION_DAYS = 30  # 탈퇴 뒤 감사 로그에 이메일 · 이름을 남겨 두는 기간
+AUDIT_PII_FIELDS = ("email", "name", "nickname")  # 관리자 콘솔 사용자 수정 로그(before/after)에 들어가는 개인정보 키
+AUDIT_PII_MASK = "***"
+
+
+def purge_deleted_user_pii(db: Session) -> int:
+    """탈퇴한 지 30일이 지난 계정을 대상으로 한 audit_logs 행에서 이메일 · 이름 · 닉네임을 `***` 로 가린다. 반환: 고친 행 수.
+
+    계정 삭제(delete_account)는 users 행은 바로 비식별화하지만, 관리자 콘솔의 사용자 수정 로그(target_type="user")의
+    before/after 스냅샷에는 예전 이메일 · 이름이 그대로 남아 있었다. 30일은 탈퇴 직후의 문의 · 되돌리기 대응에 쓰고,
+    그 뒤에는 "무엇이 바뀌었다" 는 사실만 남긴다. 여러 번 돌려도 결과가 같다 (이미 가린 값은 건너뛴다).
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import String
+    from sqlalchemy.dialects.postgresql import array
+    from sqlalchemy.orm.attributes import flag_modified
+
+    cutoff = datetime.now(UTC) - timedelta(days=AUDIT_PII_RETENTION_DAYS)
+    deleted_ids = select(User.id).where(User.deleted_at.is_not(None), User.deleted_at < cutoff)
+    fields = list(AUDIT_PII_FIELDS)
+    keys = array(fields, type_=String)  # jsonb ?| text[] — 개인정보 키가 하나라도 있는 행만
+    rows = db.scalars(
+        select(AuditLog).where(
+            AuditLog.target_type == "user", AuditLog.target_id.in_(deleted_ids),
+            or_(AuditLog.before.has_any(keys), AuditLog.after.has_any(keys)),
+        )
+    ).all()
+    changed = 0
+    for row in rows:
+        touched = False
+        for attr in ("before", "after"):
+            snap = getattr(row, attr)
+            if not snap:
+                continue
+            for f in fields:
+                if f in snap and snap[f] not in (None, AUDIT_PII_MASK):
+                    snap[f] = AUDIT_PII_MASK
+                    touched = True
+            if touched:
+                flag_modified(row, attr)
+        changed += touched
+    db.commit()
+    return changed
+
+
 def maybe_cleanup_tokens(db: Session) -> None:
-    """토큰 경로(refresh·logout·forgot)에서 한 시간에 한 번만 청소를 돌린다. 별도 스케줄러 없이 쓰레기가 쌓이지 않게."""
+    """토큰 경로(refresh·logout·forgot)에서 한 시간에 한 번만 청소를 돌린다. 별도 스케줄러 없이 쓰레기가 쌓이지 않게.
+    만료 토큰과 함께 탈퇴 30일이 지난 계정의 감사 로그 개인정보(purge_deleted_user_pii)도 가린다."""
     global _last_cleanup
     import time
 
@@ -204,9 +251,10 @@ def maybe_cleanup_tokens(db: Session) -> None:
     _last_cleanup = now
     try:
         cleanup_expired_tokens(db)
+        purge_deleted_user_pii(db)
     except Exception:
         db.rollback()
-        logging.getLogger("hooply").exception("만료 토큰 청소 실패")
+        logging.getLogger("hooply").exception("만료 토큰 · 감사 로그 개인정보 청소 실패")
 
 
 def logout(db: Session, refresh_token: str) -> None:
@@ -245,6 +293,9 @@ def delete_account(db: Session, user: User) -> None:
     그 행으로 병합된 게스트 행에서도 지운다 (0026 이 예전 탈퇴자에게도 소급했다). 소속 팀에서는 LEFT 처리.
     팀에 다른 활성 회원이 있는데 본인이 유일한 매니저면 먼저 권한을 넘기라고 거부한다 (매니저 없는 팀이 생기지 않게).
     이메일이 비워지므로 같은 이메일로 다시 가입할 수 있다.
+
+    감사 로그(audit_logs)의 사용자 수정 스냅샷에 남은 이메일 · 이름 · 닉네임은 **탈퇴 30일 뒤** 가린다
+    (purge_deleted_user_pii — 시작할 때와 토큰 경로에서 한 시간에 한 번). 그 안에는 문의 · 되돌리기 대응을 위해 남긴다.
     """
     from app.services import team_service
 

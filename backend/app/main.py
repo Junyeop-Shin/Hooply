@@ -32,6 +32,11 @@ APP_DESCRIPTION = """\
 - 형식 오류 `400` · 인증 `401` · 권한 `403` · 없음 `404` · 상태 충돌 `409` · **도메인 규칙 위반 `422`**
 - 프론트는 `code`로 분기하고 `message`는 그대로 노출 가능한 한국어 문구입니다.
 - 배정 제약 오류(`422 LOCK_*`, `CONSTRAINT_CONFLICT` 등)는 `details[]`에 어떤 그룹·선수가 문제인지 담습니다.
+- DB 충돌: 같은 것을 동시에 만들면 `409 CONFLICT`("동시에 처리된 요청이 있어요…"), 교착·직렬화 실패도 `409 CONFLICT`
+  이지만 문구는 "잠시 뒤 다시 시도해 주세요." (같은 요청을 다시 보내면 됩니다), 요청이 가리킨 행이 그 사이 지워졌으면
+  `400 REFERENCE_NOT_FOUND`("존재하지 않는 항목을 가리켜요…" — 목록을 새로 읽으면 됩니다).
+- 요청 제한 `429 RATE_LIMITED`: 로그인 · 가입 · 비밀번호 경로는 IP 기준(분당 10 · 5 · 5회), 로그인은 (IP, 이메일) 쌍의
+  **실패** 10분 10회를 더 셉니다. 비밀번호 찾기 메일은 이메일마다 한 시간 5통 — 넘으면 429 없이 조용히 보내지 않습니다.
 
 ### 구현 상태
 - 모든 엔드포인트가 `구현됨` 입니다 (각 설명의 **상태** 항목).
@@ -135,14 +140,16 @@ OPENAPI_TAGS = [
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    # 시작할 때 만료 토큰을 한 번 치운다. 이후에는 토큰 경로에서 한 시간에 한 번 (auth_service.maybe_cleanup_tokens)
+    # 시작할 때 만료 토큰 · 탈퇴 30일 지난 계정의 감사 로그 개인정보를 한 번 치운다. 이후에는 토큰 경로에서 한 시간에 한 번
+    # (auth_service.maybe_cleanup_tokens)
     try:
         from app.db.session import SessionLocal
         from app.llm.llm_guard import cleanup_old_results
-        from app.services.auth_service import cleanup_expired_tokens
+        from app.services.auth_service import cleanup_expired_tokens, purge_deleted_user_pii
 
         with SessionLocal() as db:
             logging.getLogger("hooply").info("만료 토큰 청소: %s", cleanup_expired_tokens(db))
+            logging.getLogger("hooply").info("탈퇴 계정 감사 로그 개인정보 가림: %s건", purge_deleted_user_pii(db))
             logging.getLogger("hooply").info("오래된 AI 결과 청소: %s건", cleanup_old_results(db))
     except Exception:
         logging.getLogger("hooply").exception("시작 시 토큰 청소 실패")

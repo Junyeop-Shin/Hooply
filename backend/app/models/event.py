@@ -15,7 +15,6 @@
 from datetime import date, datetime, time
 
 from sqlalchemy import (
-    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -42,18 +41,16 @@ class Event(TimestampMixin, Base):
 
     # 일정 목록·실력 재계산이 모두 "팀으로 좁혀 날짜순" 이라 복합 인덱스로 정렬까지 인덱스가 맡게 한다
     # team_id 단독 조회도 이 인덱스(team_id 가 맨 앞)가 맡는다 — 단독 인덱스는 0025 에서 지웠다
-    __table_args__ = (
-        Index("ix_events_team_date", "team_id", "event_date", "id"),
-        # 자정을 넘기는 일정은 받지 않는다 (event_service 와 같은 규칙). 시각이 하나라도 비면 검사하지 않는다
-        CheckConstraint("start_time IS NULL OR end_time IS NULL OR end_time > start_time", name="ck_events_time_order"),
-    )
+    # 종료 시각이 시작 시각보다 같거나 빠르면 자정을 넘기는 일정(22:00~00:30)으로 본다 — 다음 날로 해석한다
+    # (event_service.ends_at). 0025 의 ck_events_time_order 는 0027 에서 지웠다
+    __table_args__ = (Index("ix_events_team_date", "team_id", "event_date", "id"),)
 
     id: Mapped[BigPK]
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(100))  # 없으면 화면에서 날짜로 대체
     event_date: Mapped[date] = mapped_column(Date, nullable=False)  # 모임 날짜 (필수)
     start_time: Mapped[time | None] = mapped_column(Time)  # 시작 시각 (시간대 없는 벽시계 시간)
-    end_time: Mapped[time | None] = mapped_column(Time)  # 종료 시각
+    end_time: Mapped[time | None] = mapped_column(Time)  # 종료 시각. start_time 이하면 다음 날 (자정을 넘기는 일정)
     venue: Mapped[str | None] = mapped_column(String(100))  # 장소. 보통 teams.home_court
     rsvp_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 이후 응답 시 422 RSVP_CLOSED
     status: Mapped[EventStatus] = mapped_column(
