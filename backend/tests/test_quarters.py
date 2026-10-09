@@ -48,7 +48,7 @@ def test_quarter_validation_and_margins(client, club, event):
     assert r.status_code == 400 and r.json()["code"] == "VALIDATION_ERROR"  # pydantic: 10명 미만
     bad = good[:4] + good[5:] + [dict(good[9], player_id=club["pid"]["정영삼"], side="WHITE")]
     r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 10, "white_score": 8, "lineups": bad}, headers=m)
-    assert r.status_code == 400 and r.json()["code"] == "INVALID_LINEUP_SIZE" and "블랙 팀 4명" in r.json()["message"]
+    assert r.status_code == 400 and r.json()["code"] == "INVALID_LINEUP_SIZE" and "블랙 팀에 4명" in r.json()["message"]
     # 팀 밖 id
     r = client.post(f"{API}/events/{event}/quarters", json={"quarter_no": 1, "black_score": 10, "white_score": 8, "lineups": good[:-1] + [{"player_id": 999999, "side": "WHITE"}]}, headers=m)
     assert r.status_code == 422 and r.json()["code"] == "PLAYER_NOT_IN_TEAM"

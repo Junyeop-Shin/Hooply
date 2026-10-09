@@ -1,5 +1,5 @@
 /**
- * 팀 리더보드 — 참여율 · 출전 쿼터 (전원) / 기여 점수 (매니저). 팀 화면 팀원 탭에서 진입.
+ * 팀 리더보드 — 참석률 · 출전 쿼터 (전원) / 기여 점수 (매니저). 팀 화면 팀원 탭에서 진입.
  * 실력 수치를 순위로 공개하는 것은 갈등을 부르므로(9.2절 표시 정책) 플레이어에게는 참여 지표만 보여준다.
  *
  * 기간은 전체 또는 한 달을 고른다. 고를 수 있는 달은 서버가 알려 주는 "기록이 있는 달" 뿐이라
@@ -10,14 +10,14 @@ import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { teamsApi } from '../api/teams'
 import type { LeaderboardMetric } from '../api/types'
-import { Alert, Avatar, Card, GradeDot, Spinner } from '../components/ui'
+import { Avatar, Card, GradeDot, LoadError, Spinner } from '../components/ui'
 import { Content, Screen, TopBar } from '../components/layout'
 
-const LABEL: Record<LeaderboardMetric, string> = { attendance: '참여율', quarters: '출전 쿼터', residual: '기여 점수' }
+const LABEL: Record<LeaderboardMetric, string> = { attendance: '참석률', quarters: '출전 쿼터', residual: '기여 점수' }
 const HELP: Record<LeaderboardMetric, string> = {
   attendance: '지난 일정 중 참석한 비율이에요. 가입 전 일정은 빼요.',
   quarters: '기록된 쿼터에 출전한 횟수예요.',
-  residual: '예상보다 얼마나 더 벌었는지를 쌓은 값이에요. 매니저에게만 보여요.',
+  residual: '예상 점수 차보다 더 낸 점수를 쌓은 값이에요. 매니저에게만 보여요.',
 }
 
 /** "2026-09" → "2026년 9월" */
@@ -39,9 +39,9 @@ export function LeaderboardPage() {
   return (
     <Screen>
       <TopBar title="리더보드" back={`/teams/${id}`} />
-      <div className="grid border-b border-line bg-surface" style={{ gridTemplateColumns: `repeat(${metrics.length}, 1fr)` }}>
+      <div role="tablist" className="grid border-b border-line bg-surface" style={{ gridTemplateColumns: `repeat(${metrics.length}, 1fr)` }}>
         {metrics.map((m) => (
-          <button key={m} onClick={() => setMetric(m)} className={`min-h-11 text-sm font-semibold ${metric === m ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>{LABEL[m]}</button>
+          <button key={m} role="tab" aria-selected={metric === m} onClick={() => setMetric(m)} className={`min-h-11 text-sm font-semibold ${metric === m ? 'border-b-2 border-court-500 text-brand-ink' : 'text-muted'}`}>{LABEL[m]}</button>
         ))}
       </div>
       <Content>
@@ -50,15 +50,15 @@ export function LeaderboardPage() {
           <select
             id="period" value={period} onChange={(e) => setPeriod(e.target.value)}
             disabled={periods.isLoading}
-            className="min-h-9 flex-1 rounded-xl border border-line bg-surface px-3 text-sm font-semibold text-ink"
+            className="min-h-11 flex-1 rounded-xl border border-line-field bg-surface px-3 text-base font-semibold text-ink"
           >
             <option value="">전체</option>
             {months.map((p) => <option key={p} value={p}>{monthLabel(p)}</option>)}
           </select>
         </div>
-        {!periods.isLoading && months.length === 0 && <p className="px-1 text-xs text-faint">아직 지난 일정이 없어 달을 고를 수 없어요.</p>}
+        {!periods.isLoading && months.length === 0 && <p className="px-1 text-xs text-muted">지난 일정이 생기면 달을 고를 수 있어요.</p>}
         <p className="px-1 text-xs text-muted">{HELP[metric]}</p>
-        {q.isLoading ? <Spinner /> : q.isError ? <Alert>불러오지 못했어요.</Alert> : (
+        {q.isLoading ? <Spinner /> : q.isError ? <LoadError message="순위를 불러오지 못했어요." onRetry={() => q.refetch()} retrying={q.isFetching} /> : (
           <Card className="divide-y divide-line p-0">
             {q.data!.items.map((e) => {
               const v = Number(e.value)
@@ -77,7 +77,7 @@ export function LeaderboardPage() {
                 </div>
               )
             })}
-            {q.data!.items.length === 0 && <p className="px-4 py-6 text-center text-sm text-faint">아직 집계할 일정이 없어요.</p>}
+            {q.data!.items.length === 0 && <p className="px-4 py-6 text-center text-sm text-muted">지난 일정이 생기면 순위가 보여요.</p>}
           </Card>
         )}
       </Content>

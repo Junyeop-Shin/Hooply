@@ -222,7 +222,7 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
     referenced = {pid for g in c.lock_groups + c.separate_groups for pid in g} | {p.player_id for p in c.pins}
     unknown = sorted(pid for pid in referenced if pid not in rmap)
     if unknown:
-        v.append(ConstraintViolation(code="PLAYER_NOT_IN_TEAM", message="참석 확정자가 아닌 인원이 제약에 들어 있어요.", player_ids=unknown))
+        v.append(ConstraintViolation(code="PLAYER_NOT_IN_TEAM", message="참석하지 않는 사람이 조건에 들어 있어요. 그 사람을 빼 주세요.", player_ids=unknown))
 
     sizes = _squad_sizes(n, t) if t > 0 else []
     # 한 팀이 가질 수 있는 최대 인원 = 상대 팀에 5명을 남기는 선. 고르게 못 나누면 인원을 벌려서라도 묶음을 지킨다
@@ -249,7 +249,7 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
 
     for i, ids in enumerate(supernodes):
         if len(ids) > capacity > 0:
-            v.append(ConstraintViolation(code="LOCK_GROUP_TOO_LARGE", message=f"묶음 그룹이 {len(ids)}명이라 상대 팀에 {MIN_SQUAD}명이 남지 않아요 (한 팀 최대 {capacity}명).", player_ids=ids, group_no=i))
+            v.append(ConstraintViolation(code="LOCK_GROUP_TOO_LARGE", message=f"묶음이 {len(ids)}명이라 상대 팀에 {MIN_SQUAD}명이 남지 않아요 (한 팀 최대 {capacity}명).", player_ids=ids, group_no=i))
 
     # SEPARATE: 슈퍼노드 쌍으로 변환. 같은 슈퍼노드 안에 있으면 충돌
     sep_pairs: set[tuple[int, int]] = set()
@@ -291,12 +291,12 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
     handlers = sum(1 for r in roster if r.can_handle)
     bigs = sum(1 for r in roster if r.can_big)
     if roster and handlers < t:
-        warnings.append(f"1번(핸들러) 가능 인원이 {handlers}명이라 팀당 1명을 채우기 어려워요")
+        warnings.append(f"볼 운반(1번)을 맡을 사람이 {handlers}명뿐이라 팀마다 1명씩 두기 어려워요")
     if roster and bigs < t:
-        warnings.append(f"빅맨(4·5번) 가능 인원이 {bigs}명이라 팀당 1명을 채우기 어려워요")
+        warnings.append(f"골밑(4·5번)을 맡을 사람이 {bigs}명뿐이라 팀마다 1명씩 두기 어려워요")
     unknown_guests = [r for r in roster if r.is_guest and not r.known]
     if unknown_guests:
-        warnings.append(f"게스트 {len(unknown_guests)}명은 실력 정보가 없어 클럽 평균으로 가정해요")
+        warnings.append(f"게스트 {len(unknown_guests)}명은 실력 정보가 없어 팀 평균으로 계산해요")
 
     return Prepared(
         roster=rmap, team_count=t, sizes=sizes, supernodes=supernodes, node_of=node_of, pins=pins,
@@ -314,7 +314,7 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
 def enumerate_partitions(prep: Prepared):
     """슈퍼노드를 두 팀으로 나누는 모든 방법을 (squad index per node) 튜플로 낸다. PIN·SEPARATE 를 지킨다.
 
-    인원은 가장 고른 단계(16명이면 8:8)의 해만 낸다. 묶음·사전 배치 때문에 그 단계에 해가 하나도 없을 때만
+    인원은 가장 고른 단계(16명이면 8:8)의 해만 낸다. 묶음·미리 배치 때문에 그 단계에 해가 하나도 없을 때만
     한 명씩 더 벌어진 단계(9:7 → 10:6 …, 팀마다 5명 이상)로 넘어간다. 해를 찾은 단계의 인원을 `prep.sizes` 에 적는다.
     """
     nodes = list(range(len(prep.supernodes)))
@@ -682,7 +682,7 @@ def _good_start(prep: Prepared, rng: random.Random, sep_of: dict[int, set[int]],
 
 
 def _canon(part: tuple[int, ...], pinned: bool) -> tuple[int, ...]:
-    """사전 배치가 없으면 팀 이름만 바뀐 같은 편성을 하나로 — 처음 나온 순서로 팀 번호를 다시 매긴다."""
+    """미리 배치가 없으면 팀 이름만 바뀐 같은 편성을 하나로 — 처음 나온 순서로 팀 번호를 다시 매긴다."""
     if pinned:
         return part
     remap: dict[int, int] = {}
@@ -858,19 +858,19 @@ def explain_manager(sc: Scored, strategy: Strategy, prep: Prepared) -> str:
         + f" — {vs} 붙으면 한 쿼터에 약 {gap:.2f}점 차가 날 것으로 예상돼요 (0에 가까울수록 균형)."  # 결과 화면 상단 카드(skill_spread 소수 둘째 자리)와 같은 자릿수
     ]
     if sc.hard_ok:
-        lines.append(f"{'세 팀' if three else '양 팀'} 모두 1번(볼 운반)·5번(골밑) 가능 인원을 확보했어요.")
+        lines.append(f"{'세 팀' if three else '양 팀'} 모두 1번(볼 운반)·5번(골밑)을 맡을 사람이 있어요.")
     else:
-        lines.append("⚠ 오늘 인원으로는 어느 팀에 볼 운반이나 골밑을 맡을 사람이 없어요.")
+        lines.append("오늘 인원으로는 어느 팀에 볼 운반이나 골밑을 맡을 사람이 없어요.")
     if prep.pin_list:
-        lines.append(f"사전 배치 {len(prep.pin_list)}명은 지정한 팀에 고정했어요.")
+        lines.append(f"미리 배치한 {len(prep.pin_list)}명은 지정한 팀에 그대로 뒀어요.")
     unknown = [r for s in sc.squads for r in s if r.is_guest and not r.known]
     if unknown:
-        lines.append(f"게스트 {len(unknown)}명({', '.join(r.player.display_name for r in unknown)})은 실력 정보가 없어 클럽 평균으로 계산했어요.")
+        lines.append(f"게스트 {len(unknown)}명({', '.join(r.player.display_name for r in unknown)})은 실력 정보가 없어 팀 평균으로 계산했어요.")
     graded = [r for s in sc.squads for r in s if r.is_guest and r.known]
     if graded:
         lines.append(f"게스트 {len(graded)}명은 등록자가 지정한 등급으로 계산했어요.")
     if sc.terms["fair"] > 0:
-        lines.append("최근 회차와 같은 팀이 반복되는 조합이 일부 있어요.")
+        lines.append("지난 일정과 같은 팀이 된 사람이 일부 있어요.")
     return "\n".join(lines)
 
 
@@ -978,7 +978,7 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
         pool = [s for s in scored if s.hard_ok]
     else:
         pool = scored
-        prep.warnings.append(f"{'양 팀' if body.team_count == 2 else '모든 팀'}에 볼 운반·골밑 자원을 다 넣을 수 없어 이 조건은 접었어요")
+        prep.warnings.append(f"{'양 팀' if body.team_count == 2 else '모든 팀'}에 볼 운반·골밑을 맡을 사람을 모두 둘 수 없어, 이 조건은 빼고 나눴어요")
 
     _drop_unadopted_runs(db, event)  # 검증을 통과한 뒤에 정리한다 — 실패한 실행 때문에 지난 안을 잃지 않도록
     run_row = AssignmentRun(
@@ -1194,7 +1194,7 @@ def edit(
     어느 단계에서든 검증에 걸리면 아무것도 저장하지 않는다 (예전에는 swaps 를 저장한 뒤 moves 에서 422 가 나면 반만 바뀌었다).
     """
     if cand.is_adopted:
-        raise errors.AlreadyAdopted("확정된 후보안은 수정할 수 없어요. 재배정을 실행해 주세요.")
+        raise errors.AlreadyAdopted("확정한 배정안은 고칠 수 없어요. 바꾸려면 일정 화면에서 '팀 다시 나누기'를 눌러 주세요.")
     ensure_unlocked(db, cand.run.event_id)
     if swaps:
         _apply_exchanges(cand, [Exchange(a_player_ids=[sw.player_id_a], b_player_ids=[sw.player_id_b]) for sw in swaps])
@@ -1218,7 +1218,7 @@ def _apply_exchanges(cand: AssignmentCandidate, exchanges: list[Exchange]) -> No
 
     - 묶음(LOCK)에 속한 사람이 있으면 묶음 전체를 자동으로 포함한다 (묶음은 통째로만 움직인다).
     - 갈라놓기(SEPARATE)는 교환 뒤에도 서로 다른 팀이어야 한다 (짝을 반대편에 함께 넣으면 통과).
-    - 사전 배치(PIN)는 옮길 수 없다. 각 팀에 최소 5명은 남아야 한다.
+    - 미리 배치(PIN)는 옮길 수 없다. 각 팀에 최소 5명은 남아야 한다.
     """
     pinned = {c.player_id for c in cand.run.constraints if c.type == ConstraintType.PIN}
     lock_of = _lock_groups_of(cand)
@@ -1236,7 +1236,7 @@ def _apply_exchanges(cand: AssignmentCandidate, exchanges: list[Exchange]) -> No
             if pid not in slot_of:
                 raise errors.InvalidSwap("이 배정안에 없는 사람이에요.")
             if pid in pinned:
-                raise errors.InvalidSwap("사전 배치된 사람은 옮길 수 없어요.")
+                raise errors.InvalidSwap("미리 배치한 사람은 옮길 수 없어요.")
         if a & b:
             raise errors.InvalidSwap("같은 사람이 양쪽에 들어 있어요.")
         sq_a = {slot_of[p].squad_id for p in a}
@@ -1319,7 +1319,7 @@ def _reload_slots(db: Session, cand: AssignmentCandidate) -> None:
 def reset_manual(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
     """수동 수정을 모두 되돌려 알고리즘이 낸 원래 편성으로 복원한다."""
     if cand.is_adopted:
-        raise errors.AlreadyAdopted("확정한 배정안은 고칠 수 없어요.")
+        raise errors.AlreadyAdopted("확정한 배정안은 고칠 수 없어요. 바꾸려면 일정 화면에서 '팀 다시 나누기'를 눌러 주세요.")
     ensure_unlocked(db, cand.run.event_id)
     original = cand.metrics.get("original_squads") or {}
     if not original:

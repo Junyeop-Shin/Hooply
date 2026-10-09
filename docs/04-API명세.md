@@ -13,18 +13,18 @@
 - 요청 제한(429)은 메모리 안의 슬라이딩 윈도우다(단일 인스턴스 전제). 로그인은 IP 당 분당 10회에 더해 **(IP, 이메일) 쌍마다 10분에 실패 10회**(성공하면 그 쌍의 실패 기록을 비운다 — 남의 이메일로 틀린 비밀번호를 보내 그 사람을 다른 IP 에서까지 잠그지 못하게), 관리자 콘솔 로그인도 같다. 가입은 IP 당 분당 5회(이메일로는 세지 않는다 — 같은 이메일은 어차피 409). 비밀번호 찾기는 IP 당 분당 5회에 더해 이메일마다 한 시간에 메일 5통 — 넘으면 429 없이 **조용히** 보내지 않고 202. 비밀번호 재설정은 IP 당 분당 5회. AI 호출 · 전술 댓글은 사용자당 분당 10회.
 - 요청 제한의 IP 는 운영 같은 환경에서만 프록시 헤더(`TRUSTED_PROXY_HEADER`, 기본 `cf-connecting-ip` — Cloudflare 가 자기가 본 접속 IP 로 덮어쓴다)를 믿고, 그 밖에는 `X-Forwarded-For` 의 **마지막** 값 → 접속 주소 순으로 정한다. 첫 값은 클라이언트가 꾸밀 수 있어 믿지 않는다.
 - CORS 는 쿠키를 싣지 않는다(`allow_credentials=False`) — 인증은 Bearer 헤더뿐이다.
-- 목록 · 문자열 필드에는 길이 상한이 있다 (배정 전략 1~3개, 묶기 · 갈라놓기 그룹 30개 · 그룹당 30명, 사전 배치 60명, 정렬 100명, 일정 메모 1000자, 전술 한 단계의 동작 20개, 설문 한 문항의 선택지 20개 — 같은 선택지를 두 번 보내면 하나로 센다 등). 넘으면 `400 VALIDATION_ERROR`.
+- 목록 · 문자열 필드에는 길이 상한이 있다 (배정 전략 1~3개, 묶기 · 갈라놓기 그룹 30개 · 그룹당 30명, 미리 배치 60명, 정렬 100명, 일정 메모 1000자, 전술 한 단계의 동작 20개, 설문 한 문항의 선택지 20개 — 같은 선택지를 두 번 보내면 하나로 센다 등). 넘으면 `400 VALIDATION_ERROR`.
 - 관리자 콘솔(SQLAdmin)은 API 가 아닌 서버 페이지 `/admin` 이다. 로그인은 API 로그인과 같은 요청 제한을 받고, 세션은 로그인 당시의 토큰 세대(`users.token_version`)를 담아 비밀번호를 바꾸거나 재설정하면 함께 끝난다. 참가자 · 일정 · 참석 · 쿼터 · 배정 실행 · 후보안 · 투표 · 정렬은 지우기까지 읽기 전용이다(지표 재계산 같은 서비스 규칙을 건너뛰지 않게). 사용자 수정은 `audit_logs` 에 남고 이메일은 소문자로 맞춰 저장한다.
 
 ## 2. HTTP 상태와 에러 코드
 
 | HTTP | code | 상황 |
 | --- | --- | --- |
-| 400 | VALIDATION_ERROR, INVALID_LINEUP_SIZE, SELF_VOTE_NOT_ALLOWED, TOKEN_INVALID_OR_EXPIRED, REFERENCE_NOT_FOUND | 형식·범위 위반. `REFERENCE_NOT_FOUND` 는 요청이 가리킨 행(선수 · 일정 …)이 검사와 저장 사이에 지워진 경우(DB 외래키 위반) — "존재하지 않는 항목을 가리켜요. 화면을 새로고침해 주세요." |
+| 400 | VALIDATION_ERROR, INVALID_LINEUP_SIZE, SELF_VOTE_NOT_ALLOWED, TOKEN_INVALID_OR_EXPIRED, REFERENCE_NOT_FOUND | 형식·범위 위반. `REFERENCE_NOT_FOUND` 는 요청이 가리킨 행(선수 · 일정 …)이 검사와 저장 사이에 지워진 경우(DB 외래키 위반) — "그사이 지워진 사람이나 일정이 있어요. 화면을 새로고침해 주세요." |
 | 401 | INVALID_CREDENTIALS, TOKEN_EXPIRED, KAKAO_AUTH_FAILED | 인증 실패 |
 | 403 | FORBIDDEN_ROLE, NOT_A_MEMBER, NOT_ATTENDEE, SURVEY_NOT_OPEN, FORBIDDEN_NOT_OWNER, REMOVED_FROM_TEAM | 권한 부족·아직 열리지 않음·매니저가 제외한 팀에 코드로 재가입 |
 | 404 | NOT_FOUND, TEAM_CODE_NOT_FOUND, NOT_ADOPTED_YET, NO_RANKING | 리소스 없음 |
-| 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED, CONFLICT | 상태 충돌. `CONFLICT` 는 동시에 들어온 요청이 같은 행을 먼저 만든 경우(DB 유니크 위반) — "동시에 처리된 요청이 있어요. 다시 시도해 주세요." 교착 · 직렬화 실패도 같은 코드지만 문구는 "잠시 뒤 다시 시도해 주세요."(같은 요청을 그대로 다시 보내면 된다). (DB 외래키 위반은 400 REFERENCE_NOT_FOUND, CHECK 위반은 400 VALIDATION_ERROR) |
+| 409 | EMAIL_DUPLICATED, ALREADY_MEMBER, ALREADY_SUBMITTED, QUARTER_EXISTS, ALREADY_ADOPTED, IDENTITY_ALREADY_LINKED, ALREADY_MERGED, CONFLICT | 상태 충돌. `CONFLICT` 는 동시에 들어온 요청이 같은 행을 먼저 만든 경우(DB 유니크 위반) — "다른 사람이 방금 같은 걸 바꿨어요. 새로고침한 뒤 다시 해 주세요." 교착 · 직렬화 실패도 같은 코드지만 문구는 "잠시 뒤 다시 시도해 주세요."(같은 요청을 그대로 다시 보내면 된다). (DB 외래키 위반은 400 REFERENCE_NOT_FOUND, CHECK 위반은 400 VALIDATION_ERROR) |
 | 422 | TEAM_NOT_ACTIVE, NOT_ENOUGH_PLAYERS, RSVP_CLOSED, INVALID_SWAP, CANNOT_DEMOTE_LAST_MANAGER, PLAYER_NOT_IN_TEAM, PLAYER_NOT_IN_SQUAD, PLAY_NOT_PLAYABLE, MERGE_KIND_MISMATCH, LOCK_GROUP_TOO_LARGE, CONSTRAINT_CONFLICT, SEPARATE_INFEASIBLE, LOCK_PARTITION_INFEASIBLE, SQUAD_OVERFLOW, ASSIGNMENT_LOCKED | 도메인 규칙 위반 (배정 제약 오류는 details 에 문제 인원 포함). `ASSIGNMENT_LOCKED` 는 쿼터 기록이 있는 일정에서 배정 실행 · 수정 · 초기화 · 확정 |
 | 429 | RATE_LIMITED | 요청이 너무 많음 — 로그인(IP 분당 10회 + (IP, 이메일) 실패 10분 10회) · 관리자 콘솔 로그인(같음) · 가입(IP 분당 5회) · 비밀번호 찾기 · 재설정(IP 분당 5회), AI 호출 · 전술 댓글(사용자당 분당 10회). 비밀번호 찾기 메일의 이메일당 상한(한 시간 5통)은 429 가 아니라 조용히 202 |
 | 500 | INTERNAL_ERROR | 서버 오류 |
@@ -86,7 +86,7 @@
 | POST | `/surveys/onboarding/responses` | 온보딩 설문 응답 제출 | 201 · 400 · 409 |
 | GET | `/me/profile` | 내 실력·포지션 프로필 | 200 |
 | PUT | `/me/positions` | 가능/선호 포지션 수정 | 200 |
-| PUT | `/teams/{team_id}/self-rank` | 이 동호회에서 내 실력 위치 응답 | 200 · 403 |
+| PUT | `/teams/{team_id}/self-rank` | 이 팀에서 내 실력 위치 응답 | 200 · 403 |
 
 ### 팀 · 참가자
 
@@ -180,7 +180,7 @@
 | GET | `/players/{player_id}/stats` | 선수 통계 (참여 이력 · 쿼터 기록 · 실력 지표) | 200 · 403 |
 | GET | `/teams/{team_id}/stats/leaderboard` | 팀 리더보드 | 200 · 403 |
 | GET | `/teams/{team_id}/stats/periods` | 리더보드 · 월간 랭킹에서 고를 수 있는 달 | 200 · 403 |
-| GET | `/teams/{team_id}/stats/monthly-margin` | 월간 코트 마진 랭킹 (기록 탭, `?period=YYYY-MM`) | 200 · 400 · 403 |
+| GET | `/teams/{team_id}/stats/monthly-margin` | 이달의 점수 차 순위(월간 코트 마진) (기록 탭, `?period=YYYY-MM`) | 200 · 400 · 403 |
 | GET | `/me/badges` | 내 배지 — 획득·진행도 (기록 탭) | 200 |
 | GET | `/me/tutorial` | 시작 안내 상태 + 체크리스트 단계 (서버가 실제 데이터로 판정) | 200 |
 | PUT | `/me/tutorial` | 시작 안내 상태·경로 변경, 닫은 첫 안내 기록 | 200 · 400 |

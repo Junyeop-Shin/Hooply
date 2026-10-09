@@ -6,7 +6,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { peerApi } from '../api/peer'
-import { Alert, Avatar, Badge, Card, GradeDot, SectionTitle, Spinner } from '../components/ui'
+import { errorMessage } from '../api/client'
+import { Avatar, Badge, Card, GradeDot, LoadError, SectionTitle, Spinner } from '../components/ui'
 import { MarginTrend, Paged, QuarterList } from '../components/stats'
 import { Content, Screen, TopBar } from '../components/layout'
 
@@ -17,13 +18,15 @@ const SOURCE_LABEL: Record<string, string> = {
 const PRIOR_LABEL: Record<string, string> = { SURVEY: '설문으로 정함', MANAGER: '매니저가 정함', DEFAULT: '팀 평균 (아직 정보 없음)' }
 const AXIS_LABEL: Record<string, string> = { shooting: '슛', ball_handling: '드리블', passing: '패스', defense: '수비', rebound_post: '골밑', stamina: '체력' }
 const AXIS_LEVEL: Record<'HIGH' | 'MID' | 'LOW', string> = { HIGH: '팀 상위', MID: '팀 중간', LOW: '팀 하위' }
+/** 시각 → "9/20" (이 기기 시간대) */
+const mmdd = (iso: string) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()}` }
 
 export function PlayerDetailPage() {
   const { teamId, playerId } = useParams()
   const pid = Number(playerId)
   const q = useQuery({ queryKey: ['stats', pid], queryFn: () => peerApi.stats(pid), retry: false })
   if (q.isLoading) return <Screen><TopBar title="실력 자세히 보기" back={`/teams/${teamId}/members`} /><Spinner page /></Screen>
-  if (!q.data) return <Screen><TopBar title="실력 자세히 보기" back={`/teams/${teamId}/members`} /><Content><Alert>불러오지 못했어요. 매니저만 볼 수 있어요.</Alert></Content></Screen>
+  if (!q.data) return <Screen><TopBar title="실력 자세히 보기" back={`/teams/${teamId}/members`} /><Content><LoadError message={errorMessage(q.error, '실력 정보를 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} /></Content></Screen>
   const s = q.data
   const p = s.player
   const signed = (v: string | null | undefined) => (v === null || v === undefined ? '—' : `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(1)}`)
@@ -33,7 +36,7 @@ export function PlayerDetailPage() {
   return (
     <Screen>
       <TopBar tone="navy" title="실력 자세히 보기" back={`/teams/${teamId}/members`} />
-      <div className="bg-navy-800 px-4 pb-4 text-white">
+      <div className="bg-bar px-4 pb-4 text-bar-ink">
         <div className="flex items-center gap-3">
           <Avatar name={p.display_name} src={p.profile_image_url} size="lg" />
           <div className="min-w-0 flex-1">
@@ -48,9 +51,9 @@ export function PlayerDetailPage() {
         <Card>
           <div className="flex items-baseline justify-between">
             <p className="text-sm font-bold text-ink">실력 점수</p>
-            <p className="text-2xl font-black text-ink">{signed(s.skill_overall ?? s.prior_overall)}<span className="ml-1 text-xs font-normal text-faint">점 / 쿼터</span></p>
+            <p className="text-2xl font-black text-ink">{signed(s.skill_overall ?? s.prior_overall)}<span className="ml-1 text-xs font-normal text-muted">점</span></p>
           </div>
-          <p className="mt-1 text-xs text-muted">이 사람이 코트에 있을 때 팀이 한 쿼터에 더 얻는 점수예요. 0이 팀 평균이에요.</p>
+          <p className="mt-1 text-xs text-muted">이 사람이 뛰면 팀이 한 쿼터에 이만큼 더 얻어요. 0점이 팀 평균이에요.</p>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
             <div className="rounded-lg bg-surface-2 py-2"><p className="text-[10px] text-muted">시작 점수</p><p className="font-bold text-ink">{signed(s.prior_overall)}</p><p className="text-[10px] text-faint">{s.prior_source ? PRIOR_LABEL[s.prior_source] ?? s.prior_source : '—'}</p></div>
             <div className="rounded-lg bg-surface-2 py-2"><p className="text-[10px] text-muted">경기 반영 후</p><p className="font-bold text-ink">{signed(s.skill_overall)}</p><p className="text-[10px] text-faint">{s.skill_overall === null ? '아직 반영 전' : `경기로 ${signed(s.cumulative_residual)}`}</p></div>
@@ -65,7 +68,7 @@ export function PlayerDetailPage() {
             <Card className="flex items-center gap-3 py-3">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-ink">가입 설문</p>
-                <p className="text-xs text-muted">{s.prior_source === 'SURVEY' ? '구력·슛 거리·드리블·수비 이해도와 동호회 안에서 본인이 고른 위치를 합쳐 정했어요' : s.prior_source === 'MANAGER' ? '데려온 사람이 고른 실력 단계를 팀 안 순위로 바꿔 정했어요' : '설문 응답이 없어 팀 평균에서 시작했어요'}</p>
+                <p className="text-xs text-muted">{s.prior_source === 'SURVEY' ? '구력 · 슛 거리 · 드리블 · 수비 이해도와 이 팀에서 본인이 고른 실력 위치를 합쳐 정했어요' : s.prior_source === 'MANAGER' ? '데려온 사람이 고른 실력 단계를 팀 안 순위로 바꿔 정했어요' : '설문 응답이 없어 팀 평균에서 시작했어요'}</p>
               </div>
               <span className="text-sm font-bold text-ink">{signed(s.prior_overall)}</span>
             </Card>
@@ -79,7 +82,7 @@ export function PlayerDetailPage() {
             <Card className="flex items-center gap-3 py-3">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-ink">경기 기록</p>
-                <p className="text-xs text-muted">{s.quarters_played === 0 ? '출전 기록이 없어요' : `출전 ${s.quarters_played}쿼터 · 이긴 쿼터 ${wins}개 · 예상보다 얼마나 더 벌었는지를 쌓아 반영해요 (처음 두 일정은 빼요)`}</p>
+                <p className="text-xs text-muted">{s.quarters_played === 0 ? '출전 기록이 없어요' : `출전 ${s.quarters_played}쿼터 · 이긴 쿼터 ${wins}개 · 예상 점수 차보다 더 낸 점수를 쌓아 반영해요 (처음 두 일정은 빼요)`}</p>
               </div>
               <span className={`text-sm font-bold ${Number(s.cumulative_residual ?? 0) < 0 ? 'text-danger-ink' : 'text-ink'}`}>{signed(s.cumulative_residual)}</span>
             </Card>
@@ -99,15 +102,15 @@ export function PlayerDetailPage() {
               {Object.keys(s.skill_axes).map((k) => {
                 const r = s.skill_axes_rank?.[k]
                 const pct = r?.percentile ?? null
-                const tone = r?.level === 'HIGH' ? 'bg-brand' : r?.level === 'LOW' ? 'bg-faint' : 'bg-navy-800'
+                const tone = r?.level === 'HIGH' ? 'bg-brand' : r?.level === 'LOW' ? 'bg-faint' : 'bg-inverse'
                 return (
                   <div key={k} className="flex items-center gap-3">
                     <span className="w-9 shrink-0 text-xs font-semibold text-ink">{AXIS_LABEL[k] ?? k}</span>
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-sunken">
                       {pct !== null && <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.max(pct, 4)}%` }} />}
                     </div>
-                    <span className={`w-16 shrink-0 text-right text-[11px] font-semibold ${r?.level === 'HIGH' ? 'text-brand-ink' : r?.level === 'LOW' ? 'text-faint' : 'text-muted'}`}>
-                      {r?.level ? AXIS_LEVEL[r.level] : '비교 인원 부족'}
+                    <span className={`w-16 shrink-0 text-right text-[11px] font-semibold ${r?.level === 'HIGH' ? 'text-brand-ink' : 'text-muted'}`}>
+                      {r?.level ? AXIS_LEVEL[r.level] : '아직 몰라요'}
                     </span>
                   </div>
                 )
@@ -137,7 +140,7 @@ export function PlayerDetailPage() {
                 <div key={i} className="flex items-center gap-3 px-4 py-2.5 text-xs">
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-ink">{SOURCE_LABEL[h.source] ?? h.source}</p>
-                    <p className="truncate text-muted">{h.reason ?? ''} · {new Date(h.created_at).toLocaleDateString('ko-KR')}</p>
+                    <p className="truncate text-muted">{h.reason ?? ''} · {mmdd(h.created_at)}</p>
                   </div>
                   <span className="text-muted">{signed(h.before_value)} → <b className={Number(h.delta ?? 0) < 0 ? 'text-danger-ink' : 'text-ink'}>{signed(h.after_value)}</b></span>
                 </div>

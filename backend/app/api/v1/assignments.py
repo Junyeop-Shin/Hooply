@@ -95,7 +95,7 @@ def validate_constraints(db: DB, me: EventManager, event: Annotated[Event, Depen
     """실행 전 프리플라이트. 차단 사유(`violations[]`)와 경고(`warnings[]`)를 돌려주며 아무것도 저장하지 않는다.
 
     - **권한:** 팀 매니저 또는 ADMIN.
-    - **처리:** 인원 수, 묶음 크기 > 정원, 묶기·갈라놓기 충돌, 사전 배치 정원 초과, 분할 가능성을 검사한다.
+    - **처리:** 인원 수, 묶음 크기 > 정원, 묶기·갈라놓기 충돌, 미리 배치 정원 초과, 분할 가능성을 검사한다.
       쿼터 기록이 있는 일정이면 다른 검사 전에 `violations[]` 에 `ASSIGNMENT_LOCKED` 하나만 담아 `feasible=false` 로 돌려준다
       (실행하면 422 가 날 것을 미리 알린다 — 여기서는 422 를 내지 않는다).
       S-12 화면은 제약을 바꿀 때마다 이 API 로 실행 버튼 활성 여부를 정한다 (FR-20).
@@ -163,7 +163,7 @@ def swap_players(db: DB, user: CurrentUser, candidate_id: int, body: SwapRequest
     묶음(LOCK)에 속한 사람은 자동으로 묶음 전체가 함께 움직인다. 갈라놓기(SEPARATE)는 교환 뒤에도 다른 팀이어야 한다.
 
     - **권한:** 그 팀의 매니저 또는 ADMIN.
-    - **처리:** 교체된 슬롯은 `is_manual_override=true`. 묶음(LOCK)·사전 배치(PIN)에 속한 사람은 개별로
+    - **처리:** 교체된 슬롯은 `is_manual_override=true`. 묶음(LOCK)·미리 배치(PIN)에 속한 사람은 개별로
       옮길 수 없다. 확정된 후보안은 수정할 수 없다 (재배정 실행).
     - **오류:** `422 INVALID_SWAP`, `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정, `409 ALREADY_ADOPTED`, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.

@@ -3,7 +3,7 @@
  * API 는 vi.mock 으로 대체한다 (네트워크 없음).
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,6 +15,7 @@ vi.mock('../api/peer', () => ({ peerApi: { targets: vi.fn(), submit: vi.fn() } }
 
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
+import { answerConfirm, useFeedback } from '../store/feedback'
 import { VotePage } from './vote'
 
 const player = (id: number, name: string): PlayerCard => ({
@@ -59,19 +60,23 @@ describe('VotePage', () => {
     await user.click(screen.getByRole('button', { name: /이상민/ }))
     // 3번째는 비활성
     expect(screen.getByRole('button', { name: /현주엽/ })).toBeDisabled()
-    expect(screen.getByText('2/2 선택됨')).toBeInTheDocument()
+    expect(screen.getByText('2/2명 골랐어요')).toBeInTheDocument()
     // 아직 이유를 안 골랐으니 목록은 그대로
     expect(screen.getByRole('button', { name: /현주엽/ })).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: '패스가 좋았어요' })[0])
     await user.click(screen.getAllByRole('button', { name: '템포가 잘 맞았어요' })[1])  // 두 번째 선택자(이상민)의 칩
-    // 이유까지 고르면 접히고 수정 버튼과 이름 칩만 남는다
-    expect(await screen.findByRole('button', { name: '수정' })).toBeInTheDocument()
+    // 이유까지 고르면 접히고 고치기 버튼과 이름 칩만 남는다
+    expect(await screen.findByRole('button', { name: '고치기' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /현주엽/ })).not.toBeInTheDocument()
     // 상대 팀 이유 칩은 상대 맥락 문구
     await user.click(screen.getByRole('button', { name: /문경은/ }))
     expect(screen.getByRole('button', { name: '패스가 인상적이었어요' })).toBeInTheDocument()
-    // 제출: 3명
-    await user.click(screen.getByRole('button', { name: '3명 제출' }))
+    // 한 번 내면 못 고치므로 고른 사람을 확인받은 뒤에 낸다
+    await user.click(screen.getByRole('button', { name: '3명 뽑고 투표 마치기' }))
+    expect(peerApi.submit).not.toHaveBeenCalled()
+    expect(useFeedback.getState().pending?.body).toContain('서장훈, 이상민, 문경은')
+    answerConfirm(true)
+    await waitFor(() => expect(peerApi.submit).toHaveBeenCalled())
     expect(peerApi.submit).toHaveBeenCalledWith(1, expect.arrayContaining([
       expect.objectContaining({ target_player_id: 2, vote_type: 'PLAY_AGAIN', reason_tag: 'PASS' }),
       expect.objectContaining({ target_player_id: 5, vote_type: 'PLAY_AGAIN' }),

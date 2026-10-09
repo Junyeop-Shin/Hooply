@@ -7,19 +7,29 @@
  *   보여 준다. 카드는 모두 접힌 채로 시작한다. 자리마다 가장 잘 맞는 사람과 예비, 자리별 점수·속성은 매니저에게만.
  *   팀마다 "AI 코치" 한 줄과, 카드 안에 AI 가 쓴 이유 · 핵심 자리 · 주의할 점 (체인 C, FR-52). 실패하면 규칙 정보만.
  */
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError, errorMessage } from '../api/client'
 import { tacticStarsApi, tacticsApi, teamPlaysApi } from '../api/tactics'
-import type { AiTacticItem, EventView, Play, PlayLineup, SlotLineup, SquadRecommendation } from '../api/types'
+import type { AiTacticItem, EventView, Play, PlayLineup, SlotLineup, SquadRecommendation, TacticRole } from '../api/types'
 import { DEFENSE_LABEL, ROLE_LABEL } from '../lib/tactics'
 import { Thinking, TypedSections } from './ai-cards'
 import { FirstTimeTip } from './tutorial'
 import { squadStyle } from '../lib/squads'
-import { Badge, EmptyState, SectionTitle, Spinner } from './ui'
+import { Badge, Button, LoadError, SectionTitle, Spinner } from './ui'
 
 export const CIRCLED = ['①', '②', '③', '④', '⑤']
+/** 역할 이름 한 줄 풀이 — 역할 이름 옆 · 아래에 작게 붙인다 */
+export const ROLE_HINT: Record<TacticRole, string> = {
+  ball_handler: '공을 몰고 와서 공격을 시작해요',
+  screener_roll: '스크린을 건 뒤 골밑으로 들어가요',
+  screener_pop: '스크린을 건 뒤 바깥으로 빠져 슛을 노려요',
+  shooter: '바깥에서 공을 받아 바로 던져요',
+  cutter: '공 없이 골밑으로 파고들어요',
+  post: '골밑에서 수비를 등지고 공을 받아요',
+  spacer: '바깥에 서서 수비를 벌려 줘요',
+}
 const mmdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`
 /** play_key → 전술판 주소의 키 ("preset:high_pnr" → "high_pnr", "team:12" → "team_12") */
 export const keyOf = (playKey: string) => playKey.replace(/^preset:/, '').replace(/^team:/, 'team_')
@@ -77,15 +87,17 @@ export function TacticsTab({ teamId }: { teamId: number }) {
       )}
 
       <section>
-        <SectionTitle action={<Link to={`/teams/${teamId}/plays/new`} className="text-sm font-semibold text-brand-ink">+ 새 전술 만들기</Link>}>우리 팀 전술</SectionTitle>
-        {own.isLoading ? <Spinner /> : own.data?.items.length ? (
+        <SectionTitle action={<Link to={`/teams/${teamId}/plays/new`} className="-my-2 flex min-h-11 items-center text-sm font-semibold text-brand-ink">+ 새 전술 만들기</Link>}>우리 팀 전술</SectionTitle>
+        {own.isLoading ? <Spinner /> : own.isError && !own.data ? <LoadError message="우리 팀 전술을 불러오지 못했어요." onRetry={() => own.refetch()} retrying={own.isFetching} /> : own.data?.items.length ? (
           rest(own.data.items.map((v) => v.play)).length ? <PresetList items={rest(own.data.items.map((v) => v.play))} {...row} /> : <p className="px-1 text-sm text-muted">모두 별표 전술에 있어요.</p>
         ) : (
           <p className="px-1 text-sm text-muted">코트 위에 다섯 명의 움직임을 그려 우리 팀만의 전술을 만들 수 있어요. 역할은 움직임에서 자동으로 붙고, AI가 자리마다 할 일을 풀어 줘요.</p>
         )}
       </section>
 
-      <PresetGroup title="전술 목록" items={presets.data && rest(presets.data.items.filter((p) => p.situation === 'half_court'))} loading={presets.isLoading} row={row} />
+      <PresetGroup title="전술 목록" items={presets.data && rest(presets.data.items.filter((p) => p.situation === 'half_court'))} loading={presets.isLoading} row={row}
+        error={presets.isError && !presets.data ? <LoadError message="전술 목록을 불러오지 못했어요." onRetry={() => presets.refetch()} retrying={presets.isFetching} /> : undefined}
+      />
       <PresetGroup
         title="인바운드" desc="골밑 베이스라인에서 공을 넣을 때 쓰는 전술이에요. 오늘 추천에는 들어가지 않아요."
         items={presets.data && rest(presets.data.items.filter((p) => p.situation === 'inbound'))} loading={presets.isLoading} row={row}
@@ -97,7 +109,8 @@ export function TacticsTab({ teamId }: { teamId: number }) {
 
 type RowProps = { starred: string[]; canStar: boolean; onStar: (key: string, on: boolean) => void; onOpen: (key: string) => void }
 
-function PresetGroup({ title, desc, items, loading, row }: { title: string; desc?: string; items?: Play[]; loading: boolean; row: RowProps }) {
+function PresetGroup({ title, desc, items, loading, row, error }: { title: string; desc?: string; items?: Play[]; loading: boolean; row: RowProps; error?: ReactNode }) {
+  if (error) return <section><SectionTitle>{title}</SectionTitle>{error}</section>
   if (!loading && !items?.length) return null
   return (
     <section>
@@ -126,7 +139,7 @@ function PresetList({ items, starred, canStar, onStar, onOpen }: { items: Play[]
             {canStar ? (
               <button
                 type="button" onClick={() => onStar(p.key, !on)} aria-pressed={on} aria-label={`${p.name} 별표${on ? ' 떼기' : ' 달기'}`}
-                className={`flex w-12 shrink-0 items-center justify-center text-xl ${on ? 'text-court-500' : 'text-faint'}`}
+                className={`flex min-h-11 w-12 shrink-0 items-center justify-center text-xl ${on ? 'text-court-500' : 'text-faint'}`}
               >
                 {on ? '★' : '☆'}
               </button>
@@ -146,9 +159,9 @@ function SquadLabel({ no, name, count, mine }: { no: number; name: string; count
   return (
     <div className="flex items-center gap-2 px-1 pt-1">
       <span className={`size-3 rounded-full ${squadStyle(no).dot}`} aria-hidden="true" />
-      <span className="text-sm font-bold text-ink">{name}</span>
+      <span className="text-sm font-bold text-ink">{name} 팀</span>
       <span className="text-xs text-muted">{count}명</span>
-      {mine && <span className="text-xs font-semibold text-brand-ink">내 팀</span>}
+      {mine && <span className="text-xs font-semibold text-brand-ink">오늘 내 팀</span>}
     </div>
   )
 }
@@ -157,16 +170,16 @@ function SquadLabel({ no, name, count, mine }: { no: number; name: string; count
 export function ZoneSwitch({ zone, setZone }: { zone: boolean; setZone: (z: boolean) => void }) {
   return (
     <button
-      type="button" role="switch" aria-checked={zone} aria-label={`상대 수비: ${zone ? '지역 수비' : '맨투맨 수비'} (누르면 바뀜)`}
+      type="button" role="switch" aria-checked={zone} aria-label={`상대 수비: ${zone ? '지역 수비' : '맨투맨 수비'}, 누르면 바뀌어요`}
       onClick={() => setZone(!zone)}
       className="relative isolate inline-grid min-h-11 grid-cols-2 items-center rounded-full bg-sunken p-1 text-xs font-bold active:opacity-90"
     >
       <span
-        className={`absolute inset-y-1 w-[calc(50%-4px)] rounded-full bg-surface shadow transition-transform ${zone ? 'translate-x-[calc(100%+0px)]' : 'translate-x-0'}`}
+        className={`absolute inset-y-1 w-[calc(50%-4px)] rounded-full bg-inverse shadow transition-transform motion-reduce:transition-none ${zone ? 'translate-x-[calc(100%+0px)]' : 'translate-x-0'}`}
         style={{ left: 4 }} aria-hidden="true"
       />
-      <span className={`relative z-10 px-3 py-1.5 transition-colors ${zone ? 'text-muted' : 'text-ink'}`}>맨투맨 수비</span>
-      <span className={`relative z-10 px-3 py-1.5 transition-colors ${zone ? 'text-brand-ink' : 'text-muted'}`}>지역 수비</span>
+      <span className={`relative z-10 px-3 py-1.5 transition-colors ${zone ? 'text-muted' : 'text-on-inverse'}`}>맨투맨 수비</span>
+      <span className={`relative z-10 px-3 py-1.5 transition-colors ${zone ? 'text-on-inverse' : 'text-muted'}`}>지역 수비</span>
     </button>
   )
 }
@@ -187,7 +200,7 @@ function EventRecommend({ event, zone, setZone, rec, onlyMine = false, title }: 
   return (
     <section>
       <SectionTitle action={<ZoneSwitch zone={zone} setZone={setZone} />}>{title ?? `${mmdd(event.event_date)} 추천 전술`}</SectionTitle>
-      {rec.isLoading ? <Spinner /> : !data ? <EmptyState title="추천을 불러오지 못했어요" /> : (
+      {rec.isLoading ? <Spinner /> : !data ? <LoadError message="추천 전술을 불러오지 못했어요." onRetry={() => rec.refetch()} retrying={rec.isFetching} /> : (
         <div className="space-y-4">
           {squads.map((sq) => (
             <SquadRecommend key={sq.squad_no} sq={sq} eventId={event.id} zone={zone} mine={sq.squad_no === data.my_squad_no} showLabel={!single} fitMin={data.fit_min} manager={data.can_edit} />
@@ -209,7 +222,7 @@ function SquadRecommend({ sq, eventId, zone, mine, showLabel, fitMin, manager }:
       {sq.member_count < 5 ? (
         <p className="px-1 text-sm text-muted">5명 이상이어야 추천할 수 있어요.</p>
       ) : sq.items.length === 0 ? (
-        <p className="rounded-2xl bg-surface px-4 py-3 text-sm text-muted">오늘 팀 구성으로는 적합도 {fitMin}를 넘는 전술이 없어요. 아래 목록에서 직접 골라 볼 수 있어요.</p>
+        <p className="rounded-2xl bg-surface px-4 py-3 text-sm text-muted">오늘 팀 구성으로는 잘 맞는 정도가 {fitMin}점을 넘는 전술이 없어요. 팀 화면의 전술 탭에서 직접 골라 볼 수 있어요.</p>
       ) : (
         <>
           {ai.isLoading ? (
@@ -234,7 +247,7 @@ function SquadRecommend({ sq, eventId, zone, mine, showLabel, fitMin, manager }:
 
 /**
  * 전술 설명 한 덩어리 — 추천 카드와 전술판이 같이 쓴다.
- * AI 이유 · 핵심 자리 · 주의할 점(AI, 타자 효과) 과 막혔을 때의 대안(규칙, 그날 선수 이름) 을 한 섹션에.
+ * AI 이유 · 핵심 자리 · 주의할 점(AI, 타자 효과) 과 막혔을 때의 대안(규칙, 그날 참석자 이름) 을 한 섹션에.
  * AI 설명이 없으면(추천 밖 전술 · AI 실패) 전술 소개와 대안만.
  */
 export function TacticExplain({ summary, ai, counter }: { summary: string; ai?: AiTacticItem; counter: string }) {
@@ -280,7 +293,7 @@ function LineupCard({ it, rank, open: initial, to, manager, ai }: { it: PlayLine
         <span className={`flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-black ${rank === 1 ? 'bg-brand text-on-brand' : 'bg-sunken text-muted'}`}>{rank}</span>
         <span className="min-w-0 flex-1 truncate font-bold text-ink">{it.name}</span>
         {it.manual && <Badge tone="navy">매니저 배치</Badge>}
-        <span className="shrink-0 rounded-full bg-brand-soft px-2 py-0.5 text-xs font-bold text-brand-ink">적합도 {Math.round(it.fit)}</span>
+        <span className="shrink-0 rounded-full bg-brand-soft px-2 py-0.5 text-xs font-bold text-brand-ink">잘 맞는 정도 {Math.round(it.fit)}점</span>
         <span className="text-faint" aria-hidden="true">{open ? '▴' : '▾'}</span>
       </button>
       {open && (
@@ -290,16 +303,18 @@ function LineupCard({ it, rank, open: initial, to, manager, ai }: { it: PlayLine
             {it.slots.map((s) => (
               <li key={s.slot} className="flex items-center gap-3 py-2">
                 <span className="w-5 shrink-0 text-center text-sm font-bold text-brand-ink">{CIRCLED[s.slot - 1]}</span>
-                <span className="w-[5.5rem] shrink-0 text-sm text-ink-2">{ROLE_LABEL[s.role]}</span>
-                <span className="min-w-0 flex-1 text-sm"><SlotPeople s={s} /></span>
+                <span className="min-w-0 flex-1 text-sm">
+                  <span className="flex items-center gap-3"><span className="w-[5.5rem] shrink-0 text-ink-2">{ROLE_LABEL[s.role]}</span><span className="min-w-0 flex-1"><SlotPeople s={s} /></span></span>
+                  <span className="block text-xs text-muted">{ROLE_HINT[s.role]}</span>
+                </span>
                 {manager && s.score !== null && <span className="shrink-0 text-xs tabular-nums text-muted">{s.score}</span>}
               </li>
             ))}
           </ul>
           {manager && (
             <div>
-              <button type="button" onClick={() => setWhy(!why)} className="text-xs font-semibold text-muted underline-offset-2 active:underline">
-                {why ? '선수별 근거 접기' : '선수별 근거 보기 (매니저만)'}
+              <button type="button" onClick={() => setWhy(!why)} aria-expanded={why} className="-my-1 min-h-11 text-xs font-semibold text-muted underline-offset-2 active:underline">
+                {why ? '사람별 근거 접기' : '사람별 근거 보기 (매니저만)'}
               </button>
               {why && (
                 <ul className="mt-1.5 space-y-1">
@@ -307,20 +322,17 @@ function LineupCard({ it, rank, open: initial, to, manager, ai }: { it: PlayLine
                     <li key={s.slot} className="text-[11px] leading-relaxed text-muted">
                       <b className="text-ink-2">{s.display_name}</b>
                       {s.matched_attrs.length > 0 && <> · {s.matched_attrs.slice(0, 3).join(' · ')}</>}
-                      {s.missing_attrs.length > 0 && <span className="text-warn-ink"> · 부족: {s.missing_attrs.join(' · ')}</span>}
-                      {s.alt_display_name && <> · 벤치 교체 후보 {s.alt_display_name}</>}
+                      {s.missing_attrs.length > 0 && <span className="text-warn-ink"> · 부족한 역할: {s.missing_attrs.join(' · ')}</span>}
+                      {s.alt_display_name && <> · 바꿔 뛸 수 있는 사람 {s.alt_display_name}</>}
                     </li>
                   ))}
                 </ul>
               )}
             </div>
           )}
-          <button
-            type="button" onClick={() => nav(to)}
-            className="flex min-h-11 w-full items-center justify-center gap-1 rounded-xl bg-brand text-sm font-semibold text-on-brand active:opacity-90"
-          >
+          <Button full variant="secondary" onClick={() => nav(to)}>
             전술판에서 보기{manager ? ' · 자리 바꾸기' : ''} <span aria-hidden="true">→</span>
-          </button>
+          </Button>
         </div>
       )}
     </div>

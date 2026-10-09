@@ -278,7 +278,7 @@ def update_me(db: DB, user: CurrentUser, body: UserUpdate):
 
         ok = db.scalar(select(Player.id).where(Player.user_id == user.id, Player.team_id == data["primary_team_id"], Player.status == PlayerStatus.ACTIVE))
         if ok is None:
-            raise E.PlayerNotInTeam("내가 속한 팀만 메인 팀으로 설정할 수 있어요.")
+            raise E.PlayerNotInTeam("내가 속한 팀만 기본 팀으로 정할 수 있어요.")
     for k, v in data.items():
         setattr(user, k, v)
     db.commit()

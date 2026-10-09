@@ -93,10 +93,10 @@ export function TutorialCard({ me }: { me: UserDetail }) {
           {close}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => upd.mutate({ path: 'PLAYER' })} className="rounded-xl border border-line bg-surface px-3 py-3 text-left active:bg-sunken">
+          <button type="button" onClick={() => upd.mutate({ path: 'PLAYER' })} className="min-h-11 rounded-xl border border-line bg-surface px-3 py-3 text-left active:bg-sunken">
             <p className="text-sm font-bold text-ink">네, 받았어요</p><p className="text-[11px] text-muted">팀원으로 가입해요</p>
           </button>
-          <button type="button" onClick={() => upd.mutate({ path: 'MANAGER' })} className="rounded-xl border border-line bg-surface px-3 py-3 text-left active:bg-sunken">
+          <button type="button" onClick={() => upd.mutate({ path: 'MANAGER' })} className="min-h-11 rounded-xl border border-line bg-surface px-3 py-3 text-left active:bg-sunken">
             <p className="text-sm font-bold text-ink">아니요</p><p className="text-[11px] text-muted">팀을 직접 만들어요</p>
           </button>
         </div>
@@ -112,14 +112,14 @@ export function TutorialCard({ me }: { me: UserDetail }) {
   if (v.all_done) {
     return (
       <Card className="space-y-3 border-brand-line bg-brand-soft">
-        <div><p className="text-xs font-bold text-brand-ink">시작 안내 · 준비 끝</p><p className="mt-0.5 font-bold text-ink">이제 이런 순서로 진행돼요</p></div>
+        <div><p className="text-xs font-bold text-brand-ink">시작 안내 · 준비 끝</p><p className="mt-0.5 font-bold text-ink">이제 이런 순서로 써요</p></div>
         <ol className="space-y-1.5">
           {FLOW[me.tutorial_path].map((line, i) => (
             <li key={line} className="flex gap-2 text-sm text-ink-2"><span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-surface text-[11px] font-bold text-brand-ink">{i + 1}</span><span>{line}</span></li>
           ))}
         </ol>
         <p className="text-[11px] text-muted">그 기능을 처음 열 때 짧은 안내가 한 번 더 떠요.</p>
-        <Button full onClick={() => upd.mutate({ state: 'DONE' })}>확인</Button>
+        <Button full onClick={() => upd.mutate({ state: 'DONE' })}>안내 마치기</Button>
       </Card>
     )
   }
@@ -129,7 +129,7 @@ export function TutorialCard({ me }: { me: UserDetail }) {
   return (
     <Card className="space-y-3 border-brand-line">
       {next && spotSeen !== next.key && (
-        <Spotlight target={`step-${next.key}`} title="다음 할 일이에요" text={`${next.title} — 오른쪽 '${next.action ?? '하기'}'를 눌러 시작해요.`} onClose={() => markSpot(next.key)} />
+        <Spotlight target={`step-${next.key}`} title="다음 할 일이에요" text={`${next.title} — 오른쪽 '${next.action ?? '하기'}' 버튼을 눌러 시작해요.`} onClose={() => markSpot(next.key)} />
       )}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -176,8 +176,8 @@ export function FirstTimeTip({ id }: { id: TipId }) {
         {t.lines.map((l) => <li key={l} className="flex gap-1.5 text-xs leading-relaxed text-ink-2"><span className="text-info-ink" aria-hidden="true">·</span><span>{l}</span></li>)}
       </ul>
       <div className="mt-2.5 flex items-center justify-between">
-        <Link to={`/help#${t.help}`} className="text-xs font-semibold text-info-ink underline underline-offset-2">도움말에서 더 보기</Link>
-        <button type="button" onClick={() => upd.mutate({ tip_seen: id })} className="min-h-9 rounded-lg bg-surface px-3 text-xs font-semibold text-ink-2 active:bg-sunken">알겠어요</button>
+        <Link to={`/help#${t.help}`} className="-my-1 flex min-h-11 items-center text-xs font-semibold text-info-ink underline underline-offset-2">도움말에서 더 보기</Link>
+        <button type="button" onClick={() => upd.mutate({ tip_seen: id })} className="-my-1 -mr-1 flex min-h-11 items-center"><span className="rounded-lg bg-surface px-3 py-2 text-xs font-semibold text-ink-2">알겠어요</span></button>
       </div>
     </div>
   )

@@ -35,7 +35,7 @@ describe('피드백', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(document.body.style.overflow).toBe('')
 
-    act(() => { ok = confirm({ title: '나갈까요?' }) })
+    act(() => { ok = confirm({ title: '나갈까요?', confirmLabel: '나가기' }) })
     await user.keyboard('{Escape}')
     await expect(ok!).resolves.toBe(false)
   })

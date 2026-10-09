@@ -119,10 +119,10 @@ InvalidLineupSize = _error(400, "INVALID_LINEUP_SIZE", "쿼터마다 팀당 5명
 # 피어 설문에서 본인을 target 으로 지정 — S-16
 SelfVoteNotAllowed = _error(400, "SELF_VOTE_NOT_ALLOWED", "자기 자신은 고를 수 없어요.")
 # 비밀번호 재설정 토큰이 없거나·30분 지났거나·이미 사용됨 — POST /auth/password/reset
-TokenInvalidOrExpired = _error(400, "TOKEN_INVALID_OR_EXPIRED", "이 링크는 만료되었거나 이미 사용했어요. 다시 요청해 주세요.")
+TokenInvalidOrExpired = _error(400, "TOKEN_INVALID_OR_EXPIRED", "이 링크는 만료됐거나 이미 사용했어요. 링크를 다시 받아 주세요.")
 # 요청이 가리킨 행(선수 · 일정 · 팀 …)이 없다 — DB 외래키 위반(23503). 검사와 저장 사이에 그 행이 지워졌을 때.
 # install_error_handlers 가 IntegrityError 에서 바꾼다. 화면은 목록을 새로 읽으면 된다
-ReferenceNotFound = _error(400, "REFERENCE_NOT_FOUND", "존재하지 않는 항목을 가리켜요. 화면을 새로고침해 주세요.")
+ReferenceNotFound = _error(400, "REFERENCE_NOT_FOUND", "그사이 지워진 사람이나 일정이 있어요. 화면을 새로고침해 주세요.")
 
 # ---------------------------------------------------------------------------
 # 401 — 인증 실패. 로그인 화면으로 보내야 하는 종류.
@@ -147,7 +147,7 @@ RemovedFromTeam = _error(403, "REMOVED_FROM_TEAM", "매니저가 제외한 팀�
 NotAttendee = _error(403, "NOT_ATTENDEE", "이 일정에 참석한 사람만 볼 수 있어요.")
 # 남이 등록한 게스트를 등록자도 매니저도 아닌 플레이어가 수정·삭제 — 게스트 기능 설계.
 # 팀원 제외에서도 쓴다: 팀장이 아닌 매니저가 매니저를 제외하거나, 누가 팀장을 제외하려 할 때 (문구를 바꿔 던진다)
-ForbiddenNotOwner = _error(403, "FORBIDDEN_NOT_OWNER", "이 게스트를 등록한 사람만 수정할 수 있어요.")
+ForbiddenNotOwner = _error(403, "FORBIDDEN_NOT_OWNER", "이 게스트를 등록한 사람만 고칠 수 있어요.")
 # 일정 종료 시각 전에 피어 투표 후보 조회·제출 — 피어 투표 설계 (종료 시각이 지나면 자동 오픈)
 SurveyNotOpen = _error(403, "SURVEY_NOT_OPEN", "일정이 끝나면 투표할 수 있어요.")
 
@@ -157,7 +157,7 @@ SurveyNotOpen = _error(403, "SURVEY_NOT_OPEN", "일정이 끝나면 투표할 �
 # 범용. 문구를 바꿔 쓴다 ("팀을 찾을 수 없어요." 등) — deps.get_team_or_404 / get_event_or_404
 NotFound = _error(404, "NOT_FOUND", "찾을 수 없어요. 이미 지워졌을 수 있어요.")
 # 팀 코드 오타/재발급으로 만료 — S-06 팀 가입 (POST /teams/join)
-TeamCodeNotFound = _error(404, "TEAM_CODE_NOT_FOUND", "없는 팀 코드예요. 다시 확인해 주세요.")
+TeamCodeNotFound = _error(404, "TEAM_CODE_NOT_FOUND", "없는 팀 코드예요. 매니저에게 코드를 다시 확인해 주세요.")
 # 매니저가 아직 배정을 확정하지 않음 — S-14 플레이어 배정 결과 (GET /events/{id}/assignment/adopted)
 NotAdoptedYet = _error(404, "NOT_ADOPTED_YET", "아직 확정된 팀 배정이 없어요.")
 # 매니저 실력 정렬(F14)을 한 번도 저장하지 않음 — GET /teams/{id}/rankings/latest
@@ -182,7 +182,7 @@ IdentityAlreadyLinked = _error(409, "IDENTITY_ALREADY_LINKED", "다른 계정에
 AlreadyMerged = _error(409, "ALREADY_MERGED", "이미 기록을 이어 준 게스트예요.")
 # 같은 행을 두 요청이 동시에 만들거나 바꿈 (DB 유니크 위반 23505) — 아래 install_error_handlers 가 IntegrityError 에서 바꾼다.
 # 교착(40P01) · 직렬화 실패(40001)도 같은 코드지만 문구는 "잠시 뒤 다시 시도해 주세요." (같은 요청을 그대로 다시 보내면 된다)
-Conflict = _error(409, "CONFLICT", "동시에 처리된 요청이 있어요. 다시 시도해 주세요.")
+Conflict = _error(409, "CONFLICT", "다른 사람이 방금 같은 걸 바꿨어요. 새로고침한 뒤 다시 해 주세요.")
 RETRY_MESSAGE = "잠시 뒤 다시 시도해 주세요."
 
 # ---------------------------------------------------------------------------
@@ -193,17 +193,17 @@ TeamNotActive = _error(422, "TEAM_NOT_ACTIVE", "팀 인원이 5명 이상 모이
 # 참석자 < 팀 수 × 5 — 배정 실행/검증 (FR-33). 문구에 현재 인원을 넣어 던지는 것을 권장
 NotEnoughPlayers = _error(422, "NOT_ENOUGH_PLAYERS", "팀을 나누기에 참석 인원이 부족해요.")
 # rsvp_deadline 이 지난 뒤 본인 참석 응답 — PUT /events/{id}/attendance (FR-09)
-RsvpClosed = _error(422, "RSVP_CLOSED", "응답이 마감되었어요.")
+RsvpClosed = _error(422, "RSVP_CLOSED", "응답이 마감됐어요.")
 # 같은 팀끼리 교체, 후보안에 없는 선수, LOCK 그룹을 깨는 교체 등 — PATCH /assignments/candidates/{id}
 InvalidSwap = _error(422, "INVALID_SWAP", "이렇게는 바꿀 수 없어요.")
 # 팀의 유일한 MANAGER 를 PLAYER 로 내리려 함 — PATCH /teams/{id}/players/{pid}/role (팀이 관리 불능이 됨)
-CannotDemoteLastManager = _error(422, "CANNOT_DEMOTE_LAST_MANAGER", "매니저가 한 명뿐이라 권한을 뺄 수 없어요.")
+CannotDemoteLastManager = _error(422, "CANNOT_DEMOTE_LAST_MANAGER", "매니저가 1명뿐이라 권한을 뺄 수 없어요.")
 # 정렬·제약 등에 다른 팀의 player_id 가 섞임 — POST /teams/{id}/rankings 등
 PlayerNotInTeam = _error(422, "PLAYER_NOT_IN_TEAM", "이 팀에 없는 사람이 섞여 있어요.")
 # 전술 자리 배치에 그날 그 팀(블랙/화이트/레드)이 아닌 선수를 앉힘 — PUT /events/{id}/tactics/{play_key}/slots
 PlayerNotInSquad = _error(422, "PLAYER_NOT_IN_SQUAD", "이 팀에 배정되지 않은 사람이 섞여 있어요.")
 # 쿼터 기록이 있는 일정에서 배정 실행 · 확정 · 수정 — 기록이 그날 편성을 근거로 하므로 (POST /events/{id}/assignments 등)
-AssignmentLocked = _error(422, "ASSIGNMENT_LOCKED", "경기 기록이 있는 일정은 팀을 다시 짤 수 없어요. 쿼터 기록을 먼저 지워 주세요.")
+AssignmentLocked = _error(422, "ASSIGNMENT_LOCKED", "경기 기록이 있는 일정은 팀을 다시 나눌 수 없어요. 경기 기록을 먼저 지워 주세요.")
 # 직접 만든 전술이 재생 가능성 검사(docs/07 FR-41)를 통과하지 못함 — details[] 에 "N단계: …" 문장
 PlayNotPlayable = _error(422, "PLAY_NOT_PLAYABLE", "이대로는 전술판에서 재생할 수 없어요.")
 # 병합 방향이 게스트 → 회원이 아님 (회원끼리, 게스트끼리 등) — POST /players/{id}:merge
@@ -216,7 +216,7 @@ LockGroupTooLarge = _error(422, "LOCK_GROUP_TOO_LARGE", "묶은 인원이 한 �
 # 같은 페어가 LOCK 과 SEPARATE 에 동시 지정, 또는 같은 LOCK 그룹의 두 사람이 서로 다른 팀에 PIN
 ConstraintConflict = _error(422, "CONSTRAINT_CONFLICT", "서로 어긋나는 조건이 있어요.")
 # SEPARATE 그래프를 팀 수(T)개의 색으로 칠할 수 없음 (예: 2팀인데 3명을 전부 갈라놓기)
-SeparateInfeasible = _error(422, "SEPARATE_INFEASIBLE", "갈라놓기 조건을 지킬 수 있는 팀 구성이 없어요.")
+SeparateInfeasible = _error(422, "SEPARATE_INFEASIBLE", "갈라놓기를 모두 지키면서 팀을 나눌 수 없어요. 갈라놓기를 하나 풀어 주세요.")
 # 슈퍼노드 크기 조합으로 각 팀 정원을 정확히 채우는 부분합이 없음 ("4명 그룹과 5명 그룹으로 6명씩 두 팀 불가")
 LockPartitionInfeasible = _error(422, "LOCK_PARTITION_INFEASIBLE", "지금 묶음으로는 두 팀 인원을 맞출 수 없어요.")
 # 한 팀 칸에 PIN 된 인원 > 정원 — S-12 에서는 드롭 자체를 거부하지만 API 도 막는다
@@ -226,9 +226,9 @@ SquadOverflow = _error(422, "SQUAD_OVERFLOW", "팀 정원을 넘겨 배치할 �
 # 429 / 500
 # ---------------------------------------------------------------------------
 # 과다 요청 — app/core/ratelimit.check 가 던진다 (로그인 · 비밀번호 찾기 · AI 호출 · 전술 댓글 등)
-RateLimited = _error(429, "RATE_LIMITED", "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.")
+RateLimited = _error(429, "RATE_LIMITED", "너무 자주 눌렀어요. 1분쯤 뒤에 다시 해 주세요.")
 # 예상 못한 서버 오류. 실제 스택은 로그에만 남기고 클라이언트에는 이 문구만
-InternalError = _error(500, "INTERNAL_ERROR", "문제가 생겼어요. 잠시 후 다시 시도해 주세요.")
+InternalError = _error(500, "INTERNAL_ERROR", "문제가 생겼어요. 잠시 뒤 다시 해 주세요.")
 
 
 def install_error_handlers(app: FastAPI) -> None:

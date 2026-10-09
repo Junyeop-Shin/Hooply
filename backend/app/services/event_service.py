@@ -316,7 +316,7 @@ def set_attendance(
 ) -> EventAttendance:
     """매니저/등록자 대리 등록. RSVP 마감과 무관. flush 까지 (commit 은 호출자)."""
     if player.team_id != event.team_id or player.status != PlayerStatus.ACTIVE:
-        raise errors.NotFound("이 팀의 참가자가 아닙니다.")
+        raise errors.NotFound("이 팀 사람이 아니에요.")
     row = _get_row(db, event.id, player.id) or EventAttendance(event_id=event.id, player_id=player.id)
     row.status = status
     if note is not None:
@@ -446,7 +446,7 @@ def register_guest(db: Session, event: Event, me: Player, by: User, body: EventG
     if body.existing_player_id is not None:
         guest = guest_service.require_guest(db, body.existing_player_id)
         if guest.team_id != event.team_id or guest.merged_into_player_id is not None:
-            raise errors.NotFound("이 팀의 게스트가 아닙니다.")
+            raise errors.NotFound("이 팀 게스트가 아니에요.")
         # 재방문: 등록자가 새 정보를 주면 덮어쓴다 (등급은 지정했을 때만)
         guest_service.update_guest(
             db, guest, by, display_name=None, skill_grade=body.skill_grade,

@@ -1,13 +1,13 @@
 /**
  * S-03 온보딩 설문 (survey-feature-spec 8절, v2 문항).
- * 문항 카드 1개씩 · 진행률 바 · 이전/다음 · 응답 전엔 다음 비활성 · 마지막은 [제출하기].
+ * 문항 카드 1개씩 · 진행률 바 · 이전/다음 · 응답 전엔 다음 비활성 · 마지막은 [설문 마치기].
  * 단일선택 문항은 고르는 즉시 다음으로 넘어간다. group_label 이 같은 문항(D3A/D3B)은 한 화면에 묶는다.
  * D 섹션 다중선택(가능 포지션)은 고른 순서가 선호 순서이므로 칩에 순번을 표시한다.
  * 이미 제출했으면 홈으로 리다이렉트.
  *
- * SelfRankPage — "이 동호회에서 내 실력 위치" (구 E3). 팀 가입 직후 팀별로 한 번 묻는다.
+ * SelfRankPage — "이 팀에서 내 실력 위치" (구 E3). 팀 가입 직후 팀별로 한 번 묻고, 프로필에서 다시 고칠 수 있다.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { STATIC_QUERY } from '../queryClient'
@@ -77,6 +77,10 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
   const last = step === steps.length - 1
 
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
+  // 문항이 (저절로) 바뀌면 새 문항 제목으로 포커스를 옮긴다 — 스크린리더 · 키보드가 지난 문항에 남지 않게. 처음 들어올 때는 두지 않는다
+  const heading = useRef<HTMLHeadingElement>(null)
+  const firstStep = useRef(true)
+  useEffect(() => { if (firstStep.current) firstStep.current = false; else heading.current?.focus() }, [step])
 
   const submit = useMutation({
     mutationFn: () => {
@@ -94,7 +98,7 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
       qc.invalidateQueries({ queryKey: ['profile'] })
       nav('/', { replace: true })
     },
-    onError: (e) => setError(errorMessageWithDetails(e, '제출에 실패했어요.')),
+    onError: (e) => setError(errorMessageWithDetails(e, '설문을 저장하지 못했어요. 다시 시도해 주세요.')),
   })
 
   /** 답을 반영하고, 이 화면의 단일선택 문항이 모두 채워졌으면 잠깐 뒤 자동으로 다음 화면으로 */
@@ -112,23 +116,24 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
     <Screen>
       <TopBar title="실력 설문" back={step === 0 ? '/' : undefined} />
       <div className="h-1.5 bg-line">
-        <div className="h-full bg-court-500 transition-all" style={{ width: `${((step + 1) / steps.length) * 100}%` }} />
+        <div className="h-full bg-brand transition-all" style={{ width: `${((step + 1) / steps.length) * 100}%` }} />
       </div>
       <Content>
         <p className="text-xs font-semibold text-brand-ink">
           {SECTION_NAME[current[0].section] ?? current[0].section} · {step + 1}/{steps.length}
         </p>
-        {current[0].group_label && <h2 className="text-xl font-bold text-ink">{current[0].group_label}</h2>}
-        {current.map((q) => (
-          <QuestionCard key={q.id} q={q} compact={current.length > 1} answer={answers[q.id]} onChange={(a) => answer(q, a)} />
+        {current[0].group_label && <h2 ref={heading} tabIndex={-1} className="text-xl font-bold text-ink outline-none">{current[0].group_label}</h2>}
+        {current.map((q, i) => (
+          <QuestionCard key={q.id} q={q} titleRef={i === 0 && !current[0].group_label ? heading : undefined} compact={current.length > 1} answer={answers[q.id]} onChange={(a) => answer(q, a)} />
         ))}
+        {!last && current.every(isSingle) && <p className="text-xs text-muted">고르면 다음 질문으로 넘어가요.</p>}
         {error && <Alert>{error}</Alert>}
       </Content>
       <BottomAction>
         <div className="flex gap-2">
           <Button variant="ghost" className="shrink-0 whitespace-nowrap px-4" onClick={() => setStep(step - 1)} disabled={step === 0}>이전</Button>
           {last ? (
-            <Button full disabled={!stepDone} loading={submit.isPending} onClick={() => submit.mutate()}>제출하기</Button>
+            <Button full disabled={!stepDone} loading={submit.isPending} onClick={() => submit.mutate()}>설문 마치기</Button>
           ) : (
             <Button full disabled={!stepDone} onClick={() => setStep(step + 1)}>다음</Button>
           )}
@@ -138,7 +143,7 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
   )
 }
 
-function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; answer?: Answer; onChange: (a: Answer) => void; compact: boolean }) {
+function QuestionCard({ q, answer, onChange, compact, titleRef }: { q: SurveyQuestion; answer?: Answer; onChange: (a: Answer) => void; compact: boolean; titleRef?: Ref<HTMLHeadingElement> }) {
   const picked = answer?.optionIds ?? []
   const multi = q.answer_type === 'MULTI_CHIP'
   const ordered = multi && q.section === 'D' // 가능 포지션: 고른 순서 = 선호 순서
@@ -148,7 +153,7 @@ function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; ans
 
   return (
     <div className={compact ? 'rounded-2xl border border-line bg-surface p-4' : ''}>
-      <h2 className={compact ? 'text-base font-bold text-ink' : 'text-xl font-bold text-ink'}>{q.question_text}</h2>
+      <h2 ref={titleRef} tabIndex={-1} className={`outline-none ${compact ? 'text-base font-bold text-ink' : 'text-xl font-bold text-ink'}`}>{q.question_text}</h2>
       {q.help_text && <p className="mt-1 text-sm text-muted">{q.help_text}</p>}
       <div className={`mt-3 ${chip ? 'flex flex-wrap gap-2' : 'space-y-2'}`}>
         {q.answer_type === 'STEPPER' ? (
@@ -163,9 +168,9 @@ function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; ans
                 type="button"
                 onClick={() => toggle(o.id)}
                 aria-pressed={on}
-                className={`relative min-h-11 rounded-full border px-4 text-sm font-semibold ${on ? 'border-brand bg-brand text-on-brand' : 'border-line-strong bg-surface text-ink'}`}
+                className={`relative min-h-11 rounded-full border px-4 text-sm font-semibold ${on ? 'border-inverse bg-inverse text-on-inverse' : 'border-line-strong bg-surface text-ink'}`}
               >
-                {rank > 0 && <span className="absolute -left-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-navy-800 text-[11px] font-bold text-white">{rank}</span>}
+                {rank > 0 && <span className="absolute -left-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-on-brand">{rank}</span>}
                 {o.label}
               </button>
             ) : (
@@ -173,6 +178,7 @@ function QuestionCard({ q, answer, onChange, compact }: { q: SurveyQuestion; ans
                 key={o.id}
                 type="button"
                 onClick={() => toggle(o.id)}
+                aria-pressed={on}
                 className={`block w-full rounded-xl border px-4 py-3.5 text-left text-[15px] ${on ? 'border-court-500 bg-brand-soft font-semibold text-ink' : 'border-line bg-surface text-ink-2'}`}
               >
                 <span className="mr-2 text-xs text-faint">{i + 1}</span>{o.label}
@@ -191,13 +197,13 @@ function NumberStepper({ value, onChange }: { value?: number; onChange: (v: numb
   return (
     <div className="flex items-center justify-center gap-4 rounded-2xl border border-line bg-surface py-4">
       <button type="button" aria-label="1 줄이기" onClick={() => onChange(Math.max(120, v - 1))} className="size-12 rounded-xl bg-sunken text-2xl font-bold">−</button>
-      <input type="number" inputMode="numeric" aria-label="값" value={value ?? ''} placeholder="175" onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} className="w-28 bg-transparent text-center text-4xl font-black text-ink outline-none" />
+      <input type="number" inputMode="numeric" aria-label="값" value={value ?? ''} placeholder="175" onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} className="w-28 bg-transparent text-center text-4xl font-black text-ink outline-none focus-visible:rounded-lg focus-visible:outline-2 focus-visible:outline-brand" />
       <button type="button" aria-label="1 늘리기" onClick={() => onChange(Math.min(250, v + 1))} className="size-12 rounded-xl bg-brand-soft text-2xl font-bold text-brand-ink">+</button>
     </div>
   )
 }
 
-/* ---------- 팀 가입 직후: 이 동호회에서 내 실력 위치 (구 E3) ---------- */
+/* ---------- 팀 가입 직후 · 프로필에서 고치기: 이 팀에서 내 실력 위치 (구 E3) ---------- */
 const LEVELS: SelfRankLevel[] = ['TOP10', 'TOP30', 'MID', 'BOT30', 'BOT10']
 
 export function SelfRankPage() {
@@ -220,21 +226,24 @@ export function SelfRankPage() {
     meta: { inlineError: true },
   })
   const current = picked ?? mine?.self_rank_level ?? null
+  const answered = !!mine?.self_rank_level
 
   return (
     <Screen>
       <TopBar title={mine ? mine.team_name : '내 실력 위치'} back={`/teams/${id}`} />
-      <div className="h-1.5 bg-line"><div className="h-full w-full bg-court-500" /></div>
+      {/* 이미 답한 적이 있으면(프로필의 "고치기"로 들어옴) 가입 직후의 진행 막대 · "마지막 질문" 은 보여 주지 않는다 */}
+      {!answered && <div className="h-1.5 bg-line"><div className="h-full w-full bg-brand" /></div>}
       <Content>
-        <p className="text-xs font-semibold text-brand-ink">팀 가입 완료 · 마지막 한 문항</p>
-        <h2 className="text-xl font-bold text-ink">이 동호회에서 본인의 실력 위치는?</h2>
-        <p className="text-sm text-muted">점수가 아니라 이 팀 안에서의 위치예요. 팀 배정 정확도에 가장 큰 영향을 주는 문항이라 팀마다 따로 물어봐요. 나중에 바꿀 수 있어요.</p>
+        <p className="text-xs font-semibold text-brand-ink">{answered ? '내 위치 고치기' : '팀 가입 완료 · 마지막 질문 하나'}</p>
+        <h2 className="text-xl font-bold text-ink">이 팀에서 내 실력은 어디쯤인가요?</h2>
+        <p className="text-sm text-muted">점수가 아니라 이 팀 안에서의 위치예요. 팀을 고르게 나누는 데 가장 중요한 질문이라 팀마다 따로 물어봐요. 나중에 바꿀 수 있어요.</p>
         <div className="space-y-2">
           {LEVELS.map((lv, i) => (
             <button
               key={lv}
               type="button"
               disabled={m.isPending}
+              aria-pressed={current === lv}
               onClick={() => { setPicked(lv); m.mutate(lv) }}
               className={`block w-full rounded-xl border px-4 py-3.5 text-left text-[15px] ${current === lv ? 'border-court-500 bg-brand-soft font-semibold text-ink' : 'border-line bg-surface text-ink-2'}`}
             >
@@ -245,7 +254,7 @@ export function SelfRankPage() {
         {m.isError && <Alert>{errorMessage(m.error, '저장하지 못했어요.')}</Alert>}
       </Content>
       <BottomAction>
-        <Button variant="ghost" full onClick={done}>나중에 할게요</Button>
+        <Button variant="ghost" full onClick={done}>{answered ? '그대로 둘게요' : '나중에 할게요'}</Button>
       </BottomAction>
     </Screen>
   )

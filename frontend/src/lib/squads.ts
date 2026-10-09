@@ -21,7 +21,7 @@ export const SQUAD_STYLE: Record<SquadTone, { card: string; sub: string; dot: st
   },
   red: {
     card: 'border-team-red bg-team-red text-team-red-ink [color-scheme:dark]',
-    sub: 'text-team-red-sub', dot: 'bg-team-red', picked: 'bg-white/30', soft: 'bg-white/15',
+    sub: 'text-team-red-sub', dot: 'bg-team-red', picked: 'bg-black/25', soft: 'bg-white/15',
   },
 }
 

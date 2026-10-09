@@ -260,7 +260,7 @@ def merge(db: Session, guest: Player, into_player_id: int) -> Player:
 
 def unmerge(db: Session, guest: Player) -> Player:
     if guest.merged_into_player_id is None:
-        raise errors.NotFound("병합된 게스트가 아닙니다.")
+        raise errors.NotFound("기록을 이어 준 적이 없는 게스트예요.")
     lock_team_stats(db, guest.team_id)  # 쓰기 전에 (잠금 순서)
     guest.merged_into_player_id = None
     guest.status = PlayerStatus.ACTIVE
@@ -353,7 +353,7 @@ def claim(db: Session, user: User, guest: Player, accept: bool) -> Player | None
     if me is None:
         raise errors.NotAMember("이 팀에 속해 있어야 기록을 가져올 수 있어요.")
     if _norm_name(guest.display_name) not in {_norm_name(user.name), _norm_name(user.nickname)}:
-        raise errors.ForbiddenRole("이름이 같은 게스트 기록만 가져올 수 있어요. 다른 이름이면 매니저에게 병합을 요청해 주세요.")
+        raise errors.ForbiddenRole("이름이 같은 게스트 기록만 가져올 수 있어요. 다른 이름이면 매니저에게 기록을 이어 달라고 말해 주세요.")
     existing = db.scalar(select(GuestClaim).where(GuestClaim.guest_player_id == guest.id, GuestClaim.user_id == user.id))
     if existing is None:
         existing = GuestClaim(guest_player_id=guest.id, user_id=user.id, status=ClaimStatus.DECLINED)

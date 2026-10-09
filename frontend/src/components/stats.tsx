@@ -9,7 +9,7 @@ import { Card } from './ui'
 
 /** 회차별 평균 마진 막대 (0 기준 좌우). 실력 지표가 아니라 그 회차의 결과라는 점을 라벨로 명시 */
 export function MarginTrend({ points }: { points: MarginPoint[] }) {
-  if (points.length === 0) return <Card><p className="text-sm text-faint">아직 기록된 쿼터가 없어요.</p></Card>
+  if (points.length === 0) return <Card><p className="text-sm text-faint">매니저가 경기 뒤에 기록하면 여기에 보여요.</p></Card>
   const max = Math.max(3, ...points.map((m) => Math.abs(Number(m.avg_normalized_margin))))
   return (
     <Card className="space-y-1.5">
@@ -19,13 +19,13 @@ export function MarginTrend({ points }: { points: MarginPoint[] }) {
         const w = Math.round((Math.abs(v) / max) * 50)
         return (
           <div key={m.event_id} className="flex items-center gap-2 text-xs">
-            <span className="w-12 shrink-0 text-muted">{m.event_date.slice(5).replace('-', '/')}</span>
+            <span className="w-12 shrink-0 text-muted">{m.event_date.slice(5).split('-').map(Number).join('/')}</span>
             <div className="relative h-4 flex-1 rounded bg-sunken">
               <div className="absolute inset-y-0 left-1/2 w-px bg-line-strong" />
-              <div className={`absolute inset-y-0.5 rounded ${v >= 0 ? 'left-1/2 bg-emerald-500' : 'right-1/2 bg-rose-500'}`} style={{ width: `${Math.max(w, v === 0 ? 0 : 2)}%` }} />
+              <div className={`absolute inset-y-0.5 rounded ${v >= 0 ? 'left-1/2 bg-ok-ink' : 'right-1/2 bg-danger-ink'}`} style={{ width: `${Math.max(w, v === 0 ? 0 : 2)}%` }} />
             </div>
             <span className={`w-12 shrink-0 text-right font-semibold ${v > 0 ? 'text-ok-ink' : v < 0 ? 'text-danger-ink' : 'text-muted'}`}>{v > 0 ? '+' : ''}{v.toFixed(1)}</span>
-            <span className="w-10 shrink-0 text-right text-faint">{m.wins}승{m.losses}패</span>
+            <span className="w-12 shrink-0 whitespace-nowrap text-right text-faint">{m.wins}승 {m.losses}패</span>
           </div>
         )
       })}
@@ -65,7 +65,7 @@ export function QuarterList({ records }: { records: QuarterRecord[] }) {
         const win = r.raw_margin > 0
         return (
           <div key={`${r.event_id}-${r.quarter_no}`} className="flex items-center gap-3 px-4 py-2 text-xs">
-            <span className="w-12 shrink-0 text-muted">{r.event_date.slice(5).replace('-', '/')}</span>
+            <span className="w-12 shrink-0 text-muted">{r.event_date.slice(5).split('-').map(Number).join('/')}</span>
             <span className="w-10 shrink-0 font-semibold text-ink">{r.quarter_no}쿼터</span>
             {/* 칸(side)이 아니라 내가 뛴 팀 — 3팀인 날 레드가 블랙 · 화이트 칸에 설 수 있다 */}
             <span className={`inline-flex w-12 shrink-0 items-center justify-center rounded-full border py-0.5 text-[10px] font-semibold ${squadStyle(squadOf(r)).card}`}>{squadName(squadOf(r))}</span>

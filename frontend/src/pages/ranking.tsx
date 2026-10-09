@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { errorMessage } from '../api/client'
+import { confirm, toast } from '../store/feedback'
 import { moveItem, tapReorder } from '../lib/reorder'
 import { rankingsApi } from '../api/assignments'
 import { teamsApi } from '../api/teams'
@@ -23,7 +24,7 @@ export function RankingPage() {
   const [order, setOrder] = useState<PlayerCard[] | null>(null)
   const [drag, setDrag] = useState<number | null>(null)
   const [picked, setPicked] = useState<number | null>(null)  // 눌러서 집은 카드 (휴대폰)
-  const [msg, setMsg] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)  // 순서를 바꿨는지 — 저장하지 않고 나갈 때 묻는다
 
   // 초기 순서: 활성 정렬이 있으면 그 순서(+ 새로 들어온 사람은 뒤에), 없으면 실력순
   useEffect(() => {
@@ -39,33 +40,32 @@ export function RankingPage() {
   const save = useMutation({
     mutationFn: () => rankingsApi.create(id, order!.map((p) => p.id)),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['team', id] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] }); goBack(`/teams/${id}/members`) },
-    onError: (e) => setMsg(errorMessage(e, '저장하지 못했어요.')),
+    onError: (e) => toast(errorMessage(e, '저장하지 못했어요.'), 'error'),
   })
 
   const move = (i: number, j: number) => {
     if (!order || j < 0 || j >= order.length) return
-    setOrder(moveItem(order, i, j)); setPicked(null)
+    setOrder(moveItem(order, i, j)); setPicked(null); setDirty(true)
   }
   const tap = (i: number) => {
     if (!order) return
     const next = tapReorder({ order, picked }, i)
-    setOrder(next.order); setPicked(next.picked)
+    setOrder(next.order); setPicked(next.picked); if (next.order !== order) setDirty(true)
   }
 
   return (
     <Screen>
-      <TopBar title="실력 정렬" back={`/teams/${id}`} />
+      <TopBar title="실력 정렬" back={`/teams/${id}`} beforeBack={async () => !dirty || confirm({ title: '저장하지 않고 나갈까요?', body: '바꾼 순서가 사라져요.', confirmLabel: '나가기', cancelLabel: '계속 정렬', danger: true })} />
       <Content>
         <Alert kind="info">
-          잘하는 사람이 <b>위</b>로 오게 놓아 주세요. 설문과 반반 섞여 처음 실력이 되고, 저장본은 남아서 되돌릴 수 있어요.
-          {latest.data && <span className="mt-1 block text-xs text-muted">지금 쓰는 순서: {new Date(latest.data.ranked_at).toLocaleDateString('ko-KR')} 저장본</span>}
+          잘하는 사람이 <b>위</b>로 오게 놓아 주세요. 설문과 반반 섞여 처음 실력이 되고, 저장한 순서는 남아서 되돌릴 수 있어요.
+          {latest.data && <span className="mt-1 block text-xs text-muted">지금 쓰는 순서는 {new Date(latest.data.ranked_at).getMonth() + 1}/{new Date(latest.data.ranked_at).getDate()}에 저장했어요.</span>}
         </Alert>
-        {msg && <Alert>{msg}</Alert>}
         {/* 집은 상태를 알리는 한 줄 — 화면을 내려도 보이게 위에 붙여 둔다 */}
         {order && (
           <p className="sticky top-14 z-[5] -mx-1 rounded-xl bg-canvas/95 px-2 py-1.5 text-xs text-muted" aria-live="polite">
             {picked !== null
-              ? <><b className="text-brand-ink">{order[picked].display_name}</b>님을 집었어요. 놓을 자리의 카드를 누르세요. 다시 누르면 취소돼요.</>
+              ? <><b className="text-brand-ink">{order[picked].display_name}</b>님을 집었어요. 놓을 자리의 카드를 눌러 주세요. 다시 누르면 내려놓아요.</>
               : '카드를 누르면 집어요. 그다음 놓을 자리를 누르면 옮겨져요.'}
           </p>
         )}
@@ -93,7 +93,7 @@ export function RankingPage() {
                   <Avatar name={p.display_name} src={p.profile_image_url} size="sm" />
                   <span className="truncate font-semibold text-ink">{p.display_name}</span>
                   {p.kind === 'GUEST' && <Badge>게스트</Badge>}
-                  <span className="ml-auto text-[11px] text-faint">{p.primary_position ?? ''}</span>
+                  <span className="ml-auto text-[11px] text-muted">{p.primary_position ?? ''}</span>
                   <GradeDot grade={p.skill_grade} />
                 </div>
                 <button onClick={() => move(i, i - 1)} disabled={i === 0} aria-label={`${p.display_name} 한 칸 위로`} className="size-11 shrink-0 rounded-lg bg-sunken font-bold disabled:opacity-30">↑</button>

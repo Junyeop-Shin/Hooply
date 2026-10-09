@@ -2,8 +2,8 @@
  * S-15 쿼터 기록 (F8). 설계서 2.4절·2.5절: 기록은 매니저가 **활동이 끝난 뒤** 한 번에 입력한다.
  *
  * - 쿼터 카드 세로 누적형: 카드마다 스코어 스테퍼 2개 + 사이드별 출전 5명 체크 그리드 + 쿼터 길이(기본 8분, 1~10분).
- * - 체크 그리드 순서: 그 팀에 배정된 사람이 맨 위, 그 아래에 **다른 팀 사람**(경기 중 팀을 옮긴 경우 여기서 바로 체크),
- *   카드 맨 아래에 두 팀 공통의 "새 멤버 추가" (늦게 온 회원 · 당일 처음 온 게스트). 잘못 넣은 사람도 그 패널에서 뺀다.
+ * - 체크 그리드 순서: 그 팀에 배정된 사람이 맨 위, 그 아래에 접힌 **다른 팀 사람**(경기 중 팀을 옮긴 경우 펴서 체크),
+ *   카드 맨 아래에 두 팀 공통의 "명단에 사람 넣기" (늦게 온 회원 · 당일 처음 온 게스트). 잘못 넣은 사람도 그 패널에서 뺀다.
  *   별도의 명단 요약 섹션은 두지 않는다 — 확정 배정은 일정 화면에서 보고, 여기서는 체크 칸 자체가 명단이다.
  * - 출전 명단은 확정 배정을 기본값으로 삼되 그날 실제로 온 사람에 맞춰 고칠 수 있다 (2.5절 "인원이 매번 가변").
  *   어느 쿼터에 이미 체크된 사람은 그 사이드 명단에서 자동으로 유지된다 — 옮겨도 지난 쿼터 기록이 깨지지 않는다.
@@ -17,7 +17,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { errorMessage, errorMessageWithDetails as errMsg } from '../api/client'
-import { confirm } from '../store/feedback'
+import { confirm, toast } from '../store/feedback'
 import { assignmentsApi } from '../api/assignments'
 import { eventsApi } from '../api/events'
 import { quartersApi } from '../api/quarters'
@@ -67,9 +67,9 @@ export function QuartersPage() {
   const saved = useQuery({ queryKey: ['events', id, 'quarters'], queryFn: () => quartersApi.list(id) })
   const [quarters, setQuarters] = useState<Draft[] | null>(null)
   const [extra, setExtra] = useState<Extra>(emptyExtra)
-  const [msg, setMsg] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
-  const [addFor, setAddFor] = useState<number | null>(null)  // 새 멤버 추가 패널이 열린 쿼터 카드 index
+  const [addFor, setAddFor] = useState<number | null>(null)  // 명단에 사람 넣기 패널이 열린 쿼터 카드 index
+  const [openOther, setOpenOther] = useState<Record<string, boolean>>({})  // "다른 팀" 명단을 편 칸 (쿼터 index + 칸)
 
   const isManager = ev.data?.my_role === 'MANAGER'
   const teamId = ev.data?.team_id
@@ -150,7 +150,9 @@ export function QuartersPage() {
         const parsed = JSON.parse(raw) as Draft[] | { quarters: Draft[]; extra?: Extra & { black?: number[]; white?: number[] }; base?: string }
         const qs = (Array.isArray(parsed) ? parsed : parsed.quarters)?.map((q) => ({ ...q, home: q.home ?? 1, away: q.away ?? 2 }))  // 예전 형식(배열 · 대진 없음)도 읽는다
         const draftBase = Array.isArray(parsed) ? undefined : parsed.base
-        if (qs?.length && (!hasSaved || (draftBase === serverBase && JSON.stringify(qs) !== JSON.stringify(fromServer)))) {
+        const hasExtra = !Array.isArray(parsed) && Object.values(parsed.extra ?? {}).some((v) => v?.length)
+        // 고친 것이 없는 초안(만든 그대로의 빈 쿼터 · 서버 기록 그대로)은 되살리지 않는다 — "되살렸어요" 가 거짓으로 뜬다
+        if (qs?.length && (!hasSaved || draftBase === serverBase) && (hasExtra || !draftMatchesServer(qs, fromServer))) {
           setQuarters(qs)
           if (!Array.isArray(parsed) && parsed.extra) {
             const e = parsed.extra
@@ -165,13 +167,22 @@ export function QuartersPage() {
   }, [quarters, saved.isSuccess, adopted.isLoading, fromServer, serverBase, id, seeded, adoptServer])
 
   // 임시 저장 — 누를 때마다 쓰지 않고 입력이 0.3초 멈추면 한 번. 바탕이 된 서버 기록(base)을 같이 적는다 — 초안을 만들 때의 것
+  const flush = useRef(() => {})
   useEffect(() => {
     if (!quarters || !isManager) return
-    const t = setTimeout(() => {
+    const write = () => {
       try { localStorage.setItem(draftKey(id), JSON.stringify({ quarters, extra, base: base.current?.key ?? serverBase })) } catch { /* ignore */ }
-    }, 300)
+    }
+    flush.current = write
+    const t = setTimeout(write, 300)
     return () => clearTimeout(t)
   }, [quarters, extra, id, isManager, serverBase])
+  // 0.3초가 되기 전에 화면을 떠나거나 창을 닫아도 마지막 입력이 남게 — 떠날 때 한 번 더 쓴다
+  useEffect(() => {
+    const f = () => flush.current()
+    window.addEventListener('pagehide', f)
+    return () => { window.removeEventListener('pagehide', f); f() }
+  }, [])
 
   const save = useMutation({
     mutationFn: () => {
@@ -183,6 +194,7 @@ export function QuartersPage() {
       return quartersApi.bulkSave(id, payload)
     },
     onSuccess: () => {
+      flush.current = () => {}  // 화면을 떠날 때 방금 지운 임시 저장을 다시 쓰지 않게
       try { localStorage.removeItem(draftKey(id)) } catch { /* ignore */ }
       base.current = null  // 저장한 것이 곧 서버 기록 — 뒤따르는 재조회를 "다른 기기의 변경" 으로 보지 않는다
       // 이 일정(쿼터 · 상태 · 쿼터 수)과 팀 일정 목록 · 리더보드 기간, 실력이 바뀐 팀원 · 프로필 · 기록
@@ -190,7 +202,7 @@ export function QuartersPage() {
       qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] })
       goBack(`/events/${id}`)
     },
-    onError: (e) => setMsg(errMsg(e, '저장하지 못했어요.')),
+    onError: (e) => toast(errMsg(e, '저장하지 못했어요.'), 'error'),
   })
 
   if (!ev.data && ev.isError) return <Screen><TopBar title="경기 기록" back={`/events/${id}`} /><Content><LoadError message={errorMessage(ev.error, '일정을 불러오지 못했어요.')} onRetry={() => ev.refetch()} retrying={ev.isFetching} /></Content></Screen>
@@ -198,7 +210,7 @@ export function QuartersPage() {
     return (
       <Screen>
         <TopBar title="경기 기록" back={`/events/${id}`} />
-        <Content><LoadError message={errorMessage(saved.error, '저장된 쿼터 기록을 불러오지 못했어요. 불러온 뒤에 고칠 수 있어요.')} onRetry={() => saved.refetch()} retrying={saved.isFetching} /></Content>
+        <Content><LoadError message={errorMessage(saved.error, '저장된 경기 기록을 불러오지 못했어요. 불러온 뒤에 고칠 수 있어요.')} onRetry={() => saved.refetch()} retrying={saved.isFetching} /></Content>
       </Screen>
     )
   }
@@ -232,7 +244,7 @@ export function QuartersPage() {
   const removeQuarter = async (i: number) => {
     const q = quarters[i]
     // 점수나 명단을 넣은 쿼터는 한 번 묻는다 (저장 전이라도 손으로 넣은 것이 사라진다)
-    if (!isPristineQuarter(q) && !(await confirm({ title: `${q.quarter_no}쿼터를 지울까요?`, body: `${nameOfSquad(q.home)} ${q.black_score} : ${q.white_score} ${nameOfSquad(q.away)} · 출전 명단도 함께 빠져요. 저장해야 서버 기록에 반영돼요.`, confirmLabel: '지우기', danger: true }))) return
+    if (!isPristineQuarter(q) && !(await confirm({ title: `${q.quarter_no}쿼터를 지울까요?`, body: `${nameOfSquad(q.home)} ${q.black_score} : ${q.white_score} ${nameOfSquad(q.away)} · 출전 명단도 함께 빠져요. 아래 저장을 눌러야 실제로 지워져요.`, confirmLabel: '지우기', danger: true }))) return
     setQuarters((qs) => qs!.filter((_, j) => j !== i).map((qq, j) => ({ ...qq, quarter_no: j + 1 })))
   }
   const addToSquad = (sq: number, pid: number) => setExtra((e) => ((e[sq] ?? []).includes(pid) ? e : { ...e, [sq]: [...(e[sq] ?? []), pid] }))
@@ -241,6 +253,12 @@ export function QuartersPage() {
   const removable = (sq: number, pid: number) =>
     (extra[sq] ?? []).includes(pid) && !quarters.some((q) => (q.home === sq && q.black.includes(pid)) || (q.away === sq && q.white.includes(pid)))
   const three = teamCount === 3
+  const discardDraft = async () => {
+    if (!(await confirm({ title: '되살린 입력을 버릴까요?', body: '저장된 기록으로 돌아가요. 버린 입력은 되찾을 수 없어요.', confirmLabel: '버리기', cancelLabel: '계속 입력', danger: true }))) return
+    try { localStorage.removeItem(draftKey(id)) } catch { /* ignore */ }
+    setRestored(false); setExtra(emptyExtra); setOpenOther({})
+    adoptServer(fromServer.length ? fromServer : [seeded()])
+  }
 
   // ---- 플레이어: 읽기 전용 ----
   if (!isManager) {
@@ -249,11 +267,11 @@ export function QuartersPage() {
       <Screen>
         <TopBar title="경기 기록" back={`/events/${id}`} />
         <Content>
-          {!s || s.quarter_count === 0 ? <Alert kind="info">아직 기록된 쿼터가 없어요.</Alert> : (
+          {!s || s.quarter_count === 0 ? <Alert kind="info">매니저가 경기 뒤에 기록하면 여기에 보여요.</Alert> : (
             <>
               {(s.team_count ?? 2) === 3
                 ? <SquadTable squads={s.squads} quarters={s.quarter_count} />
-                : <ScoreBoard black={s.black_total} white={s.white_total} sub={`${s.quarter_count}쿼터 · 블랙 ${s.black_wins}승 / 화이트 ${s.white_wins}승`} />}
+                : <ScoreBoard black={s.black_total} white={s.white_total} sub={`${s.quarter_count}쿼터 · 블랙 ${s.black_wins}승 · 화이트 ${s.white_wins}승`} />}
               {saved.data!.items.map((q) => (
                 <Card key={q.id} className="space-y-1">
                   <div className="flex items-center justify-between"><p className="font-bold text-ink">{q.quarter_no}쿼터</p><p className="text-sm font-bold"><span className="text-ink">{nameOfSquad(q.home_squad_no)} {q.black_score}</span> : <span className="text-muted">{q.white_score} {nameOfSquad(q.away_squad_no)}</span></p></div>
@@ -275,8 +293,15 @@ export function QuartersPage() {
       <TopBar title="경기 기록" back={`/events/${id}`} right={three ? undefined : <span className="mr-2 text-sm font-bold"><span className="text-ink">블랙 {total.black}</span> <span className="text-faint">:</span> <span className="text-muted">{total.white} 화이트</span></span>} />
       <Content>
         <FirstTimeTip id="quarters" />
-        <p className="px-1 text-xs text-muted">경기 후 한 번에 입력하세요. 저장 전 내용은 이 기기에 임시 보관돼요.</p>
-        {restored && <Alert kind="info">저장하지 않은 입력을 되살렸어요.</Alert>}
+        <p className="px-1 text-xs text-muted">경기가 끝난 뒤 한 번에 입력해 주세요. 저장 전 내용은 이 기기에 임시로 보관돼요.</p>
+        {restored && (
+          <Alert kind="info">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0 flex-1">저장하지 않은 입력을 되살렸어요.</span>
+              <button type="button" onClick={discardDraft} className="-my-2 min-h-11 shrink-0 px-2 text-sm font-semibold underline underline-offset-2">버리고 저장된 기록 보기</button>
+            </div>
+          </Alert>
+        )}
         {conflict && (
           <Alert kind="warn">
             <div className="flex items-center justify-between gap-3">
@@ -287,7 +312,6 @@ export function QuartersPage() {
         )}
         {!hasAssignment && <Alert kind="warn">확정된 팀 배정이 없어 참석자 전원이 양쪽에 보여요. 팀마다 5명씩 골라 주세요.</Alert>}
         {three && <p className="px-1 text-xs text-muted">세 팀이에요. 쿼터마다 위의 <b>대진</b>에서 뛴 두 팀을 골라 주세요.</p>}
-        {msg && <Alert>{msg}</Alert>}
 
         {quarters.map((q, i) => (
           <Card key={q.quarter_no} className="space-y-3">
@@ -298,22 +322,22 @@ export function QuartersPage() {
                   <select
                     value={q.duration_min} onChange={(ev2) => update(i, { duration_min: Number(ev2.target.value) })}
                     aria-label={`${q.quarter_no}쿼터 길이(분)`}
-                    className="min-h-9 rounded-lg border border-line bg-surface px-1 text-center text-ink"
+                    className="min-h-11 rounded-lg border border-line-field bg-surface px-1 text-center text-base text-ink"
                   >
                     {DURATIONS.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>분
                 </label>
               </p>
-              {quarters.length > 1 && <button type="button" aria-label={`${q.quarter_no}쿼터 삭제`} className="-my-2 -mr-2 min-h-11 px-3 text-xs font-semibold text-danger-ink" onClick={() => removeQuarter(i)}>삭제</button>}
+              {quarters.length > 1 && <button type="button" aria-label={`${q.quarter_no}쿼터 지우기`} className="-my-2 -mr-2 min-h-11 px-3 text-xs font-semibold text-danger-ink" onClick={() => removeQuarter(i)}>지우기</button>}
             </div>
             {three && (
               <div className="flex items-center gap-2 text-xs" aria-label={`${q.quarter_no}쿼터 대진`}>
                 <span className="font-semibold text-muted">대진</span>
-                <select value={q.home} onChange={(e) => setMatchup(i, 'black', Number(e.target.value))} aria-label={`${q.quarter_no}쿼터 첫째 팀`} className="min-h-9 flex-1 rounded-lg border border-line bg-surface px-2 font-semibold text-ink">
+                <select value={q.home} onChange={(e) => setMatchup(i, 'black', Number(e.target.value))} aria-label={`${q.quarter_no}쿼터 첫째 팀`} className="min-h-11 flex-1 rounded-lg border border-line-field bg-surface px-2 text-base font-semibold text-ink">
                   {squadNos.map((sq) => <option key={sq} value={sq}>{nameOfSquad(sq)}</option>)}
                 </select>
                 <span className="text-faint">vs</span>
-                <select value={q.away} onChange={(e) => setMatchup(i, 'white', Number(e.target.value))} aria-label={`${q.quarter_no}쿼터 둘째 팀`} className="min-h-9 flex-1 rounded-lg border border-line bg-surface px-2 font-semibold text-ink">
+                <select value={q.away} onChange={(e) => setMatchup(i, 'white', Number(e.target.value))} aria-label={`${q.quarter_no}쿼터 둘째 팀`} className="min-h-11 flex-1 rounded-lg border border-line-field bg-surface px-2 text-base font-semibold text-ink">
                   {squadNos.map((sq) => <option key={sq} value={sq}>{nameOfSquad(sq)}</option>)}
                 </select>
               </div>
@@ -325,32 +349,35 @@ export function QuartersPage() {
             <div className="grid grid-cols-2 gap-2">
               {(['black', 'white'] as const).map((side) => {
                 const list = q[side]
-                const ok = list.length === 5
+                const ok = list.length === 5  // 모자라면 팀 색 위에서 읽히는 고정 빨강 — 화이트 칸은 어두운 화면에서도 밝아 danger-ink 가 안 맞는다
                 const otherSide: SideKey = side === 'black' ? 'white' : 'black'
                 const sq = side === 'black' ? q.home : q.away
                 const st = squadStyle(sq)
                 const ownIds = new Set((pool[sq] ?? []).map((p) => p.id))
                 // 다른 팀 사람들 — 팀을 옮긴 경우를 대비해 아래에 둔다
                 const others = uniq(squadNos.filter((x) => x !== sq).flatMap((x) => (pool[x] ?? []).map((p) => p.id))).filter((pid) => !ownIds.has(pid)).map((pid) => people.get(pid) ?? stub(pid, `#${pid}`))
+                const k = `${i}${side}`
+                const open = openOther[k] ?? others.some((p) => list.includes(p.id))  // 다른 팀 사람이 이미 체크돼 있으면 편 채로
                 const row = (p: PlayerCard, dim: boolean) => {
                   const on = list.includes(p.id)
                   const blocked = q[otherSide].includes(p.id)
                   return (
-                    <label key={p.id} className={`flex min-h-10 min-w-0 items-center gap-2 rounded-lg px-1 py-1.5 text-sm ${on ? st.picked : dim ? 'opacity-60' : ''} ${blocked ? 'opacity-30' : ''}`}>
-                      <input type="checkbox" checked={on} disabled={blocked} onChange={() => toggle(i, side, p.id)} className="size-5 shrink-0 accent-brand" />
+                    <label key={p.id} className={`flex min-h-10 min-w-0 items-center gap-2 rounded-lg px-1 py-1.5 text-sm ${on ? st.picked : dim ? st.sub : ''} ${blocked ? 'opacity-30' : ''}`}>
+                      {/* 다른 팀 사람을 건드리면 편 상태를 굳힌다 — 마지막 체크를 풀어도 명단이 갑자기 접히지 않게 */}
+                      <input type="checkbox" checked={on} disabled={blocked} onChange={() => { if (dim) setOpenOther((o) => ({ ...o, [k]: true })); toggle(i, side, p.id) }} className="size-5 shrink-0 accent-brand" />
                       <span className="truncate">{p.display_name}</span>
-                      {p.kind === 'GUEST' && <span className="text-[10px] opacity-60">G</span>}
+                      {p.kind === 'GUEST' && <span className={`text-[10px] ${on ? '' : st.sub}`}>G</span>}
                     </label>
                   )
                 }
                 return (
                   <div key={side} className={`rounded-xl border p-2 ${st.card}`}>
-                    <p className={`mb-1 text-[11px] font-bold ${ok ? '' : 'text-rose-400'}`}>{nameOfSquad(sq)} 출전 {list.length}/5</p>
+                    <p className={`mb-1 text-[11px] font-bold ${ok ? '' : sq === 2 ? 'text-rose-800' : 'text-rose-100'}`}>{nameOfSquad(sq)} 출전 {list.length}/5</p>
                     <div className="space-y-0.5" data-roster={`${side}-own`}>{(pool[sq] ?? []).map((p) => row(p, false))}</div>
                     {others.length > 0 && (
                       <>
-                        <p className="mb-0.5 mt-2 border-t border-current/20 pt-1.5 text-[10px] font-semibold opacity-60">다른 팀 · 옮겼으면 여기서 체크</p>
-                        <div className="space-y-0.5" data-roster={`${side}-other`}>{others.map((p) => row(p, true))}</div>
+                        <button type="button" aria-expanded={open} onClick={() => setOpenOther((o) => ({ ...o, [k]: !open }))} className={`mt-2 flex min-h-11 w-full items-center border-t border-current/20 text-left text-xs font-semibold ${st.sub}`}>다른 팀 사람 넣기 {open ? '▴' : '▾'}</button>
+                        {open && <div className="space-y-0.5" data-roster={`${side}-other`}>{others.map((p) => row(p, true))}</div>}
                       </>
                     )}
                   </div>
@@ -359,37 +386,42 @@ export function QuartersPage() {
             </div>
             <button
               type="button" onClick={() => setAddFor((v) => (v === i ? null : i))}
-              className="flex min-h-10 w-full items-center justify-center rounded-xl border border-dashed border-line-strong text-sm font-semibold text-ink-2"
+              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-dashed border-line-strong text-sm font-semibold text-ink-2"
             >
-              {addFor === i ? '닫기' : '＋ 새 멤버 추가'}
+              {addFor === i ? '닫기' : '+ 명단에 사람 넣기'}
             </button>
             {addFor === i && (
               <RosterEditor
                 eventId={id} people={people} pool={pool} attendIds={attendIds} squadNos={squadNos} nameOf={nameOfSquad}
                 onAdd={addToSquad} removable={removable} onRemove={dropFromSquad}
-                onError={(m) => setMsg(m)}
+                onError={(m) => toast(m, 'error')}
                 onGuestAdded={() => { qc.invalidateQueries({ queryKey: ['events', id, 'attendances'] }); qc.invalidateQueries({ queryKey: ['team', teamId, 'guests'] }) }}
               />
             )}
           </Card>
         ))}
-        <Button variant="ghost" full onClick={addQuarter}>+ 쿼터 추가 (앞 쿼터 명단 그대로)</Button>
-        {invalid.length > 0 && <Alert kind="warn">{invalid.map((q) => `${q.quarter_no}쿼터`).join(', ')}의 출전 인원이 5명이 아니에요.</Alert>}
+        <div>
+          <Button variant="ghost" full onClick={addQuarter}>+ 쿼터 추가</Button>
+          <p className="mt-1 px-1 text-center text-xs text-muted">앞 쿼터 명단을 그대로 가져와요.</p>
+        </div>
+        {invalid.length > 0 && <Alert kind="warn">{invalid.map((q) => `${q.quarter_no}쿼터`).join(', ')}의 출전이 5명이 아니에요.</Alert>}
         {saved.data && saved.data.summary.quarter_count > 0 && <PlayTime per={saved.data.summary.per_player} squadNos={squadNos} nameOf={nameOfSquad} />}
         <p className="px-1 text-[11px] text-faint">명단에 넣은 사람: {Object.values(extra).flat().length ? uniq(Object.values(extra).flat()).map(nameOf).join(' · ') : '없음'}</p>
       </Content>
       <BottomAction>
         {/* 서버 기록을 지금 받은 상태일 때만 저장한다 (불러오기에 실패한 채로 저장하면 서버 쿼터를 덮어쓴다) */}
         {saved.isError && <div className="mb-2"><LoadError message="저장된 기록을 다시 확인하지 못했어요. 다시 불러온 뒤 저장할 수 있어요." onRetry={() => saved.refetch()} retrying={saved.isFetching} /></div>}
+        {conflict ? <p className="mb-2 px-1 text-xs text-warn-ink">다른 기기에서 기록이 바뀌어 저장할 수 없어요. 위에서 다시 불러와 주세요.</p>
+          : invalid.length > 0 && <p className="mb-2 px-1 text-xs text-muted">쿼터마다 팀별로 5명씩 골라야 저장할 수 있어요.</p>}
         <Button full loading={save.isPending} disabled={invalid.length > 0 || quarters.length === 0 || !saved.isSuccess || conflict} onClick={() => save.mutate()}>
-          {saved.data && saved.data.summary.quarter_count > 0 ? '기록 수정 저장' : '경기 후 한 번에 저장'} ({quarters.length}쿼터)
+          {quarters.length}쿼터 {saved.data && saved.data.summary.quarter_count > 0 ? '고쳐서 저장' : '저장'}
         </Button>
       </BottomAction>
     </Screen>
   )
 }
 
-/** 새 멤버 추가 — 팀 회원·게스트를 어느 팀 명단에 넣을지 고르고, 당일 처음 온 게스트는 여기서 바로 등록한다. 두 팀 공통 */
+/** 명단에 사람 넣기 — 팀 회원·게스트를 어느 팀 명단에 넣을지 고르고, 당일 처음 온 게스트는 여기서 바로 등록한다. 두 팀 공통 */
 function RosterEditor({
   eventId, people, pool, attendIds, squadNos, nameOf, onAdd, removable, onRemove, onError, onGuestAdded,
 }: {
@@ -430,11 +462,11 @@ function RosterEditor({
 
   return (
     <div className="space-y-3 rounded-xl bg-surface-2 p-3">
-      <p className="text-xs text-muted">넣으면 그 팀 명단에 올라와요. 출전은 위에서 체크하세요.</p>
+      <p className="text-xs text-muted">넣으면 그 팀 명단에 올라와요. 출전은 위에서 체크해 주세요.</p>
       <div>
         <input
           value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름으로 찾기" aria-label="명단에 넣을 사람 찾기"
-          className="w-full rounded-xl border border-line px-3 py-2 text-sm"
+          className="min-h-11 w-full rounded-xl border border-line-field px-3 py-2 text-base"
         />
         <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
           {rows.map((p) => (
@@ -451,15 +483,15 @@ function RosterEditor({
                   <button
                     key={sq} disabled={already && !canRemove} onClick={() => (canRemove ? onRemove(sq, p.id) : onAdd(sq, p.id))}
                     aria-label={canRemove ? `${p.display_name} ${nameOf(sq)} 명단에서 빼기` : undefined}
-                    className={`min-h-8 rounded-lg border px-2 text-xs font-semibold ${canRemove ? 'border-danger-line text-danger-ink' : already ? 'border-transparent bg-sunken text-faint' : squadStyle(sq).card}`}
+                    className={`min-h-11 shrink-0 rounded-lg border px-3 text-xs font-semibold ${canRemove ? 'border-danger-line text-danger-ink' : already ? 'border-transparent bg-sunken text-faint' : squadStyle(sq).card}`}
                   >
-                    {canRemove ? `${nameOf(sq)} 빼기` : already ? '있음' : `＋${nameOf(sq)}`}
+                    {canRemove ? `${nameOf(sq)} 빼기` : already ? '있음' : `+${nameOf(sq)}`}
                   </button>
                 )
               })}
             </div>
           ))}
-          {rows.length === 0 && <p className="text-xs text-faint">넣을 수 있는 사람이 없어요.</p>}
+          {rows.length === 0 && <p className="text-xs text-faint">찾는 사람이 없어요. 아래에서 게스트로 추가해 주세요.</p>}
         </div>
       </div>
       <div className="border-t border-line pt-3">
@@ -467,14 +499,14 @@ function RosterEditor({
         <div className="flex items-center gap-2">
           <input
             value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="이름" aria-label="새 게스트 이름"
-            className="min-w-0 flex-1 rounded-xl border border-line px-3 py-2 text-sm"
+            className="min-h-11 min-w-0 flex-1 rounded-xl border border-line-field px-3 py-2 text-base"
           />
           {squadNos.map((sq) => (
             <button
               key={sq} disabled={!guestName.trim() || addGuest.isPending} onClick={() => addGuest.mutate(sq)}
-              className={`min-h-9 rounded-lg border px-2 text-xs font-semibold disabled:opacity-40 ${squadStyle(sq).card}`}
+              className={`min-h-11 shrink-0 rounded-lg border px-3 text-xs font-semibold disabled:opacity-40 ${squadStyle(sq).card}`}
             >
-              ＋{nameOf(sq)}
+              +{nameOf(sq)}
             </button>
           ))}
         </div>
@@ -488,14 +520,14 @@ function Stepper({ label, squadNo, value, onChange }: { label: string; squadNo: 
   const dark = squadNo !== 2
   return (
     <div className={`rounded-xl border p-1.5 ${squadStyle(squadNo).card}`}>
-      <p className="px-0.5 text-[11px] font-semibold opacity-70">{label}</p>
+      <p className={`px-0.5 text-[11px] font-semibold ${squadStyle(squadNo).sub}`}>{label}</p>
       <div className="flex items-center justify-between">
         <button type="button" aria-label={`${label} 1점 빼기`} onClick={() => onChange(Math.max(0, value - 1))} className={`size-11 shrink-0 rounded-lg text-lg font-bold ${dark ? 'bg-white/10' : 'bg-stone-200'}`}>−</button>
         <input
           type="text" inputMode="numeric" pattern="[0-9]*" value={value} aria-label={`${label} 득점`}
           onChange={(e) => { const d = e.target.value.replace(/\D/g, '').slice(-2); onChange(d === '' ? 0 : Math.min(MAX_SCORE, Number(d))) }}  // 두 자리가 찬 뒤 더 치면 앞자리가 밀린다 (13 → 4 입력 → 34)
           onFocus={(e) => e.target.select()}
-          className="w-10 min-w-0 flex-1 bg-transparent text-center text-2xl font-black tabular-nums outline-none"
+          className="w-10 min-w-0 flex-1 bg-transparent text-center text-2xl font-black tabular-nums outline-none focus-visible:rounded-lg focus-visible:outline-2 focus-visible:outline-brand"
         />
         <button type="button" aria-label={`${label} 1점 더하기`} onClick={() => onChange(Math.min(MAX_SCORE, value + 1))} className={`size-11 shrink-0 rounded-lg text-lg font-bold ${dark ? 'bg-court-700 text-white' : 'bg-court-100 text-court-800'}`}>+</button>
       </div>

@@ -2,7 +2,7 @@
  * 화면 뼈대. 모바일 폭(max 28rem)으로 가운데 정렬하고, 로그인 후 화면은 하단 탭바를 붙인다.
  * 설계서 5.1절: 주요 액션은 하단 고정, 역할별 진입점은 홈 카드로 분리.
  */
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 
 export function Screen({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -54,6 +54,8 @@ export function TopBar({
   const nav = useNavigate()
   const goBack = useGoBack()
   const dark = tone === 'navy'
+  // 탭 · 방문 기록 · 스크린리더가 화면을 구분할 수 있게 (제목이 글자일 때만)
+  useEffect(() => { if (typeof title === 'string') document.title = `${title} · HOOPLY` }, [title])
   return (
     <header
       className={`sticky top-0 z-10 flex h-14 items-center gap-2 px-3 ${
@@ -107,7 +109,7 @@ const tabs = [
 /** 하단 탭 — 홈 / 프로필. 활성 탭은 코트 오렌지, 위에 짧은 바 */
 export function TabBar() {
   return (
-    <nav className="safe-bottom sticky bottom-0 z-10 grid grid-cols-2 border-t border-line bg-surface">
+    <nav aria-label="주 메뉴" className="safe-bottom sticky bottom-0 z-10 grid grid-cols-2 border-t border-line bg-surface">
       {tabs.map((t) => (
         <NavLink
           key={t.to}
@@ -115,7 +117,7 @@ export function TabBar() {
           end={t.to === '/'}
           className={({ isActive }) =>
             `relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${
-              isActive ? 'text-brand-ink' : 'text-faint'
+              isActive ? 'text-brand-ink' : 'text-muted'
             }`
           }
         >

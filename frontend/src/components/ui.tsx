@@ -37,6 +37,7 @@ export function Button({
       type={type}
       {...rest}
       disabled={rest.disabled || loading}
+      aria-busy={loading || undefined}
       className={cx(
         'inline-flex items-center justify-center gap-2 rounded-xl px-4 font-semibold transition',
         'min-h-11 text-[15px] disabled:opacity-50 disabled:cursor-not-allowed',
@@ -45,7 +46,7 @@ export function Button({
         className,
       )}
     >
-      {loading && <span className="size-4 animate-spin rounded-full border-2 border-transparent border-t-current" />}
+      {loading && <span className="size-4 animate-spin motion-reduce:animate-none rounded-full border-2 border-transparent border-t-current" />}
       {children}
     </button>
   )
@@ -73,11 +74,11 @@ export function Field({
         aria-describedby={desc ? descId : undefined}
         aria-invalid={error ? true : undefined}
         className={cx(
-          'block w-full rounded-xl border bg-surface px-3.5 py-3 text-[15px] outline-none transition',
+          'block w-full rounded-xl border bg-surface px-3.5 py-3 text-base outline-none transition',
           'placeholder:text-faint focus:ring-2 disabled:bg-surface-2 disabled:text-faint',
           error
             ? 'border-danger-line focus:border-danger-ink focus:ring-danger-ink/25'
-            : 'border-line focus:border-brand focus:ring-brand/25',
+            : 'border-line-field focus:border-brand focus:ring-brand/25',
           input.className,
         )}
       />
@@ -112,7 +113,7 @@ export function Alert({ kind = 'error', children }: { kind?: 'error' | 'info' | 
     info: 'bg-info-soft text-info-ink border-info-line',
     warn: 'bg-warn-soft text-warn-ink border-warn-line',
   }[kind]
-  return <div className={cx('rounded-xl border px-3.5 py-3 text-sm', styles)}>{children}</div>
+  return <div role={kind === 'error' ? 'alert' : undefined} className={cx('rounded-xl border px-3.5 py-3 text-sm', styles)}>{children}</div>
 }
 
 export function Badge({ tone = 'neutral', children }: { tone?: 'neutral' | 'court' | 'navy' | 'success' | 'warn'; children: ReactNode }) {
@@ -129,9 +130,9 @@ export function Badge({ tone = 'neutral', children }: { tone?: 'neutral' | 'cour
 export function TeamStatusBadge({ status, approval }: { status: TeamStatus; approval?: ApprovalStatus }) {
   if (approval === 'REJECTED') return <Badge>승인 거절</Badge>
   if (approval === 'PENDING') return <Badge tone="warn">승인 대기</Badge>
-  if (status === 'ACTIVE') return <Badge tone="success">활성</Badge>
-  if (status === 'PENDING') return <Badge tone="warn">모집 중</Badge>
-  return <Badge>보관됨</Badge>
+  if (status === 'ACTIVE') return <Badge tone="success">운영 중</Badge>
+  if (status === 'PENDING') return <Badge tone="warn">팀원 모으는 중</Badge>
+  return <Badge>보관한 팀</Badge>
 }
 
 /** 역할 배지 — 글자 수가 달라도 폭을 같게 해서 옆의 실력 배지가 세로로 정렬되게 한다 */
@@ -151,7 +152,7 @@ export function GradeDot({ grade, small }: { grade: SkillGrade | null; small?: b
   }
   return (
     <span
-      title={grade ? `실력 등급 ${grade}` : '데이터 부족'}
+      role="img" aria-label={grade ? `실력 등급 ${grade}` : '실력 정보 없음'}
       className={cx(
         'inline-flex shrink-0 items-center justify-center rounded-full font-bold',
         small ? 'size-5 text-[10px]' : 'size-8 text-sm',
@@ -237,7 +238,7 @@ export function Spinner({ page = false }: { page?: boolean }) {
   if (page) return <div className="h-24" aria-hidden="true" />
   return (
     <div className="flex justify-center py-6" aria-hidden="true">
-      <span className={cx('size-6 animate-spin rounded-full border-[3px] border-brand-line border-t-brand', covered && 'invisible')} />
+      <span className={cx('size-6 animate-spin motion-reduce:animate-none rounded-full border-[3px] border-brand-line border-t-brand', covered && 'invisible')} />
     </div>
   )
 }

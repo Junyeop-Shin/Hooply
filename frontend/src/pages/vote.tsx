@@ -1,7 +1,7 @@
 /**
- * S-16 경기 후 피어 투표 (F9, peer-vote-spec 3.1 · 6절, 이후 사용자 결정 반영).
+ * S-16 경기 후 투표 (F9, peer-vote-spec 3.1 · 6절, 이후 사용자 결정 반영).
  * "다음에 같이 뛰고 싶은 사람"만 받는다 — 같은 팀에서 최대 2명, 상대 팀에서 최대 2명 (배정이 없던 회차는 합계 4명).
- * 0명이어도 제출 가능. 이유 칩은 선택한 사람 아래에 인라인.
+ * 0명이어도 낼 수 있다. 한 번 내면 못 고치므로 내기 전에 고른 사람을 확인받는다. 이유 칩은 선택한 사람 아래에 인라인.
  */
 import { useState } from 'react'
 import { squadName, squadStyle } from '../lib/squads'
@@ -13,7 +13,7 @@ import { confirm } from '../store/feedback'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
 import { REASON_TAGS, reasonLabel, type ReasonTag, type VoteCandidate, type VoteIn } from '../api/types'
-import { Alert, Avatar, Badge, Button, Card, EmptyState, Spinner } from '../components/ui'
+import { Alert, Avatar, Badge, Button, Card, EmptyState, LoadError, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
 import { fmtEvent } from '../lib/format'
@@ -37,7 +37,7 @@ export function VotePage() {
     mutationFn: (votes: VoteIn[]) => peerApi.submit(id, votes),
     // 이 일정(내 제출 여부 · 응답 수) · 팀 일정 목록(투표 배너) · 받은 표가 들어가는 기록
     onSuccess: () => { invalidateEvent(qc, id, ev.data?.team_id); qc.invalidateQueries({ queryKey: ['stats'] }); qc.invalidateQueries({ queryKey: ['me', 'badges'] }) },
-    onError: (e) => setMsg(errorMessage(e, '제출하지 못했어요.')),
+    onError: (e) => setMsg(errorMessage(e, '투표를 내지 못했어요. 다시 시도해 주세요.')),
   })
 
   const back = `/events/${id}`
@@ -51,11 +51,15 @@ export function VotePage() {
       <Screen>
         <TopBar title="경기 후 투표" back={back} />
         <Content>
-          <EmptyState
-            title={notOpen ? '일정이 끝나면 투표할 수 있어요' : errorMessage(err, '투표 명단을 불러오지 못했어요.')}
-            desc={notOpen && ev.data ? `${fmtEvent(ev.data)} 종료 후 자동으로 열려요.` : undefined}
-            action={<Button variant="ghost" onClick={() => nav(back, { replace: true })}>일정으로 돌아가기</Button>}
-          />
+          {notOpen ? (
+            <EmptyState
+              title="일정이 끝나면 투표할 수 있어요"
+              desc={ev.data ? `${fmtEvent(ev.data)} 일정이 끝나면 열려요.` : undefined}
+              action={<Button variant="ghost" onClick={() => nav(back, { replace: true })}>일정으로 돌아가기</Button>}
+            />
+          ) : (
+            <LoadError message={errorMessage(err, '투표 명단을 불러오지 못했어요.')} onRetry={() => t.refetch()} retrying={t.isFetching} />
+          )}
         </Content>
       </Screen>
     )
@@ -67,7 +71,7 @@ export function VotePage() {
     ? [
         { key: 'same', title: '우리 팀에서', items: data.candidates.filter((c) => c.is_same_team) },
         { key: 'opp', title: '상대 팀에서', items: data.candidates.filter((c) => c.is_same_team === false) },
-        ...(data.candidates.some((c) => c.is_same_team === null) ? [{ key: 'etc', title: '팀 미배정', items: data.candidates.filter((c) => c.is_same_team === null) }] : []),
+        ...(data.candidates.some((c) => c.is_same_team === null) ? [{ key: 'etc', title: '팀 배정 없이 온 사람', items: data.candidates.filter((c) => c.is_same_team === null) }] : []),
       ]
     : [{ key: 'all', title: '그날 참석한 사람', items: data.candidates }]
   const limitOf = (key: string) => (key === 'all' || key === 'etc' ? MAX_PER_SIDE * 2 : MAX_PER_SIDE)
@@ -85,7 +89,7 @@ export function VotePage() {
           </Card>
           <section>
             <p className="mb-2 px-1 text-sm font-bold tracking-wide text-muted">다음에 같이 뛰고 싶은 사람</p>
-            {data.my_votes.length === 0 ? <p className="px-1 text-sm text-faint">선택 안 함</p> : (
+            {data.my_votes.length === 0 ? <p className="px-1 text-sm text-faint">아무도 뽑지 않았어요.</p> : (
               <div className="space-y-2">
                 {data.my_votes.map((v) => {
                   const c = byId.get(v.target_player_id)
@@ -93,7 +97,7 @@ export function VotePage() {
                     <Card key={v.target_player_id} className="flex items-center gap-3 py-3">
                       <Avatar name={c?.player.display_name ?? '?'} src={c?.player.profile_image_url} />
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-ink">{c?.player.display_name ?? '참가자'}</p>
+                        <p className="font-semibold text-ink">{c?.player.display_name ?? '참석자'}</p>
                         {v.reason_tag && <p className="text-xs text-brand-ink">{reasonLabel(v.reason_tag, c?.is_same_team ?? null)}</p>}
                       </div>
                       {c && <SquadBadge c={c} />}
@@ -132,7 +136,7 @@ export function VotePage() {
         <FirstTimeTip id="vote" />
         <div className="px-1">
           {ev.data && <p className="text-xs font-semibold text-muted">{fmtEvent(ev.data)}</p>}
-          <p className="mt-2 text-sm leading-relaxed text-ink">다음에 또 같은 팀으로 뛰고 싶은 사람을 골라 주세요. {hasTeams ? '우리 팀·상대 팀에서 2명씩' : `최대 ${MAX_PER_SIDE * 2}명`} 고를 수 있고, 다음 팀을 짤 때 반영돼요.</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink">다음에 또 같은 팀으로 뛰고 싶은 사람을 골라 주세요. {hasTeams ? '우리 팀 · 상대 팀에서 2명씩' : `최대 ${MAX_PER_SIDE * 2}명`} 고를 수 있고, 다음에 팀을 나눌 때 반영해요.</p>
         </div>
         {msg && <Alert>{msg}</Alert>}
 
@@ -141,8 +145,8 @@ export function VotePage() {
             <div className="mb-2 flex items-center justify-between px-1">
               <h3 className="text-sm font-bold tracking-wide text-muted">{g.title}</h3>
               <span className="flex items-center gap-2">
-                <span className={`text-xs font-semibold ${countIn(g) ? 'text-brand-ink' : 'text-faint'}`}>{countIn(g)}/{limitOf(g.key)} 선택됨</span>
-                {!collapsed[g.key] && countIn(g) > 0 && <button className="text-xs font-semibold text-ink-2" onClick={() => setCollapsed((c) => ({ ...c, [g.key]: true }))}>접기</button>}
+                <span className={`text-xs font-semibold ${countIn(g) ? 'text-brand-ink' : 'text-faint'}`}>{countIn(g)}/{limitOf(g.key)}명 골랐어요</span>
+                {!collapsed[g.key] && countIn(g) > 0 && <button className="-my-3 -mr-1 flex min-h-11 items-center px-1 text-xs font-semibold text-ink-2" onClick={() => setCollapsed((c) => ({ ...c, [g.key]: true }))}>접기</button>}
               </span>
             </div>
             {collapsed[g.key] ? (
@@ -150,11 +154,11 @@ export function VotePage() {
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                   {g.items.filter((c) => picked.includes(c.player.id)).map((c) => (
                     <span key={c.player.id} className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-semibold text-brand-ink">
-                      {c.player.display_name}{reasons[c.player.id] && <span className="font-normal text-court-500">· {reasonLabel(reasons[c.player.id]!, c.is_same_team)}</span>}
+                      {c.player.display_name}{reasons[c.player.id] && <span className="font-normal">· {reasonLabel(reasons[c.player.id]!, c.is_same_team)}</span>}
                     </span>
                   ))}
                 </div>
-                <Button variant="ghost" className="min-h-10 text-sm" onClick={() => setCollapsed((c) => ({ ...c, [g.key]: false }))}>수정</Button>
+                <Button variant="ghost" className="shrink-0 whitespace-nowrap text-sm" onClick={() => setCollapsed((c) => ({ ...c, [g.key]: false }))}>고치기</Button>
               </Card>
             ) : (
             <div className="space-y-2">
@@ -164,13 +168,13 @@ export function VotePage() {
                   <div key={c.player.id}>
                     <CandidateRow c={c} on={on} disabled={!on && countIn(g) >= limitOf(g.key)} onClick={() => toggle(g, c.player.id)} />
                     {on && (
-                      <div className="mt-1.5 flex flex-wrap gap-1.5 px-2">
+                      <div className="flex flex-wrap gap-x-1.5 px-2">
                         {REASON_TAGS.map((r) => {
                           const sel = reasons[c.player.id] === r.tag
                           return (
-                            <button key={r.tag} onClick={() => pickReason(g, c.player.id, sel ? null : r.tag)}
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sel ? 'border-brand bg-brand text-on-brand' : 'border-line bg-surface text-muted'}`}>
-                              {reasonLabel(r.tag, c.is_same_team)}
+                            // 보이는 칩은 작게 두고 누르는 영역만 44px 로
+                            <button key={r.tag} aria-pressed={sel} onClick={() => pickReason(g, c.player.id, sel ? null : r.tag)} className="flex min-h-11 items-center">
+                              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sel ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-muted'}`}>{reasonLabel(r.tag, c.is_same_team)}</span>
                             </button>
                           )
                         })}
@@ -185,8 +189,11 @@ export function VotePage() {
         ))}
       </Content>
       <BottomAction>
-        <Button full loading={submit.isPending} onClick={async () => { if (votes.length > 0 || (await confirm({ title: '아무도 선택하지 않고 제출할까요?', body: '나중에 다시 할 수 없어요.', confirmLabel: '제출' }))) submit.mutate(votes) }}>
-          {votes.length === 0 ? '선택 없이 제출' : `${votes.length}명 제출`}
+        <Button full loading={submit.isPending} onClick={async () => {
+          const names = picked.map((pid) => byId.get(pid)?.player.display_name).filter(Boolean).join(', ')
+          if (await confirm({ title: votes.length ? '이대로 투표를 마칠까요?' : '아무도 뽑지 않고 투표를 마칠까요?', body: `${votes.length ? `${names}\n` : ''}한 번 내면 고칠 수 없어요.`, confirmLabel: '투표 마치기', cancelLabel: '다시 고르기' })) submit.mutate(votes)
+        }}>
+          {votes.length === 0 ? '아무도 안 뽑고 마치기' : `${votes.length}명 뽑고 투표 마치기`}
         </Button>
       </BottomAction>
     </Screen>
@@ -205,7 +212,7 @@ function SquadBadge({ c }: { c: VoteCandidate }) {
 function CandidateRow({ c, on, disabled, onClick }: { c: VoteCandidate; on: boolean; disabled: boolean; onClick: () => void }) {
   const p = c.player
   return (
-    <button onClick={onClick} disabled={disabled} className={`flex min-h-14 w-full items-center gap-3 rounded-2xl border-2 bg-surface px-3 py-2 text-left transition disabled:opacity-40 ${on ? 'border-court-500 bg-brand-soft' : 'border-line'}`}>
+    <button onClick={onClick} disabled={disabled} aria-pressed={on} className={`flex min-h-14 w-full items-center gap-3 rounded-2xl border-2 bg-surface px-3 py-2 text-left transition disabled:opacity-40 ${on ? 'border-court-500 bg-brand-soft' : 'border-line'}`}>
       <Avatar name={p.display_name} src={p.profile_image_url} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-ink">{p.display_name}{p.kind === 'GUEST' && <span className="ml-1.5 text-[11px] text-muted">게스트</span>}</p>

@@ -119,7 +119,8 @@ export const TacticBoard = memo(function TacticBoard({
 
   return (
     <div className="space-y-2">
-      <svg viewBox={`0 ${-top} ${W} ${H + top}`} className="w-full touch-manipulation select-none rounded-2xl" role="img" aria-label={`${play.name} 전술판`}>
+      {/* 자리를 누를 수 있을 때 role="img" 면 안의 버튼이 보조기술에서 사라진다 — 그때만 group */}
+      <svg viewBox={`0 ${-top} ${W} ${H + top}`} className="w-full touch-manipulation select-none rounded-2xl" role={onSlotTap ? 'group' : 'img'} aria-label={`${play.name} 전술판`}>
         <defs>
           <marker id={`ah-${ids}`} viewBox="0 0 6 6" refX="5" refY="3" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
             <path d="M0,0 L6,3 L0,6 z" style={{ fill: 'var(--color-ink)' }} />
@@ -165,11 +166,13 @@ export const TacticBoard = memo(function TacticBoard({
             <g
               key={i}
               onClick={onSlotTap ? () => onSlotTap(i + 1) : undefined}
-              role={onSlotTap ? 'button' : undefined}
-              aria-label={onSlotTap ? `${i + 1}번 자리 선수 고르기` : undefined}
-              className={onSlotTap ? 'cursor-pointer' : undefined}
+              onKeyDown={onSlotTap ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSlotTap(i + 1) } } : undefined}
+              role={onSlotTap ? 'button' : undefined} tabIndex={onSlotTap ? 0 : undefined}
+              aria-label={onSlotTap ? `${i + 1}번 자리${name ? ` ${name}` : ''}, 사람 바꾸기` : undefined}
+              className={onSlotTap ? 'group cursor-pointer outline-none' : undefined}
             >
               {onSlotTap && <circle cx={sx(p)} cy={sy(p)} r={R + 4} fill="transparent" />}
+              {onSlotTap && <circle cx={sx(p)} cy={sy(p)} r={R + 2} className="opacity-0 group-focus-visible:opacity-100" style={{ fill: 'none', stroke: 'var(--color-brand)' }} strokeWidth={1.2} />}
               <circle cx={sx(p)} cy={sy(p)} r={R} style={{ fill: colors.fill, stroke: colors.stroke }} strokeWidth={0.6} />
               <text x={sx(p)} y={sy(p) + 1.9} textAnchor="middle" fontSize={5.4} fontWeight={800} style={{ fill: colors.ink }}>{i + 1}</text>
               {name && (
@@ -214,7 +217,10 @@ export const TacticBoard = memo(function TacticBoard({
       </div>
       <Legend defense />
       <p className="text-center text-[11px] text-muted">
-        점선 동그라미는 상대 수비 — <b className="font-semibold text-ink-2">{kind === 'zone' ? '지역 수비(2-3)' : '맨투맨 수비'} · 스크린 {SCREEN_CALL_LABEL[screen]}</b>를 가정한 전술이에요
+        점선 동그라미는 상대 수비예요. <b className="font-semibold text-ink-2">{kind === 'zone' ? '지역 수비(2-3)' : '맨투맨 수비'} · 스크린 {SCREEN_CALL_LABEL[screen]}</b>
+        <span className="block">
+          {kind === 'zone' ? '앞에 2명 · 뒤에 3명이 자리를 지키고' : '한 사람씩 맡아서 막고'}, 스크린을 만나면 {screen === 'switch' ? '막는 사람을 서로 바꾸는(스위치)' : '맡은 사람을 끝까지 따라가는(스테이)'} 수비를 상대로 짠 전술이에요.
+        </span>
       </p>
     </div>
   )

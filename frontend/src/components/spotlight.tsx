@@ -3,7 +3,7 @@
  *
  * - 대상은 `data-tutorial="<key>"` 가 붙은 요소. 여러 개면 구멍도 여러 개 (예: 입력칸 + 아래 버튼)
  * - 덮개는 누르는 것을 막지 않는다(pointer-events none). 안내 때문에 앱을 못 쓰게 되지 않도록
- * - 밝은 칸을 누르거나 "알겠어요"·Esc 를 누르면 사라진다. 대상이 4초 안에 안 나타나면 아무것도 그리지 않는다
+ * - 밝은 칸을 누르거나 "알겠어요" · Esc 를 누르면 사라진다. 말풍선은 포커스를 가두지 않는 안내라 role 은 note 다. 대상이 4초 안에 안 나타나면 아무것도 그리지 않는다
  * - 스크롤·크기 변화를 따라가려고 떠 있는 동안만 매 프레임 위치를 읽는다 (바뀔 때만 다시 그림)
  */
 import { useEffect, useRef, useState } from 'react'
@@ -70,12 +70,12 @@ export function Spotlight({ target, title, text, onClose }: { target: string; ti
         <rect width="100%" height="100%" fill="rgba(11,18,32,0.62)" mask="url(#hooply-spotlight-mask)" />
         {boxes.map((b, i) => <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} rx="16" fill="none" stroke="#f26b1d" strokeWidth="2.5" className="motion-safe:animate-pulse" />)}
       </svg>
-      <div role="dialog" aria-label={title} className="pointer-events-auto absolute rounded-2xl bg-surface p-4 shadow-xl" style={tipStyle}>
+      <div role="note" aria-label={title} className="pointer-events-auto absolute rounded-2xl bg-surface p-4 shadow-xl" style={tipStyle}>
         <p className="text-xs font-bold text-brand-ink">시작 안내</p>
         <p className="mt-0.5 font-bold text-ink">{title}</p>
         <p className="mt-1 text-sm leading-relaxed text-ink-2">{text}</p>
         <div className="mt-3 flex justify-end">
-          <button type="button" onClick={() => closeRef.current()} className="min-h-9 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand">알겠어요</button>
+          <button type="button" onClick={() => closeRef.current()} className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand">알겠어요</button>
         </div>
       </div>
     </div>,

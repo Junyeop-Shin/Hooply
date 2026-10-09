@@ -11,7 +11,7 @@ import { peerApi } from '../api/peer'
 import { announceShare, shareText } from '../lib/kakao'
 import { POSITIONS, localISODate, type AttendanceView, type EventGuestInput, type EventGuestUpdate, type EventView, type GuestPreset, type PlayerCard, type Position } from '../api/types'
 import { invalidateEvent } from '../lib/invalidate'
-import { confirm } from '../store/feedback'
+import { confirm, toast } from '../store/feedback'
 import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
 import { fmtEvent } from '../lib/format'
 import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, LoadError, Sheet, Spinner } from '../components/ui'
@@ -130,7 +130,7 @@ export function EventCreatePage() {
 
   return (
     <Screen>
-      <TopBar title={editId !== null ? '일정 수정' : '일정 등록'} back={editId !== null ? `/events/${editId}` : `/teams/${id}`} />
+      <TopBar title={editId !== null ? '일정 고치기' : '일정 등록'} back={editId !== null ? `/events/${editId}` : `/teams/${id}`} />
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); m.mutate() }} className="flex flex-1 flex-col">
         <Content>
           {editId !== null && <Alert kind="info">응답은 그대로 남아요. 날짜나 시간을 바꿨다면 팀원에게 알려 주세요.</Alert>}
@@ -147,7 +147,7 @@ export function EventCreatePage() {
                 {lastEvent.venue && <p className="text-muted">{lastEvent.venue}</p>}
                 {lastEvent.memo && <p className="line-clamp-2 text-muted">{lastEvent.memo}</p>}
               </div>
-              <Button variant="secondary" full className="min-h-10 text-sm" onClick={loadFromLast}>이 내용으로 채우기</Button>
+              <Button variant="secondary" full className="text-sm" onClick={loadFromLast}>이 내용으로 채우기</Button>
             </Card>
           )}
           <Field label="제목 (선택)" value={f.title} onChange={set('title')} placeholder="일정 이름" hint="비워 두면 날짜로 보여요." />
@@ -161,14 +161,20 @@ export function EventCreatePage() {
             <Field label="응답 마감 (선택)" type="date" value={f.rsvp_date} onChange={setRsvpDate} max={f.event_date || undefined} />
             <Field label="마감 시각" type="time" value={f.rsvp_time} onChange={set('rsvp_time')} disabled={!f.rsvp_date} />
           </div>
-          <p className="-mt-2 px-1 text-xs text-muted">마감 후에는 팀원이 응답을 바꿀 수 없어요. 매니저는 대신 바꿀 수 있어요.</p>
+          <p className="-mt-2 px-1 text-xs text-muted">마감 뒤에는 팀원이 응답을 바꿀 수 없어요. 매니저는 대신 바꿀 수 있어요.</p>
           <Field label="메모 (선택)" value={f.memo} onChange={set('memo')} placeholder="회비, 준비물, 주차 안내 등" />
           {m.isError && <Alert>{errMsg(m.error, editId !== null ? '일정을 고치지 못했어요.' : '일정을 만들지 못했어요.')}</Alert>}
         </Content>
-        <BottomAction><div data-tutorial="FIRST_EVENT"><Button type="submit" full loading={m.isPending} disabled={!f.event_date || (editId !== null && !prefilled)}>{editId !== null ? '수정 저장' : '등록하고 응답 받기'}</Button></div></BottomAction>
+        <BottomAction><div data-tutorial="FIRST_EVENT"><Button type="submit" full loading={m.isPending} disabled={!f.event_date || (editId !== null && !prefilled)}>{editId !== null ? '고친 내용 저장' : '등록하고 응답 받기'}</Button></div></BottomAction>
       </form>
     </Screen>
   )
+}
+
+/** 응답 마감 시각을 "9/20 오후 10:00" 으로 */
+function fmtDeadline(iso: string) {
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}`
 }
 
 /* ---------- S-10 + S-11 일정 상세 ---------- */
@@ -204,7 +210,7 @@ export function EventDetailPage() {
     },
     onError: (e, _status, ctx) => {
       if (ctx?.prev) qc.setQueryData(['events', id], ctx.prev)
-      setMsg(errMsg(e, '응답하지 못했어요.'))
+      toast(errMsg(e, '응답하지 못했어요.'), 'error')
     },
     // 연달아 누르면 아직 보낼 응답이 남아 있다(자기 자신도 센다) — 마지막 것만 다시 받아 화면이 번갈아 깜빡이지 않게
     onSettled: () => { if (qc.isMutating({ mutationKey: rsvpKey }) <= 1) refresh() },
@@ -216,18 +222,18 @@ export function EventDetailPage() {
     mutationFn: () => eventsApi.remove(id),
     // 먼저 나가고 팀 일정 목록만 다시 받는다 (지운 일정 자체는 다시 부르지 않는다)
     onSuccess: () => { deleted.current = true; goBack('/'); qc.invalidateQueries({ queryKey: ev.data?.team_id ? ['events', 'team', ev.data.team_id] : ['events', 'team'] }) },
-    onError: (e) => setMsg(errMsg(e, '일정을 지우지 못했어요.')),
+    onError: (e) => toast(errMsg(e, '일정을 지우지 못했어요.'), 'error'),
   })
-  const closeRsvp = useMutation({ mutationFn: () => eventsApi.closeRsvp(id), onSuccess: refresh, onError: (e) => setMsg(errMsg(e, '마감하지 못했어요.')) })
+  const closeRsvp = useMutation({ mutationFn: () => eventsApi.closeRsvp(id), onSuccess: refresh, onError: (e) => toast(errMsg(e, '마감하지 못했어요.'), 'error') })
   const removeGuest = useMutation({
     mutationFn: (pid: number) => eventsApi.removeGuest(id, pid),
     onSuccess: refresh,
-    onError: (e) => setMsg(errMsg(e, '삭제하지 못했어요.')),
+    onError: (e) => toast(errMsg(e, '참석을 취소하지 못했어요.'), 'error'),
   })
   const setAtt = useMutation({
     mutationFn: ({ pid, status }: { pid: number; status: 'ATTEND' | 'ABSENT' }) => eventsApi.setAttendance(id, pid, status),
     onSuccess: refresh,
-    onError: (e) => setMsg(errMsg(e, '참석 상태를 바꾸지 못했어요.')),
+    onError: (e) => toast(errMsg(e, '참석 상태를 바꾸지 못했어요.'), 'error'),
   })
 
   if (ev.isLoading) return <Screen><TopBar title="일정" back="/" /><Spinner page /></Screen>
@@ -240,13 +246,21 @@ export function EventDetailPage() {
   const groups = { ATTEND: [] as AttendanceView[], PENDING: [] as AttendanceView[], ABSENT: [] as AttendanceView[] }
   att.data?.items.forEach((i) => groups[i.status].push(i))
   const surveyBlock = isManager && e.survey_open && e.status !== 'CANCELED' && <SurveyProgressCard eventId={id} responded={e.survey_responded} total={e.survey_total} onMsg={setMsg} />
-  const quarterBlock = e.quarter_count > 0 ? (
-    <button onClick={() => nav(`/events/${id}/quarters`)} className="flex w-full items-center justify-between rounded-2xl bg-brand px-4 py-3 text-left text-sm font-semibold text-on-brand">
-      <span>경기 기록 {e.quarter_count}쿼터 — {isManager ? '보기 · 수정' : '결과 보기'}</span><span>→</span>
+  const attend = s?.attend ?? e.attend_count
+  const canAssign = !past && !e.adopted_candidate_id && e.quarter_count === 0
+  // 매니저의 다음 할 일 하나 — 화면 아래에 고정한다 (경기 기록이 있으면 보기 · 고치기, 팀을 나누기 전이면 팀 나누기, 시작했으면 기록)
+  const toQuarters = () => nav(`/events/${id}/quarters`)
+  const action = !isManager || e.status === 'CANCELED' ? null
+    : e.quarter_count > 0 ? { label: '경기 기록 보기 · 고치기', go: toQuarters, off: false }
+    : canAssign ? { label: '팀 나누러 가기', go: () => nav(`/events/${id}/assign`), off: attend < 10 }
+    : started ? { label: '경기 기록하기', go: toQuarters, off: false }
+    : null
+  // 팀원에게는 결과로 가는 한 줄 (매니저는 아래 고정 버튼)
+  const quarterBlock = !isManager && e.quarter_count > 0 && (
+    <button onClick={toQuarters} className="flex min-h-11 w-full items-center justify-between rounded-2xl border border-brand-line bg-brand-soft px-4 py-3 text-left text-sm font-semibold text-brand-ink">
+      <span>경기 기록 {e.quarter_count}쿼터 · 결과 보기</span><span>→</span>
     </button>
-  ) : isManager && started ? (
-    <Button full onClick={() => nav(`/events/${id}/quarters`)}>경기 후 쿼터 기록하기</Button>
-  ) : null
+  )
 
   // 참석 응답 · 요약 · 참석자 목록 (S-10 · S-11). 배정이 확정되면 매니저에게만, 접어서 보여 준다
   const attendanceBlock = (
@@ -283,9 +297,9 @@ export function EventDetailPage() {
               </button>
             </div>
           )}
-          {!e.rsvp_open && <p className="mt-2 text-xs text-muted">{e.status === 'OPEN' && !past ? '응답이 마감되었어요.' : '응답 기한이 지난 일정이에요.'}</p>}
+          {!e.rsvp_open && <p className="mt-2 text-xs text-muted">{e.status === 'OPEN' && !past ? '응답이 마감됐어요.' : '응답 기한이 지난 일정이에요.'}</p>}
           {e.status !== 'CANCELED' && e.rsvp_open && !past && (
-            <button onClick={() => setSheet('new')} className="mt-3 flex w-full items-center justify-between rounded-xl bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-ink">
+            <button onClick={() => setSheet('new')} className="mt-3 flex min-h-11 w-full items-center justify-between rounded-xl bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-ink">
               + 게스트로 초대할 사람이 있어요 <span>→</span>
             </button>
           )}
@@ -308,10 +322,9 @@ export function EventDetailPage() {
           </Card>
         )}
 
-        {isManager && s && !past && !e.adopted_candidate_id && e.quarter_count === 0 && (
-          <Button variant="secondary" full disabled={s.attend < 10} onClick={() => nav(`/events/${id}/assign`)}>
-            {s.attend < 10 ? `팀 배정 (참석 10명 이상 필요 · 현재 ${s.attend}명)` : '팀 배정하러 가기'}
-          </Button>
+        {/* 시작했지만 팀을 나누지 않은 날 — 아래 고정 버튼은 팀 나누기라, 나누지 않고 기록할 길을 따로 둔다 */}
+        {isManager && canAssign && started && (
+          <button onClick={toQuarters} className="min-h-11 w-full text-sm font-semibold text-ink-2 underline underline-offset-2">팀을 나누지 않고 경기 기록하기</button>
         )}
 
         {att.isLoading ? <Spinner /> : (
@@ -345,30 +358,30 @@ export function EventDetailPage() {
       {/* 경기 기록이 있는(DONE) 일정은 실력 지표의 근거라 지울 수 없다. 배정을 확정한 일정(CLOSED)은 지울 수 있다 */}
       <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && (e.status === 'OPEN' || e.status === 'CLOSED') && (
         <span className="-mr-1 flex text-sm">
-          <button className="min-h-11 min-w-11 px-2 font-semibold text-court-300" onClick={() => nav(`/events/${id}/edit`)}>수정</button>
+          <button className="min-h-11 min-w-11 px-2 font-semibold text-bar-ink" onClick={() => nav(`/events/${id}/edit`)}>고치기</button>
           <button
-            className="min-h-11 min-w-11 px-2 font-semibold text-rose-300 disabled:opacity-50" disabled={remove.isPending}
-            onClick={async () => { if (await confirm({ title: '일정을 삭제할까요?', body: '참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.', confirmLabel: '삭제', danger: true })) remove.mutate() }}
+            className="min-h-11 min-w-11 px-2 font-semibold text-bar-sub disabled:opacity-50" disabled={remove.isPending}
+            onClick={async () => { if (await confirm({ title: '일정을 지울까요?', body: '참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.', confirmLabel: '일정 지우기', danger: true })) remove.mutate() }}
           >
-            삭제
+            지우기
           </button>
         </span>
       )} />
-      <div className="bg-navy-800 px-4 pb-4 text-white">
-        <p className="text-lg font-bold">{fmtEvent(e)}</p>
+      <div className="bg-bar px-4 pb-4 text-bar-ink">
+        {/* 제목이 없으면 위 제목 줄이 이미 날짜다 */}
+        {e.title && <p className="text-lg font-bold">{fmtEvent(e)}</p>}
         <p className="text-sm text-bar-sub">{e.venue ?? '장소 미정'}{e.memo ? ` · ${e.memo}` : ''}</p>
         <div className="mt-2 flex items-center gap-2 text-sm">
           <Badge tone={e.status === 'OPEN' ? 'success' : 'neutral'}>{{ OPEN: past ? '종료' : '응답 받는 중', CLOSED: past ? '종료' : '응답 마감', DONE: '기록 완료', CANCELED: '취소됨' }[e.status]}</Badge>
           <span className="text-bar-sub">참석 {e.attend_count}명</span>
-          {e.rsvp_deadline && <span className="ml-auto text-xs text-bar-sub">마감 {new Date(e.rsvp_deadline).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
+          {e.rsvp_deadline && <span className="ml-auto text-xs text-bar-sub">마감 {fmtDeadline(e.rsvp_deadline)}</span>}
         </div>
       </div>
 
       <Content>
         {msg && <Alert>{msg}</Alert>}
 
-        {/* 끝난 일정의 매니저 도구는 맨 위로: 경기 기록 · 피어 투표 독려 */}
-        {isManager && past && quarterBlock}
+        {/* 끝난 일정의 매니저 도구는 맨 위로: 경기 후 투표 독려 (경기 기록은 아래 고정 버튼) */}
         {isManager && past && surveyBlock}
 
         {e.adopted_candidate_id ? (
@@ -378,14 +391,14 @@ export function EventDetailPage() {
             {isManager && s && !past && (
               e.quarter_count > 0 ? (
                 // 경기 기록이 붙은 배정은 바꿀 수 없다 (서버 422 ASSIGNMENT_LOCKED)
-                <p className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted">경기 기록이 있는 일정은 팀을 다시 짤 수 없어요. 쿼터 기록을 먼저 지워 주세요.</p>
+                <p className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted">경기 기록이 있는 일정은 팀을 다시 나눌 수 없어요. 경기 기록을 먼저 지워 주세요.</p>
               ) : (
-                <Button variant="secondary" full onClick={() => nav(`/events/${id}/assign`)}>재배정하기</Button>
+                <Button variant="secondary" full onClick={() => nav(`/events/${id}/assign`)}>팀 다시 나누기</Button>
               )
             )}
             <EventTactics event={e} />
             {!(isManager && past) && surveyBlock}
-            {!(isManager && past) && quarterBlock}
+            {quarterBlock}
             {/* 참석 현황은 매니저만 — 팀원에게는 누가 불참했는지 보여 줄 필요가 없다 */}
             {isManager && (
               <section className="space-y-3">
@@ -400,12 +413,19 @@ export function EventDetailPage() {
         ) : (
           <>
             {attendanceBlock}
-            {/* 피어 투표 진입은 팀 화면의 일정 배너에서만 (사용자 결정). 여기서는 매니저 독려 카드만 */}
+            {/* 경기 후 투표 진입은 팀 화면의 일정 배너에서만 (사용자 결정). 여기서는 매니저 독려 카드만 */}
             {!(isManager && past) && surveyBlock}
-            {!(isManager && past) && quarterBlock}
+            {quarterBlock}
           </>
         )}
       </Content>
+
+      {action && (
+        <BottomAction>
+          {action.off && <p className="mb-2 text-center text-xs text-muted">참석 10명부터 나눌 수 있어요 · 지금 {attend}명</p>}
+          <Button full disabled={action.off} onClick={action.go}>{action.label}</Button>
+        </BottomAction>
+      )}
 
       {sheet && (
         <GuestSheet
@@ -420,7 +440,7 @@ export function EventDetailPage() {
   )
 }
 
-/** 매니저 뷰 — "피어 투표 현황 N/M명 응답" + 독려 메시지 공유. 자동 발송은 없다 (스펙 3.3절) */
+/** 매니저 뷰 — "경기 후 투표 현황 N/M명 응답" + 독려 메시지 공유. 자동 발송은 없다 (스펙 3.3절) */
 function SurveyProgressCard({ eventId, responded, total, onMsg }: { eventId: number; responded: number; total: number; onMsg: (m: string | null) => void }) {
   const share = useMutation({
     mutationFn: () => peerApi.shareMessage(eventId),
@@ -435,12 +455,12 @@ function SurveyProgressCard({ eventId, responded, total, onMsg }: { eventId: num
     <Card>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-bold text-ink">피어 투표 현황</p>
+          <p className="text-sm font-bold text-ink">경기 후 투표 현황</p>
           <p className="text-xs text-muted">{responded}/{total}명 응답 · 팀원 참석자 기준</p>
         </div>
         <Button variant="secondary" className="px-3 text-sm" loading={share.isPending} onClick={() => share.mutate()}>독려 메시지 공유</Button>
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sunken"><div className="h-full rounded-full bg-court-500 transition-all" style={{ width: `${pct}%` }} /></div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sunken"><div className="h-full rounded-full bg-brand transition-all" style={{ width: `${pct}%` }} /></div>
     </Card>
   )
 }
@@ -468,10 +488,10 @@ function AttendeeRow({ a, isMe, onEdit, onRemove, onSetStatus, showGrade }: { a:
       {showGrade && <GradeDot grade={p.skill_grade} />}
       {guest && a.can_edit ? (
         <div className="-my-1 -mr-1 flex shrink-0 items-center">
-          <button onClick={onEdit} aria-label={`${p.display_name} 수정`} className="flex min-h-11 min-w-11 items-center justify-center px-1">
-            <span className="rounded-lg border border-line px-2 py-1 text-[11px] font-semibold text-ink-2">수정</span>
+          <button onClick={onEdit} aria-label={`${p.display_name} 고치기`} className="flex min-h-11 min-w-11 items-center justify-center px-1">
+            <span className="rounded-lg border border-line px-2 py-1 text-[11px] font-semibold text-ink-2">고치기</span>
           </button>
-          <button onClick={onRemove} aria-label={`${p.display_name} 참석 취소`} className="flex min-h-11 min-w-11 items-center justify-center px-1 text-[11px] font-semibold text-danger-ink">삭제</button>
+          <button onClick={onRemove} aria-label={`${p.display_name} 참석 취소`} className="flex min-h-11 min-w-11 items-center justify-center px-1 text-[11px] font-semibold text-danger-ink">참석 취소</button>
         </div>
       ) : onSetStatus ? (
         <button onClick={() => onSetStatus(a.status === 'ATTEND' ? 'ABSENT' : 'ATTEND')} className="-my-1 -mr-1 flex min-h-11 shrink-0 items-center px-1">
@@ -520,24 +540,24 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
       return eventsApi.updateGuest(eventId, editing!.player.id, patch)
     },
     onSuccess: onDone,
-    onError: (e) => setError(errMsg(e, '수정하지 못했어요.')),
+    onError: (e) => setError(errMsg(e, '고치지 못했어요.')),
   })
   const busy = create.isPending || update.isPending
 
   return (
-    <Sheet label={editing ? '게스트 수정' : '게스트 초대'} title={editing ? '게스트 수정' : '게스트 초대'} onClose={onClose}>
+    <Sheet label={editing ? '게스트 고치기' : '게스트 초대'} title={editing ? '게스트 고치기' : '게스트 초대'} onClose={onClose}>
         <p className="mb-4 text-xs text-muted">이름만 있으면 돼요. 실력을 알면 등급까지 넣어 주세요.</p>
         {!editing && !similar && presets.data && presets.data.items.length > 0 && (
           <div className="mb-4">
             <p className="mb-1.5 text-sm font-medium text-ink">이전에 초대한 사람 불러오기</p>
             <div className="flex flex-wrap gap-1.5">
               {presets.data.items.map((pr) => (
-                <button key={pr.id} type="button" onClick={() => applyPreset(pr)} className={`min-h-9 rounded-full border px-3 text-sm ${name === pr.display_name ? 'border-court-500 bg-brand-soft font-semibold text-brand-ink' : 'border-line bg-surface text-ink'}`}>
+                <button key={pr.id} type="button" onClick={() => applyPreset(pr)} aria-pressed={name === pr.display_name} className={`min-h-11 rounded-full border px-3 text-sm ${name === pr.display_name ? 'border-inverse bg-inverse font-semibold text-on-inverse' : 'border-line bg-surface text-ink'}`}>
                   {pr.display_name}{pr.skill_grade ? ` · ${pr.skill_grade}` : ''}{pr.preferred_position ? ` · ${pr.preferred_position}` : ''}
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-[11px] text-muted">고르면 지난번 정보가 그대로 채워져요.</p>
+            <p className="mt-1 text-[11px] text-muted">고르면 지난번 정보를 그대로 채워요.</p>
           </div>
         )}
 
@@ -557,17 +577,17 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
         ) : (
           <div className="space-y-4">
             <Field label="이름" value={name} onChange={(e) => { setName(e.target.value); setReuseId(undefined) }} placeholder="게스트 이름을 입력해 주세요" maxLength={50} autoFocus />
-            <Field label="키 (cm, 선택)" type="text" inputMode="numeric" value={height} onChange={(e) => setHeight(e.target.value.replace(/\D/g, '').slice(0, 3))} placeholder="키를 입력해 주세요" hint="팀 평균 신장 계산에만 쓰여요." />
+            <Field label="키 (cm, 선택)" type="text" inputMode="numeric" value={height} onChange={(e) => setHeight(e.target.value.replace(/\D/g, '').slice(0, 3))} placeholder="키를 입력해 주세요" hint="팀 평균 키를 계산할 때만 써요." />
             <div>
               <p className="mb-1.5 text-sm font-medium text-ink">대략적인 실력 <span className="text-faint">(선택)</span></p>
               <div className="grid grid-cols-5 gap-1.5">
                 {[1, 2, 3, 4, 5].map((g) => (
-                  <button key={g} type="button" onClick={() => setGrade(grade === g ? null : g)} className={`min-h-11 rounded-xl border text-sm font-bold ${grade === g ? 'border-brand bg-brand text-on-brand' : 'border-line bg-surface text-ink'}`}>{g}</button>
+                  <button key={g} type="button" onClick={() => setGrade(grade === g ? null : g)} aria-pressed={grade === g} className={`min-h-11 rounded-xl border text-sm font-bold ${grade === g ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-ink'}`}>{g}</button>
                 ))}
               </div>
               <p className={`mt-1 text-[11px] ${grade === null ? 'text-warn-ink' : 'text-muted'}`}>
                 {grade === null
-                  ? '비워 두면 팀 평균으로 계산돼요. 대략이라도 고르면 배정이 정확해져요 (1 초보 … 5 최상위).'
+                  ? '비워 두면 팀 평균으로 계산해요. 대략이라도 고르면 팀을 더 고르게 나눌 수 있어요 (1 초보 … 5 최상위).'
                   : '1 초보 … 5 우리 팀 최상위. 나중에 바꿀 수 있어요.'}
               </p>
             </div>
@@ -580,7 +600,7 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
               <PosChips value={playable} onChange={setPlayable} />
             </div>
             <label className="flex items-center justify-between rounded-xl bg-surface-2 px-4 py-3">
-              <span className="text-sm font-medium text-ink">나와 같은 팀으로 묶어 주세요<br /><span className="text-[11px] font-normal text-muted">매니저에게 제안으로 전달돼요</span></span>
+              <span className="text-sm font-medium text-ink">나와 같은 팀으로 묶어 주세요<br /><span className="text-[11px] font-normal text-muted">매니저에게 제안으로 알려요</span></span>
               <input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} className="size-5 accent-brand" />
             </label>
             {error && <Alert>{error}</Alert>}
@@ -602,8 +622,9 @@ export function PosChips({ value, onChange, single }: { value: Position[]; onCha
           <button
             key={p}
             type="button"
+            aria-pressed={on}
             onClick={() => onChange(on ? value.filter((x) => x !== p) : single ? [p] : [...value, p])}
-            className={`min-h-10 flex-1 rounded-lg border text-sm font-bold ${on ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-ink'}`}
+            className={`min-h-11 flex-1 rounded-lg border text-sm font-bold ${on ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-ink'}`}
           >
             {p}
           </button>

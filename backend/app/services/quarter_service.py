@@ -80,7 +80,7 @@ def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn], kept: 
     for side in (Side.BLACK, Side.WHITE):
         n = sum(1 for lineup in lineups if lineup.side == side)
         if n != 5:
-            raise errors.InvalidLineupSize(f"{SIDE_LABEL[side]} 팀 {n}명이 선택되었어요. 팀당 5명이어야 해요.")
+            raise errors.InvalidLineupSize(f"{SIDE_LABEL[side]} 팀에 {n}명을 골랐어요. 팀마다 5명을 골라 주세요.")
     ids = [lineup.player_id for lineup in lineups]
     if len(set(ids)) != len(ids):
         raise errors.ValidationError("같은 사람이 두 번 들어 있어요.")

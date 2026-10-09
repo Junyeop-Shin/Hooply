@@ -18,7 +18,7 @@ import type { EventPlayView, Play, SlotLineup, SquadBoard } from '../api/types'
 import { BottomAction, Content, Screen, TopBar } from '../components/layout'
 import { TacticBoard, type BoardTone } from '../components/tactic-board'
 import { TacticComments } from '../components/tactic-comments'
-import { CIRCLED, SlotPeople, TacticExplain, useAiTactics } from '../components/tactics'
+import { CIRCLED, ROLE_HINT, SlotPeople, TacticExplain, useAiTactics } from '../components/tactics'
 import { Alert, Badge, Button, SectionTitle, Sheet, Spinner } from '../components/ui'
 import { DEFENSE_LABEL, ROLE_LABEL, renderCounter } from '../lib/tactics'
 import { squadStyle, squadTone } from '../lib/squads'
@@ -49,7 +49,13 @@ export function TacticBoardPage() {
     return (
       <Screen>
         <TopBar title="전술" back="/" />
-        {loading ? <Spinner page /> : <Content><Alert>없는 전술이에요.</Alert></Content>}
+        {loading ? <Spinner page /> : (
+          <Content>
+            <Alert kind="info">지워졌거나 없는 전술이에요.</Alert>
+            {/* 팀 화면은 주소로 탭을 고를 수 없어 일정 탭으로 열린다 — 그래서 라벨도 "팀 화면으로" */}
+            <Link to={teamId ? `/teams/${teamId}` : '/'} className="flex min-h-11 items-center justify-center rounded-xl bg-bar text-[15px] font-semibold text-bar-ink">{teamId ? '팀 화면으로' : '홈으로'}</Link>
+          </Content>
+        )}
       </Screen>
     )
   }
@@ -62,7 +68,7 @@ export function TacticBoardPage() {
 }
 
 function EditLink({ to }: { to: string | null }) {
-  return to ? <Link to={to} className="mr-1 text-sm font-semibold text-brand-ink">고치기</Link> : null
+  return to ? <Link to={to} className="flex min-h-11 min-w-11 items-center justify-center text-sm font-semibold text-brand-ink">고치기</Link> : null
 }
 
 function PlayHeader({ play, context }: { play: Play; context?: ReactNode }) {
@@ -89,8 +95,10 @@ function RoleList({ play, slots, onTap }: { play: Play; slots?: SlotLineup[]; on
           const inner = (
             <>
               <span className="w-5 shrink-0 text-center text-sm font-bold text-brand-ink">{CIRCLED[i]}</span>
-              <span className="w-[5.5rem] shrink-0 text-sm text-ink-2">{ROLE_LABEL[role]}</span>
-              <span className="min-w-0 flex-1 text-sm">{s ? <SlotPeople s={s} /> : null}</span>
+              <span className="min-w-0 flex-1 text-sm">
+                <span className="flex items-center gap-3"><span className="w-[5.5rem] shrink-0 text-ink-2">{ROLE_LABEL[role]}</span><span className="min-w-0 flex-1">{s ? <SlotPeople s={s} /> : null}</span></span>
+                <span className="block text-xs text-muted">{ROLE_HINT[role]}</span>
+              </span>
               {onTap && <span className="text-xs font-semibold text-brand-ink">바꾸기</span>}
             </>
           )
@@ -176,10 +184,10 @@ function EventBoard({ play, view, eventId, editPath }: { play: Play; view: Event
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
       <span className="inline-flex items-center gap-1.5 font-semibold text-ink-2">
         <span className={`size-2.5 rounded-full ${squadStyle(sq.squad_no).dot}`} aria-hidden="true" />
-        {sq.squad_name}{view.my_squad_no === sq.squad_no ? ' · 내 팀' : ''}
+        {sq.squad_name} 팀{view.my_squad_no === sq.squad_no ? ' · 오늘 내 팀' : ''}
       </span>
-      <span>적합도 <b className="text-brand-ink">{Math.round(lineup.fit)}</b></span>
-      <span>{lineup.manual ? '매니저가 정한 배치' : '자동 추천 배치'}</span>
+      <span>잘 맞는 정도 <b className="text-brand-ink">{Math.round(lineup.fit)}점</b></span>
+      <span>{lineup.manual ? '매니저가 정한 배치' : '앱이 추천한 배치'}</span>
     </p>
   )
 
@@ -210,7 +218,7 @@ function EventBoard({ play, view, eventId, editPath }: { play: Play; view: Event
             {dirty && (
               <>
                 <Button variant="ghost" className="shrink-0 whitespace-nowrap" onClick={() => setDraft(null)}>취소</Button>
-                <Button full loading={save.isPending} onClick={() => save.mutate(row.map((pid, i) => ({ slot: i + 1, player_id: pid })))}>{sq.squad_name} 배치 저장</Button>
+                <Button full loading={save.isPending} onClick={() => save.mutate(row.map((pid, i) => ({ slot: i + 1, player_id: pid })))}>{sq.squad_name} 팀 배치 저장</Button>
               </>
             )}
           </div>
@@ -227,8 +235,8 @@ function PickSheet({ squad, slot, role, row, onPick, onClose }: {
   squad: SquadBoard; slot: number; role: string; row: number[]; onPick: (pid: number) => void; onClose: () => void
 }) {
   return (
-    <Sheet label={`${slot}번 자리 선수 고르기`} title={<>{CIRCLED[slot - 1]} {role}</>} onClose={onClose} tall={false}>
-        <p className="mb-3 text-xs text-muted">{squad.squad_name} 팀에서 이 자리에 설 사람을 골라요. 다른 자리에 있던 사람을 고르면 두 자리가 바뀌고, 벤치에 있던 사람을 고르면 지금 사람이 벤치로 가요.</p>
+    <Sheet label={`${slot}번 자리에 설 사람 고르기`} title={<>{CIRCLED[slot - 1]} {role}</>} onClose={onClose} tall={false}>
+        <p className="mb-3 text-xs text-muted">{squad.squad_name} 팀에서 이 자리에 설 사람을 골라 주세요. 다른 자리에 있던 사람을 고르면 두 자리가 바뀌고, 벤치에 있던 사람을 고르면 지금 사람이 벤치로 가요.</p>
         <div className="space-y-1.5">
           {squad.members.map((m) => {
             const at = row.indexOf(m.player_id)

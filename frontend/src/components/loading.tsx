@@ -20,7 +20,7 @@ export function LoadingHost() {
   // 터치는 막지 않는다(뒤로 가기는 눌린다). 0.15초 뒤에 나타나므로 금방 끝나는 로딩에서는 번쩍이지 않는다
   return (
     <div className={`pointer-events-none fixed inset-0 z-20 flex animate-[loading-in_200ms_ease-out_150ms_both] flex-col items-center justify-center gap-3 px-6 ${modalOpen ? '' : 'bg-canvas/70 backdrop-blur-[3px]'}`}>
-      <span className="size-8 animate-spin rounded-full border-[3px] border-brand-line border-t-brand" aria-hidden={msg ? true : undefined} />
+      <span className="size-8 animate-spin motion-reduce:animate-none rounded-full border-[3px] border-brand-line border-t-brand" aria-hidden={msg ? true : undefined} />
       {msg && (
         <div role="status" aria-live="polite" className="text-center">
           <p className="text-sm font-semibold text-ink">{msg}</p>

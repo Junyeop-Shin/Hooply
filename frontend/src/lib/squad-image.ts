@@ -52,7 +52,7 @@ export function layoutSquadImage(input: SquadImageInput): SquadImageLayout {
   const n = Math.max(1, squads.length)
   const colWidth = Math.floor((IMAGE_WIDTH - PAD * 2 - GAP * (n - 1)) / n)
   const columns: SquadColumn[] = squads.map((s, i) => ({
-    title: `팀 ${s.squad_name}`,
+    title: `${s.squad_name} 팀`,
     count: s.members.length,
     dark: s.squad_no !== 2,  // 블랙 · 레드는 어두운 카드
     tone: s.squad_no === 1 ? 'black' : s.squad_no === 3 ? 'red' : 'white',

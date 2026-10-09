@@ -21,7 +21,7 @@ export const queryClient = new QueryClient({
   mutationCache: new MutationCache({
     onError: (error, _vars, _ctx, mutation) => {
       if (mutation.options.onError || mutation.meta?.inlineError) return
-      toast(errorMessage(error, '요청을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.'), 'error')
+      toast(errorMessage(error, '처리하지 못했어요. 잠시 뒤 다시 해 주세요.'), 'error')
     },
   }),
   defaultOptions: {

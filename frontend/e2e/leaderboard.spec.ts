@@ -17,7 +17,7 @@ test('리더보드: 달을 고르면 기여 점수가 그 달 값으로 바뀐�
   expect(options.length).toBeGreaterThan(1)
   for (const o of options.slice(1)) expect(o).toMatch(/^\d{4}년 \d{1,2}월$/)  // 년·월 표기
 
-  await page.getByRole('button', { name: '기여 점수' }).click()
+  await page.getByRole('tab', { name: '기여 점수' }).click()
   const firstValue = () => page.locator('main >> text=/^[+-]?\\d+\\.\\d$/').first().innerText()
   const all = await firstValue()
   // 기록이 있는 가장 최근 달을 고르면 전체와 다른 값이 나온다 (예전에는 늘 같은 값이었다)

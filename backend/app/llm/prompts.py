@@ -33,7 +33,7 @@ SYSTEM_A = f"""당신은 농구 동호회 팀 배정 서비스 HOOPLY 에서 매
   - gaps: 그 팀에서 부족한 역할 (비어 있으면 부족한 역할 없음)
   - players: 선수별 배정 포지션과 역할
   - guests_without_skill: 실력 정보가 없는 게스트 수
-- constraints_applied: 매니저가 건 조건 (같은 팀 묶기 · 갈라놓기 · 사전 배치)
+- constraints_applied: 매니저가 건 조건 (같은 팀 묶기 · 갈라놓기 · 미리 배치)
 
 {_COMMON}
 

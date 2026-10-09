@@ -44,12 +44,13 @@
   --color-sunken: #f5f5f4;        /* 눌리는 버튼·비활성 입력 */
   --color-line: #e7e5e4;          /* 기본 테두리 */
   --color-line-strong: #d6d3d1;   /* 강조 테두리·구분선 */
+  --color-line-field: #8a8580;    /* 입력칸 테두리 — 칸의 경계가 보이게 3:1 이상 */
 
   /* 글자 */
   --color-ink: #0f1b2d;           /* 제목·본문 */
   --color-ink-2: #44403c;         /* 보조 본문 */
-  --color-muted: #78716c;         /* 설명 */
-  --color-faint: #a8a29e;         /* 비활성·힌트 */
+  --color-muted: #6b6560;         /* 설명 — 바탕(canvas) 위에서도 5.27:1 */
+  --color-faint: #736d68;         /* 힌트 — 본문으로도 읽히게 4.5:1 이상 (바탕 위 4.68:1) */
 
   /* 주요 액션(오렌지) */
   /* 채운 버튼 바탕. 원색 court-500(#f26b1d)은 흰 글자와 3.05:1 이라 작은 글자가 읽히지 않는다 —
@@ -88,10 +89,10 @@
   --color-team-black-sub: #d6d3d1;
   --color-team-white: #fafaf9;
   --color-team-white-ink: #0f1b2d;
-  --color-team-white-sub: #78716c;
+  --color-team-white-sub: #57534e;
   --color-team-red: #b91c1c;       /* 3팀일 때 세 번째 팀 — 늘 진한 빨강에 흰 글자 */
   --color-team-red-ink: #ffffff;
-  --color-team-red-sub: #fecaca;
+  --color-team-red-sub: #ffe1e1;
 
   --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
 }
@@ -107,11 +108,12 @@
     --color-sunken: #232f45;
     --color-line: #27334a;
     --color-line-strong: #3a4761;
+    --color-line-field: #6e7d94;
 
     --color-ink: #edf1f7;
     --color-ink-2: #c3cddc;
-    --color-muted: #94a2b8;
-    --color-faint: #6e7d94;
+    --color-muted: #a3b0c4;
+    --color-faint: #8c9ab0;
 
     --color-brand: #ff8340;
     --color-on-brand: #24100a;

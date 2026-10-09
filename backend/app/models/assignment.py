@@ -3,7 +3,7 @@
 제약(assignment_constraints)은 회차별이다 (v0.3). 한 테이블로 LOCK / SEPARATE / PIN을 모두 표현한다.
   LOCK     + group_no  → 반드시 같은 팀
   SEPARATE + group_no  → 반드시 다른 팀
-  PIN      + squad_no  → 지정한 팀에 사전 배치
+  PIN      + squad_no  → 지정한 팀에 미리 배치
 
 계층 구조와 각 계층의 의미 (설계서 6.3절 "1:N 체인")
   assignment_runs          "언제·누가·어떤 조건으로 배정을 돌렸나"  — 한 회차에 최종 편성 하나만 남는다

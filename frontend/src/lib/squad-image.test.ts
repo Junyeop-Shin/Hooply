@@ -29,7 +29,7 @@ describe('layoutSquadImage', () => {
   it('두 팀을 나란히 놓고, 높이는 인원이 많은 쪽에 맞춘다', () => {
     const L = layoutSquadImage({ teamName: '일요 코트메이트', eventLine: '9/20 (일)', squads: [white, black] })
     expect(L.width).toBe(IMAGE_WIDTH)
-    expect(L.columns.map((c) => c.title)).toEqual(['팀 블랙', '팀 화이트'])  // squad_no 순
+    expect(L.columns.map((c) => c.title)).toEqual(['블랙 팀', '화이트 팀'])  // squad_no 순
     expect(L.columns[0].dark).toBe(true)
     expect(L.columns[1].x).toBeGreaterThan(L.columns[0].x + L.columns[0].width)
     expect(L.columns[1].x + L.columns[1].width).toBeLessThanOrEqual(IMAGE_WIDTH)

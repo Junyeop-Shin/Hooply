@@ -11,7 +11,7 @@ import { assignmentsApi } from '../api/assignments'
 import { useDebounced, useTypewriter } from '../lib/typewriter'
 import { Card } from './ui'
 
-const AI_NOTE = 'AI가 쓴 설명이에요 · 팀은 배정 알고리즘이 나눴어요'
+const AI_NOTE = 'AI가 쓴 설명이에요 · 팀은 앱이 나눴어요'
 
 function Frame({ ai, title, children }: { ai: boolean; title: string; children: ReactNode }) {
   return (
@@ -29,7 +29,7 @@ export function Thinking({ label }: { label: string }) {
   return (
     <p className="flex items-center gap-2 text-sm text-muted" role="status">
       <span className="flex gap-0.5" aria-hidden="true">
-        {[0, 150, 300].map((d) => <span key={d} className="size-1.5 animate-bounce rounded-full bg-brand" style={{ animationDelay: `${d}ms` }} />)}
+        {[0, 150, 300].map((d) => <span key={d} className="size-1.5 animate-bounce rounded-full motion-reduce:animate-none bg-brand" style={{ animationDelay: `${d}ms` }} />)}
       </span>
       {label}
     </p>
@@ -37,7 +37,7 @@ export function Thinking({ label }: { label: string }) {
 }
 
 function Caret({ on }: { on: boolean }) {
-  return on ? <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-brand align-middle" aria-hidden="true" /> : null
+  return on ? <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-brand motion-reduce:animate-none align-middle" aria-hidden="true" /> : null
 }
 
 function Fallback({ title, text }: { title: string; text: string | null | undefined }) {
@@ -128,7 +128,7 @@ export function AiMessageCard({ eventId, fallbackText }: { eventId: number; fall
       <TypedSections sections={[
         { title: '왜 이 포지션일까요', items: [d.why_position].filter(Boolean) },
         { title: '오늘 기대하는 역할', items: [d.role].filter(Boolean) },
-        { title: '호흡을 맞춰 보세요', items: [d.partner].filter(Boolean) },
+        { title: '호흡을 맞출 동료', items: [d.partner].filter(Boolean) },
       ]} />
     </Frame>
   )

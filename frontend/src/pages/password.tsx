@@ -17,11 +17,12 @@ export function ForgotPasswordPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null); setLoading(true)
-    try { await authApi.forgotPassword(email.trim()); setSent(true) } catch (err) { setError(errorMessage(err, '요청을 보내지 못했어요.')) } finally { setLoading(false) }
+    try { await authApi.forgotPassword(email.trim()); setSent(true) } catch (err) { setError(errorMessage(err, '메일을 보내지 못했어요. 잠시 뒤 다시 시도해 주세요.')) } finally { setLoading(false) }
   }
   return (
-    <Screen className="px-6">
+    <Screen>
       <TopBar title="비밀번호 찾기" back="/login" />
+      <main className="px-6">
       {sent ? (
         <div className="space-y-4 pt-6">
           <Alert kind="info">가입된 이메일이면 재설정 링크를 보냈어요. 30분 안에 메일의 링크를 열어 주세요. 메일이 없으면 스팸함을 확인해 주세요.</Alert>
@@ -35,6 +36,7 @@ export function ForgotPasswordPage() {
           <Button type="submit" full loading={loading} disabled={!email.trim()}>재설정 링크 보내기</Button>
         </form>
       )}
+      </main>
     </Screen>
   )
 }
@@ -64,15 +66,16 @@ export function ResetPasswordPage() {
   }
   if (!token) {
     return (
-      <Screen className="px-6">
+      <Screen>
         <TopBar title="비밀번호 재설정" back="/login" />
-        <div className="space-y-4 pt-6"><Alert>재설정 링크가 올바르지 않아요. 메일의 링크를 다시 열어 주세요.</Alert><Link to="/password/forgot"><Button full variant="secondary">링크 다시 받기</Button></Link></div>
+        <main className="space-y-4 px-6 pt-6"><Alert>재설정 링크가 올바르지 않아요. 메일의 링크를 다시 열어 주세요.</Alert><Link to="/password/forgot"><Button full variant="secondary">링크 다시 받기</Button></Link></main>
       </Screen>
     )
   }
   return (
-    <Screen className="px-6">
+    <Screen>
       <TopBar title="비밀번호 재설정" back="/login" />
+      <main className="px-6">
       {done ? (
         <div className="space-y-4 pt-6">
           <Alert kind="info">비밀번호를 바꿨어요. 새 비밀번호로 로그인해 주세요.</Alert>
@@ -86,6 +89,7 @@ export function ResetPasswordPage() {
           <Button type="submit" full loading={loading} disabled={pw.length < 8 || mismatch}>비밀번호 바꾸기</Button>
         </form>
       )}
+      </main>
     </Screen>
   )
 }

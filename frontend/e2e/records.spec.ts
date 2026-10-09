@@ -8,7 +8,7 @@ test('기록 탭: 세 섹션이 보이고 월간 랭킹은 접었다 펼 수 있
   await page.getByRole('tab', { name: '기록', exact: true }).click()
 
   await expect(page.getByRole('heading', { name: '내 추세' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '월간 코트 마진' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /이달의 점수 차 순위/ })).toBeVisible()
   await expect(page.getByRole('heading', { name: '배지' })).toBeVisible()
   // 데모 매니저는 10주치 기록이 있어 추세 그래프와 순위 표가 나온다
   await expect(page.getByRole('img', { name: '활동일별 평균 점수 차' })).toBeVisible()

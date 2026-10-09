@@ -182,7 +182,7 @@ class ConstraintType(StrEnum):
 
     LOCK = "LOCK"  # 같은 group_no 끼리 반드시 같은 팀 (슈퍼노드로 축약). 1순위 기능
     SEPARATE = "SEPARATE"  # 같은 group_no 끼리 반드시 다른 팀. 2순위
-    PIN = "PIN"  # squad_no 로 지정한 팀에 사전 배치 (F16). 2순위
+    PIN = "PIN"  # squad_no 로 지정한 팀에 미리 배치 (F16). 2순위
 
 
 class Strategy(StrEnum):

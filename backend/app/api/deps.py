@@ -59,7 +59,7 @@ def get_current_user(
     비밀번호를 바꾸기 전에 발급된 토큰(`users.token_version` 불일치).
     """
     if cred is None:
-        raise errors.TokenExpired("로그인이 필요합니다.")
+        raise errors.TokenExpired("로그인해 주세요.")
     decoded = decode_token(cred.credentials, "access")
     if decoded is None:
         raise errors.TokenExpired()

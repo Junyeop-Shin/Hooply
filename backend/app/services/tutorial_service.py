@@ -37,7 +37,7 @@ def update(db: Session, user: User, body: TutorialUpdate) -> User:
     if "tip_seen" in data and data["tip_seen"] is not None:
         tip = data["tip_seen"]
         if tip not in TIP_IDS:
-            raise errors.ValidationError(f"알 수 없는 안내예요: {tip}")
+            raise errors.ValidationError("없는 안내예요. 화면을 새로고침해 주세요.")
         if tip not in (user.tutorial_tips_seen or []):
             user.tutorial_tips_seen = [*(user.tutorial_tips_seen or []), tip]  # 새 리스트를 넣어야 JSONB 변경이 저장된다
     if data.get("state") is not None:
@@ -99,13 +99,13 @@ def view(db: Session, user: User) -> TutorialView:
 
 
 def _self_rank_step(players: list[Player]) -> TutorialStep:
-    title = "이 동호회에서 내 실력 위치"
+    title = "이 팀에서 내 실력 위치"
     if not players:
         return TutorialStep(key="SELF_RANK", title=title, status="WAITING", hint="팀에 들어가면 열려요.")
     if any(p.profile and p.profile.self_rank_level for p in players):
-        return TutorialStep(key="SELF_RANK", title=title, status="DONE", hint="팀 배정 정확도에 가장 큰 영향을 주는 한 문항이에요.")
+        return TutorialStep(key="SELF_RANK", title=title, status="DONE", hint="팀을 고르게 나누는 데 가장 중요한 질문이에요.")
     p = players[0]
-    return TutorialStep(key="SELF_RANK", title=title, status="TODO", hint="팀 배정 정확도에 가장 큰 영향을 주는 한 문항이에요.",
+    return TutorialStep(key="SELF_RANK", title=title, status="TODO", hint="팀을 고르게 나누는 데 가장 중요한 질문이에요.",
                         link=f"/teams/{p.team_id}/self-rank", action="답하기")
 
 

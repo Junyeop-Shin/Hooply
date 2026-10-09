@@ -32,6 +32,15 @@ describe('TacticBoard 재생', () => {
     expect(screen.queryByText('화면을 불러오지 못했어요')).toBeNull()
   })
 
+  it('자리를 바꿀 수 있는 전술판은 키보드로도 자리를 고른다', () => {
+    const onSlotTap = vi.fn()
+    render(<TacticBoard play={play} names={['허재', null, null, null, null]} onSlotTap={onSlotTap} />)
+    const slot = screen.getByRole('button', { name: '1번 자리 허재, 사람 바꾸기' })
+    expect(slot).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(slot, { key: 'Enter' })
+    expect(onSlotTap).toHaveBeenCalledWith(1)
+  })
+
   it('다음 단계 버튼으로 한 단계씩 넘어간다', () => {
     const frames: FrameRequestCallback[] = []
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb))

@@ -98,7 +98,7 @@ function downloadFile(file: File): boolean {
 
 export const SHARE_DONE: Record<ShareResult, string | null> = {
   kakao: '카카오톡으로 보냈어요.',
-  sheet: '공유 시트를 열었어요.',
+  sheet: '공유했어요.',
   clipboard: '복사했어요. 카카오톡에 붙여 넣어 주세요.',
   download: '이미지를 저장했어요. 카카오톡에 첨부해 주세요.',
   none: null,

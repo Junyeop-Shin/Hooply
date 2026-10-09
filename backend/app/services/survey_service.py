@@ -102,7 +102,7 @@ def get_active_template(db: Session) -> SurveyTemplate:
         .order_by(SurveyTemplate.version.desc())
     )
     if tpl is None:
-        raise errors.NotFound("설문을 준비하지 못했어요. 잠시 후 다시 시도해 주세요.")
+        raise errors.NotFound("설문을 준비하지 못했어요. 잠시 뒤 다시 해 주세요.")
     return tpl
 
 
@@ -156,7 +156,7 @@ def submit(db: Session, user: User, body: SurveyResponseIn) -> SurveyResponse:
         raise errors.AlreadySubmitted("이미 설문을 제출했어요. 수정은 매니저·관리자 보정으로만 가능해요.")
     tpl = get_active_template(db)
     if body.template_id is not None and body.template_id != tpl.id:
-        raise errors.ValidationError("설문 버전이 바뀌었어요. 화면을 새로고침해 주세요.")
+        raise errors.ValidationError("설문이 새로 바뀌었어요. 화면을 새로고침해 주세요.")
     by_q = _validate_answers(tpl, body.answers)
 
     resp = SurveyResponse(template_id=tpl.id, user_id=user.id, submitted_at=datetime.now(UTC))

@@ -12,7 +12,7 @@
 - run        : 배정 실행 1회. 같은 회차에서 재실행하면 run 이 하나 더 쌓인다 (이력 보존)
 - candidate  : 전략(SKILL / CHEMISTRY / BALANCED)별 후보안. run 당 최대 3개, 확정은 1개
 - squad      : 후보안 안의 팀 (블랙/화이트, 3팀이면 레드). squad_no 는 1부터
-- constraint : 그 회차에만 적용되는 LOCK(묶기) / SEPARATE(갈라놓기) / PIN(사전 배치)
+- constraint : 그 회차에만 적용되는 LOCK(묶기) / SEPARATE(갈라놓기) / PIN(미리 배치)
 """
 
 from datetime import datetime
@@ -26,11 +26,11 @@ from app.schemas.common import SquadView
 
 MAX_GROUPS = 30  # 묶기 · 갈라놓기 그룹 수 상한
 MAX_GROUP_SIZE = 30  # 그룹 하나의 인원 상한
-MAX_PINS = 60  # 사전 배치 인원 상한
+MAX_PINS = 60  # 미리 배치 인원 상한
 
 
 class PinConstraint(BaseModel):
-    """사전 배치(PIN) 하나 — "이 사람은 squad_no 팀에 미리 꽂아둔다" (F16, 2순위).
+    """미리 배치(PIN) 하나 — "이 사람은 squad_no 팀에 미리 꽂아둔다" (F16, 2순위).
 
     S-12 에서 참석자 칩을 팀 칸에 직접 드롭한 것. LOCK 과 달리 팀까지 지정한다.
     한 팀에 정원보다 많이 PIN 하면 422 SQUAD_OVERFLOW.
@@ -174,7 +174,7 @@ class Exchange(BaseModel):
     """그룹 단위 교환 — 한쪽 팀의 a_player_ids 와 다른 팀의 b_player_ids 를 서로 상대 팀으로 보낸다.
 
     한쪽이 비어 있으면 일방 이동이다. 묶음(LOCK)에 속한 사람이 포함되면 묶음 전체가 자동으로 함께 움직이고,
-    갈라놓기(SEPARATE)는 교환 뒤에도 서로 다른 팀이어야 한다. 사전 배치(PIN)는 옮길 수 없다.
+    갈라놓기(SEPARATE)는 교환 뒤에도 서로 다른 팀이어야 한다. 미리 배치(PIN)는 옮길 수 없다.
     """
 
     a_player_ids: list[int] = Field(default=[], max_length=MAX_GROUP_SIZE, description="같은 팀에 있는 선수들 (상대 팀으로 이동)")

@@ -239,5 +239,5 @@ def leaderboard(
 
     is_mgr = me.role == TeamRole.MANAGER
     if metric == "residual" and not is_mgr:
-        raise E.ForbiddenRole("기여도 순위는 매니저만 볼 수 있어요.")
+        raise E.ForbiddenRole("기여 점수 순위는 매니저만 볼 수 있어요.")
     return ItemList(items=peer_service.leaderboard(db, team.id, metric=metric, period=period, include_grade=is_mgr))

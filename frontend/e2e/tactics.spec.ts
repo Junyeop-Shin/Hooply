@@ -56,7 +56,7 @@ test('배정이 끝난 일정(팀원): 팀 배정 결과만 — 공유·참석 �
   await login(page, PLAYER)
   await openEvent(page, EVENT.LAST_WEEK)
   await expect(page.getByRole('heading', { name: '팀 배정 결과' })).toBeVisible()
-  await expect(page.getByText(/내 팀 · 팀|팀 블랙|팀 화이트/).first()).toBeVisible()
+  await expect(page.getByText(/내 팀 · |블랙 팀|화이트 팀/).first()).toBeVisible()
   await expect(page.getByRole('button', { name: '카카오톡 공유' })).toHaveCount(0)  // 공유는 매니저만
   await expect(page.getByText('참석 현황 · 관리')).toHaveCount(0)  // 누가 불참했는지는 팀원에게 필요 없다
 })

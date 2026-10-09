@@ -32,7 +32,7 @@ export function errorMessageWithDetails(e: unknown, fallback: string): string {
 }
 
 async function parseError(res: Response): Promise<ApiError> {
-  let body: ErrorResponse = { code: 'UNKNOWN', message: res.status >= 500 ? '문제가 생겼어요. 잠시 후 다시 시도해 주세요.' : '요청을 처리하지 못했어요.', details: [] }
+  let body: ErrorResponse = { code: 'UNKNOWN', message: res.status >= 500 ? '문제가 생겼어요. 잠시 뒤 다시 해 주세요.' : '처리하지 못했어요. 화면을 새로고침한 뒤 다시 해 주세요.', details: [] }
   try {
     body = (await res.json()) as ErrorResponse
   } catch {
@@ -43,7 +43,7 @@ async function parseError(res: Response): Promise<ApiError> {
 
 /** 응답을 이만큼 넘게 기다리면 끊는다. 무료 서버가 잠에서 깨는 데 30~60초 걸리므로 그보다 넉넉히 */
 export const REQUEST_TIMEOUT_MS = 70_000
-export const TIMEOUT_MESSAGE = '서버 응답이 너무 늦어요. 잠시 뒤 다시 시도해 주세요.'
+export const TIMEOUT_MESSAGE = '응답이 늦어지고 있어요. 잠시 뒤 다시 눌러 주세요.'
 
 /** fetch + 시간 초과. 끊기면 ApiError(code=TIMEOUT) — 화면이 영원히 돌기만 하지 않게 */
 async function fetchWithTimeout(url: string, init: RequestInit, ms = REQUEST_TIMEOUT_MS): Promise<Response> {

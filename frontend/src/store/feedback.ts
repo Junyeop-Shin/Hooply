@@ -15,8 +15,8 @@ export interface ToastItem { id: number; text: string; kind: ToastKind }
 export interface ConfirmOptions {
   title: string
   body?: string
-  /** 확인 버튼 문구 (기본 "확인") */
-  confirmLabel?: string
+  /** 확인 버튼 문구 — 무엇을 하는지 동사로 ("지우기", "마감하기") */
+  confirmLabel: string
   /** 취소 버튼 문구 (기본 "취소") */
   cancelLabel?: string
   /** 지우기처럼 되돌릴 수 없는 일이면 붉은 버튼 */
@@ -32,7 +32,7 @@ interface FeedbackState {
 export const useFeedback = create<FeedbackState>()(() => ({ toasts: [], pending: null }))
 
 /** 토스트가 떠 있는 시간 — 오류는 읽을 시간이 조금 더 필요하다 */
-export const TOAST_MS = { info: 2500, error: 4000 } as const
+export const TOAST_MS = { info: 2500, error: 6000 } as const
 let seq = 0
 
 /** 한 줄 알림. 같은 문구가 이미 떠 있으면 하나만 남긴다 (같은 오류를 두 번 보여 주지 않게) */

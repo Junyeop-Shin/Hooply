@@ -27,13 +27,15 @@ export function SquadCard({ squad, picked, onPick, showSkill, highlightId, marks
   const st = squadStyle(squad.squad_no)
   const dark = squad.squad_no !== 2
   const tag = (full: string, short: string) => (narrow ? short : full)
+  // 칩은 바탕과 글자를 함께 정해 팀 색 위에서도 4.5:1 — 짙은 팀은 반투명 흰 바탕 + 팀 보조색
+  const chip = (light: string) => `shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : light}`
   return (
     <div className={`min-w-0 rounded-2xl border-2 ${narrow ? 'p-2' : 'p-3'} ${st.card}`}>
       <div className={`flex flex-wrap items-center justify-between gap-1 font-bold ${narrow ? 'text-xs' : 'text-sm'}`}>
         <span>{title ?? squad.squad_name} ({squad.members.length})</span>
-        {!compact && showSkill && squad.avg_skill !== null && <Badge tone={dark ? 'court' : 'navy'}>{narrow ? '' : '쿼터당 '}{Number(squad.avg_skill) > 0 ? '+' : ''}{squad.avg_skill}</Badge>}
+        {!compact && showSkill && squad.avg_skill !== null && <Badge tone={dark ? 'court' : 'navy'}>{narrow ? '' : '한 쿼터에 '}{Number(squad.avg_skill) > 0 ? '+' : ''}{squad.avg_skill}{narrow ? '' : '점'}</Badge>}
       </div>
-      {!compact && squad.avg_height_cm !== null && <p className={`text-[11px] ${st.sub}`}>{narrow ? '' : '평균 신장 '}{squad.avg_height_cm}cm</p>}
+      {!compact && squad.avg_height_cm !== null && <p className={`text-[11px] ${st.sub}`}>{narrow ? '' : '평균 키 '}{squad.avg_height_cm}cm</p>}
       <ul className="mt-2 space-y-1">
         {squad.members.map((m) => {
           const pos = squad.assigned_positions[m.id]
@@ -44,15 +46,15 @@ export function SquadCard({ squad, picked, onPick, showSkill, highlightId, marks
             <li key={m.id}>
               <Row
                 {...(onPick && { type: 'button' as const, onClick: () => onPick(m.id), 'aria-pressed': on })}
-                className={`flex w-full items-center gap-1 rounded-lg ${narrow ? 'px-1 py-0.5 text-xs' : 'gap-1.5 px-1.5 py-1 text-sm'} text-left ${on ? st.picked : me ? st.soft : ''}`}
+                className={`flex w-full items-center gap-1 rounded-lg ${onPick ? 'min-h-11' : ''} ${narrow ? 'px-1 py-0.5 text-xs' : 'gap-1.5 px-1.5 py-1 text-sm'} text-left ${on ? st.picked : me ? st.soft : ''}`}
               >
                 <span className={`${narrow ? 'w-4 text-[9px]' : 'w-6 text-[10px]'} shrink-0 font-bold ${st.sub}`}>{pos ?? '—'}</span>
                 <span className="min-w-0 truncate font-medium">{m.display_name}{me ? ' (나)' : ''}</span>
                 {m.kind === 'GUEST' && <span className={`shrink-0 text-[10px] ${st.sub}`}>G</span>}
-                {squad.manual_override_ids.includes(m.id) && <span className="text-[10px] text-amber-400">↔</span>}
-                {marks?.locked.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-navy-100 text-navy-700'}`} title="같은 팀으로 묶음">{tag('묶음', '묶')}{marks.locked.get(m.id)}</span>}
-                {marks?.pinned.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-navy-100 text-navy-700'}`} title="사전 배치">{tag('고정', '고')}</span>}
-                {marks?.sepGroup.has(m.id) && <span className={`shrink-0 rounded px-1 text-[9px] font-semibold ${dark ? `bg-white/15 ${st.sub}` : 'bg-rose-100 text-rose-700'}`} title="갈라놓기">{tag('분리', '분')}</span>}
+                {squad.manual_override_ids.includes(m.id) && <span role="img" aria-label="직접 옮김" className={chip('bg-warn-soft text-warn-ink')}>↔</span>}
+                {marks?.locked.has(m.id) && <span className={chip('bg-info-soft text-info-ink')}>{tag('묶음', '묶')}{marks.locked.get(m.id)}</span>}
+                {marks?.pinned.has(m.id) && <span className={chip('bg-info-soft text-info-ink')}>{tag('미리', '미')}</span>}
+                {marks?.sepGroup.has(m.id) && <span className={chip('bg-danger-soft text-danger-ink')}>{tag('갈라', '갈')}</span>}
                 {showSkill && <span className="ml-auto shrink-0"><GradeDot grade={m.skill_grade} small={narrow} /></span>}
               </Row>
             </li>
@@ -61,6 +63,16 @@ export function SquadCard({ squad, picked, onPick, showSkill, highlightId, marks
       </ul>
     </div>
   )
+}
+
+/** 팀 카드 표시의 범례 — 카드 묶음 아래 한 줄. 표시가 하나도 없으면 그리지 않는다 */
+export function MarkLegend({ squads, marks }: { squads: SquadView[]; marks?: Marks }) {
+  const has = (set?: { has: (id: number) => boolean }) => !!set && squads.some((s) => s.members.some((m) => set.has(m.id)))
+  const items = [
+    has(marks?.locked) && '묶 같은 팀으로 묶음', has(marks?.pinned) && '미 미리 배치', has(marks?.sepGroup) && '갈 갈라놓기',
+    squads.some((s) => s.manual_override_ids.length > 0) && '↔ 직접 옮김',
+  ].filter(Boolean)
+  return items.length ? <p className="px-1 text-[11px] text-muted">{items.join(' · ')}</p> : null
 }
 
 /**
@@ -98,7 +110,7 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
       <FirstTimeTip id="adopted" />
       {mine && (
         <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${squadStyle(mine.squad_no).card}`}>
-          <span className="text-xs opacity-70">내 팀</span>
+          <span className={`text-xs ${squadStyle(mine.squad_no).sub}`}>내 팀</span>
           <span className="text-xl font-black">{mine.squad_name}</span>
           {v.my_assigned_position && <span className="rounded-lg bg-brand px-2 py-0.5 text-sm font-bold text-on-brand">{v.my_assigned_position}</span>}
         </div>
@@ -122,14 +134,15 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
       )}
       {mine ? (
         <>
-          <SquadCard squad={mine} showSkill={isManager} highlightId={me?.id} title={`내 팀 · 팀 ${mine.squad_name}`} />
-          {others.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`상대 · 팀 ${s.squad_name}`} />)}
+          <SquadCard squad={mine} showSkill={isManager} highlightId={me?.id} title={`내 팀 · ${mine.squad_name} 팀`} />
+          {others.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`상대 · ${s.squad_name} 팀`} />)}
         </>
       ) : (
         <div className={`grid gap-2 ${v.squads.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-          {v.squads.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`팀 ${s.squad_name}`} narrow={v.squads.length === 3} />)}
+          {v.squads.map((s) => <SquadCard key={s.squad_no} squad={s} showSkill={isManager} title={`${s.squad_name} 팀`} narrow={v.squads.length === 3} />)}
         </div>
       )}
+      <MarkLegend squads={v.squads} />
       {!isManager && <p className="px-1 text-center text-xs text-faint">실력 수치는 표시하지 않아요. 등급은 경기 기록이 저장될 때마다 갱신돼요.</p>}
     </section>
   )
@@ -155,13 +168,14 @@ export function AdoptedSummary({ eventId, isManager }: { eventId: number; isMana
       </div>
       <div className={`grid gap-2 ${ordered.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
         {ordered.map((s) => (
-          <SquadCard key={s.squad_no} squad={s} showSkill={isManager} highlightId={myId} title={`팀 ${s.squad_name}`} compact narrow={ordered.length === 3} />
+          <SquadCard key={s.squad_no} squad={s} showSkill={isManager} highlightId={myId} title={`${s.squad_name} 팀`} compact narrow={ordered.length === 3} />
         ))}
       </div>
+      <MarkLegend squads={ordered} />
       {v.total_score !== null && v.total_score !== undefined && (
         <div className="flex items-center justify-between rounded-lg bg-surface px-3 py-1.5 text-xs">
           <span className="text-muted">균형 점수</span>
-          <span className="font-bold text-ink">{v.total_score} <span className="text-[10px] font-normal text-faint">낮을수록 균형이 좋아요</span></span>
+          <span className="font-bold text-ink">{v.total_score} <span className="text-[10px] font-normal text-faint">낮을수록 고르게 나뉜 거예요</span></span>
         </div>
       )}
     </div>

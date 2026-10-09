@@ -1,5 +1,5 @@
 /**
- * 팀 화면 "기록" 탭 — 내 추세(활동일별 꺾은선) · 월간 코트 마진 랭킹(접을 수 있음) · 배지.
+ * 팀 화면 "기록" 탭 — 내 추세(활동일별 꺾은선) · 이달의 점수 차 순위(월간 코트 마진, 접을 수 있음) · 배지.
  *
  * 순서에 이유가 있다. 추세는 나에 관한 것이라 늘 맨 위. 월간 랭킹은 남과 견주는 것이라 접어 둘 수 있고, 접힌 상태는
  * 이 기기에만 기억한다(localStorage). 새 달이 시작된 뒤 처음 팀 화면을 열면 팀 페이지가 이 탭을 먼저 보여 주고
@@ -30,6 +30,8 @@ function prevMonth(p: string) {
 }
 const fmtSigned = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 const mmdd = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`
+/** 추세 그래프 점 하나를 글로 — "9/20 평균 점수 차 +1.2점 · 3승 2패" */
+const pointLabel = (m: MarginPoint) => `${mmdd(m.event_date)} 평균 점수 차 ${fmtSigned(Number(m.avg_normalized_margin))}점 · ${m.wins}승 ${m.losses}패`
 
 export function RecordsTab({ teamId, myPlayerId, newMonth }: { teamId: number; myPlayerId: number | null; newMonth: boolean }) {
   return (
@@ -53,7 +55,7 @@ function TrendSection({ playerId }: { playerId: number | null }) {
       {playerId === null ? <EmptyState title="팀원만 볼 수 있어요" /> : q.isLoading ? <Spinner /> : !s ? (
         <LoadError message={errorMessage(q.error, '기록을 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} />
       ) : s.quarters_played === 0 ? (
-        <EmptyState title="아직 경기 기록이 없어요" desc={`참석 ${s.events_attended}회 · 매니저가 쿼터를 기록하면 활동일마다 점이 찍혀요.`} />
+        <EmptyState title="아직 경기 기록이 없어요" desc={`참석 ${s.events_attended}회 · 매니저가 경기를 기록하면 활동일마다 점이 찍혀요.`} />
       ) : (
         <TrendChart points={s.margin_trend} />
       )}
@@ -78,19 +80,27 @@ export function TrendChart({ points }: { points: MarginPoint[] }) {
   const wins = points.reduce((a, m) => a + m.wins, 0), games = points.reduce((a, m) => a + m.wins + m.losses, 0)
   return (
     <Card className="space-y-2">
-      <p className="text-[11px] text-faint">활동일마다 뛴 쿼터의 평균 점수 차예요. 팀 결과라서 개인 실력 그 자체는 아니에요. 점을 누르면 그날 요약이 보여요.</p>
+      <p className="text-[11px] text-muted">활동일마다 뛴 쿼터의 평균 점수 차예요. 팀 결과라서 개인 실력 그 자체는 아니에요. 점을 누르면 그날 요약이 보여요.</p>
+      {/* 그림을 못 보는 사람에게는 같은 값을 목록으로 */}
+      <ul className="sr-only">
+        {points.map((m) => <li key={m.event_id}>{pointLabel(m)}</li>)}
+      </ul>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="활동일별 평균 점수 차">
         <line x1={PX} x2={W - PX} y1={y(0)} y2={y(0)} stroke="var(--color-line-strong)" strokeDasharray="3 3" />
         <text x={W - PX} y={y(max) + 4} fontSize="9" fill="var(--color-faint)" textAnchor="end">+{max.toFixed(0)}</text>
         <text x={W - PX} y={y(-max) + 4} fontSize="9" fill="var(--color-faint)" textAnchor="end">−{max.toFixed(0)}</text>
-        {points.length > 1 && <path d={path} fill="none" stroke="var(--color-navy-300)" strokeWidth="2" strokeLinejoin="round" />}
+        {points.length > 1 && <path d={path} fill="none" stroke="var(--color-muted)" strokeWidth="2" strokeLinejoin="round" />}
         {points.map((m, i) => {
           const v = Number(m.avg_normalized_margin)
           const r = 3 + Math.min(3, m.quarters / 3)
           return (
-            <g key={m.event_id} onClick={() => setSel(i)} className="cursor-pointer">
+            <g
+              key={m.event_id} onClick={() => setSel(i)} role="button" tabIndex={0} aria-label={pointLabel(m)} aria-pressed={i === curIdx}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSel(i) } }}
+              className="cursor-pointer focus-visible:outline-2 focus-visible:outline-brand"
+            >
               <circle cx={x(i)} cy={y(v)} r={r + 6} fill="transparent" />
-              <circle cx={x(i)} cy={y(v)} r={r} fill={v > 0 ? 'var(--color-court-500)' : v < 0 ? '#f43f5e' : 'var(--color-faint)'} stroke={i === curIdx ? 'var(--color-ink)' : 'white'} strokeWidth={i === curIdx ? 2 : 1.5} />
+              <circle cx={x(i)} cy={y(v)} r={r} fill={v > 0 ? 'var(--color-court-500)' : v < 0 ? 'var(--color-danger-ink)' : 'var(--color-faint)'} stroke={i === curIdx ? 'var(--color-ink)' : 'var(--color-surface)'} strokeWidth={i === curIdx ? 2 : 1.5} />
               {labelled(i) && (
                 <text x={x(i)} y={H - 8} fontSize="9" fill="var(--color-muted)" textAnchor={i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}>{mmdd(m.event_date)}</text>
               )}
@@ -98,19 +108,19 @@ export function TrendChart({ points }: { points: MarginPoint[] }) {
           )
         })}
       </svg>
-      <div className="flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2 text-xs">
+      <div className="flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2 text-xs" aria-live="polite">
         <span className="text-muted">{mmdd(cur.event_date)}{cur.title ? ` · ${cur.title}` : ''}</span>
         <span className="font-semibold text-ink">
           <span className={Number(cur.avg_normalized_margin) > 0 ? 'text-ok-ink' : Number(cur.avg_normalized_margin) < 0 ? 'text-danger-ink' : 'text-muted'}>평균 {fmtSigned(Number(cur.avg_normalized_margin))}</span>
-          <span className="text-faint"> · {cur.wins}승 {cur.losses}패 · {cur.quarters}쿼터</span>
+          <span className="text-muted"> · {cur.wins}승 {cur.losses}패 · {cur.quarters}쿼터</span>
         </span>
       </div>
-      <p className="text-[11px] text-muted">전체 {points.length}일 · 이긴 쿼터 {wins}/{games}</p>
+      <p className="text-[11px] text-muted">전체 {points.length}일 · {wins}승 {games - wins}패</p>
     </Card>
   )
 }
 
-/* ---------- 월간 코트 마진 ---------- */
+/* ---------- 이달의 점수 차 순위 (코트 마진) ---------- */
 
 const collapsedKey = (teamId: number) => `hooply:margin-rank-collapsed:${teamId}`
 
@@ -134,34 +144,34 @@ function MonthlyMarginSection({ teamId, newMonth }: { teamId: number; newMonth: 
 
   return (
     <section>
-      <SectionTitle action={<button onClick={toggle} aria-expanded={!collapsed} className="min-h-8 rounded-lg px-2 text-xs font-semibold text-ink-2">{collapsed ? '펼치기 ▾' : '접기 ▴'}</button>}>월간 코트 마진</SectionTitle>
+      <SectionTitle action={<button onClick={toggle} aria-expanded={!collapsed} className="-my-2 min-h-11 rounded-lg px-2 text-xs font-semibold text-ink-2">{collapsed ? '펼치기 ▾' : '접기 ▴'}</button>}>이달의 점수 차 순위 <span className="ml-1 text-[11px] font-normal">코트 마진</span></SectionTitle>
       <Card className="space-y-2 p-0">
         {!collapsed && (
           <div className="flex items-center gap-2 px-4 pt-3">
             <label htmlFor="margin-period" className="text-xs font-semibold text-muted">달</label>
             <select
               id="margin-period" value={period} onChange={(e) => setChosen(e.target.value)} disabled={periods.isLoading}
-              className="min-h-9 flex-1 rounded-xl border border-line bg-surface px-3 text-sm font-semibold text-ink"
+              className="min-h-11 flex-1 rounded-xl border border-line-field bg-surface px-3 text-base font-semibold text-ink"
             >
               {options.map((p) => <option key={p} value={p}>{monthLabel(p, today)}{p === thisMonth ? ' (이번 달)' : ''}</option>)}
             </select>
           </div>
         )}
         {!collapsed && newMonth && period !== thisMonth && (
-          <p className="mx-4 rounded-xl bg-brand-soft px-3 py-2 text-xs font-semibold text-brand-ink">새 달이 시작됐어요. {monthLabel(period, today)} 최종 순위예요 — 이번 달 랭킹은 첫 기록부터 다시 쌓여요.</p>
+          <p className="mx-4 rounded-xl bg-brand-soft px-3 py-2 text-xs font-semibold text-brand-ink">새 달이 시작됐어요. {monthLabel(period, today)} 최종 순위예요. 이번 달 순위는 첫 기록부터 다시 쌓여요.</p>
         )}
         {collapsed ? (
-          <button onClick={toggle} className="flex w-full items-center justify-between px-4 py-3 text-left text-sm">
+          <button onClick={toggle} className="flex min-h-11 w-full items-center justify-between px-4 py-3 text-left text-sm">
             <span className="text-muted">{v ? (top ? <>{monthLabel(period, today)} 1위 <b className="text-ink">{top.player.display_name}</b> <span className="text-ok-ink">{fmtSigned(Number(top.avg_margin))}</span></> : `${monthLabel(period, today)} · 아직 순위가 없어요`) : '…'}</span>
             <span className="text-xs font-semibold text-ink-2">펼치기 ▾</span>
           </button>
         ) : periods.isLoading || q.isLoading ? <div className="pb-3"><Spinner /></div> : !v ? (
-          <div className="px-4 pb-4"><LoadError message={errorMessage(q.error, '월간 코트 마진을 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} /></div>
+          <div className="px-4 pb-4"><LoadError message={errorMessage(q.error, '점수 차 순위를 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} /></div>
         ) : (
           <>
-            <p className="px-4 text-[11px] text-faint">
+            <p className="px-4 text-[11px] text-muted">
               {v.total_quarters === 0
-                ? '이 달엔 아직 기록된 쿼터가 없어요.'
+                ? '매니저가 이 달 경기를 기록하면 순위가 보여요.'
                 : `출전 쿼터의 평균 점수 차 순서예요. 이 달 팀 전체 ${v.total_quarters}쿼터 중 ${v.threshold_quarters}쿼터(${Math.round(v.min_share * 100)}%) 이상 뛴 사람만 순위에 올라요. 실력이 아니라 이 달의 결과예요.`}
             </p>
             {v.items.length > 0 && (
@@ -169,14 +179,14 @@ function MonthlyMarginSection({ teamId, newMonth }: { teamId: number; newMonth: 
                 {v.items.filter((e) => e.eligible).map((e) => <MarginRow key={e.player.id} e={e} />)}
                 {v.items.some((e) => !e.eligible) && (
                   <>
-                    <p className="bg-surface-2 px-4 py-1.5 text-[11px] font-semibold text-muted">집계 제외 · 출전 {v.threshold_quarters}쿼터 미만</p>
+                    <p className="bg-surface-2 px-4 py-1.5 text-[11px] font-semibold text-muted">순위 밖 · {v.threshold_quarters}쿼터보다 적게 뛴 사람</p>
                     {v.items.filter((e) => !e.eligible).map((e) => <MarginRow key={e.player.id} e={e} dim />)}
                   </>
                 )}
               </div>
             )}
-            <button onClick={() => nav(`/teams/${teamId}/leaderboard`)} className="flex w-full items-center justify-between border-t border-line px-4 py-3 text-left text-sm font-semibold text-ink">
-              <span>리더보드 더 보기 <span className="ml-1 text-[11px] font-normal text-muted">참여율 · 출전 쿼터</span></span><span>→</span>
+            <button onClick={() => nav(`/teams/${teamId}/leaderboard`)} className="flex min-h-11 w-full items-center justify-between border-t border-line px-4 py-3 text-left text-sm font-semibold text-ink">
+              <span>리더보드 더 보기 <span className="ml-1 text-[11px] font-normal text-muted">참석률 · 출전 쿼터</span></span><span>→</span>
             </button>
           </>
         )}
@@ -259,9 +269,9 @@ function BadgeSection() {
     <section>
       <BadgeDefs />
       <SectionTitle action={items.length ? <span className="text-xs text-muted">획득 {earned}/{items.length}</span> : undefined}>배지</SectionTitle>
-      {q.isLoading ? <Spinner /> : (
+      {q.isLoading ? <Spinner /> : q.isError && !q.data ? <LoadError message="배지를 불러오지 못했어요." onRetry={() => q.refetch()} retrying={q.isFetching} /> : (
         <Card className="space-y-3">
-          <p className="text-[11px] text-faint">함께한 행동으로 얻어요. 칸을 누르면 단계와 남은 양이 보여요.</p>
+          <p className="text-[11px] text-muted">함께한 행동으로 얻어요. 칸을 누르면 단계와 남은 양이 보여요.</p>
           {GROUP_ORDER.map((g) => (
             <div key={g}>
               <p className="mb-1.5 text-xs font-bold text-muted">{GROUP_LABEL[g]}</p>

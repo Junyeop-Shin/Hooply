@@ -17,7 +17,7 @@ export function ConfirmHost() {
       {pending.body && <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink-2">{pending.body}</p>}
       <div className="mt-5 flex gap-2">
         <Button variant="ghost" className="shrink-0 px-5" onClick={() => answerConfirm(false)}>{pending.cancelLabel ?? '취소'}</Button>
-        <Button full variant={pending.danger ? 'danger' : 'primary'} onClick={() => answerConfirm(true)}>{pending.confirmLabel ?? '확인'}</Button>
+        <Button full variant={pending.danger ? 'danger' : 'primary'} onClick={() => answerConfirm(true)}>{pending.confirmLabel}</Button>
       </div>
     </Sheet>
   )

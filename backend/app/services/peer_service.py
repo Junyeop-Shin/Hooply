@@ -171,7 +171,7 @@ def submit(db: Session, event: Event, me: Player, body: PostGameSurveyIn) -> Pos
     if not is_open(event):
         raise errors.SurveyNotOpen()
     if my_survey(db, event, respondent.id) is not None:
-        raise errors.AlreadySubmitted("이미 이 회차 투표를 제출했어요.")
+        raise errors.AlreadySubmitted("이 일정 투표는 이미 했어요.")
     attendee_ids = {p.id for p in _attending_players(db, event)}
     squads = _squad_of(db, event)
     my_squad = squads.get(respondent.id)
@@ -209,7 +209,7 @@ def submit(db: Session, event: Event, me: Player, body: PostGameSurveyIn) -> Pos
         db.flush()
     except IntegrityError:  # 같은 사람이 두 기기에서 동시에 제출 — 먼저 온 쪽만 남는다
         db.rollback()
-        raise errors.AlreadySubmitted("이미 이 회차 투표를 제출했어요.") from None
+        raise errors.AlreadySubmitted("이 일정 투표는 이미 했어요.") from None
     recompute_team_chemistry(db, event.team_id)
     db.commit()
     return survey
@@ -218,7 +218,7 @@ def submit(db: Session, event: Event, me: Player, body: PostGameSurveyIn) -> Pos
 def share_message(db: Session, event: Event) -> ShareMessage:
     responded, total = progress(db, event)
     link = f"{get_settings().frontend_base_url.rstrip('/')}/events/{event.id}/vote"
-    text = f"🏀 오늘 경기 어떠셨나요?\n같이 뛰고 싶은 사람에게 투표해주세요 (30초)\n👉 {link}"
+    text = f"[HOOPLY] {event.event_date.month}/{event.event_date.day} 경기 어땠어요?\n다음에 같이 뛰고 싶은 사람에게 투표해 주세요 (30초)\n{link}"
     return ShareMessage(text=text, link=link, responded=responded, total=total, open=is_open(event), opens_at=opens_at(event))
 
 
@@ -535,7 +535,7 @@ def _period_range(period: str) -> tuple[date, date]:
         else:
             raise ValueError(period)
     except ValueError:
-        raise errors.ValidationError("기간은 2026-09(월) 또는 2026-Q3(분기) 형태로 적어 주세요.") from None
+        raise errors.ValidationError("기간을 다시 골라 주세요.") from None
     return lo, hi
 
 

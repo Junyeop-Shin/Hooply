@@ -6,7 +6,7 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
-import { errorMessage } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
 import { confirm, toast } from '../store/feedback'
 import { toAvatarDataUrl } from '../lib/image'
 import { peerApi } from '../api/peer'
@@ -40,21 +40,7 @@ export function ProfilePage() {
           <LoadError message={errorMessage(me.error, '내 정보를 불러오지 못했어요.')} onRetry={() => me.refetch()} retrying={me.isFetching} />
         ) : (
           <>
-            <Card className="flex items-center gap-4">
-              <AvatarEditor user={u} />
-              <div className="min-w-0 flex-1">
-                <p className="text-lg font-bold text-ink">{u.nickname ?? u.name}</p>
-                <p className="truncate text-sm text-muted">{u.email ?? '이메일 없음 (카카오 계정)'}</p>
-                <div className="mt-1.5 flex gap-1.5">
-                  {u.identities.map((i) => <Badge key={i.provider} tone={i.provider === 'KAKAO' ? 'warn' : 'navy'}>{i.provider === 'KAKAO' ? '카카오' : '이메일'}</Badge>)}
-                  {!u.identities.some((i) => i.provider === 'KAKAO') && (
-                    <button onClick={() => startKakao('link', (m) => toast(m, 'error'))} className="-my-3 flex min-h-11 items-center"><span className="rounded-full bg-[#FEE500] px-2.5 py-0.5 text-xs font-semibold text-[#191919]">카카오 연결</span></button>
-                  )}
-                  {u.global_role === 'ADMIN' && <Badge tone="court">관리자</Badge>}
-                  {u.height_cm && <Badge>{u.height_cm}cm</Badge>}
-                </div>
-              </div>
-            </Card>
+            <AccountCard user={u} />
 
             <section>
               <SectionTitle>포지션</SectionTitle>
@@ -62,7 +48,7 @@ export function ProfilePage() {
                 <PositionEditor key={p.playable_positions.join(',')} current={p.playable_positions} />
               ) : (
                 <Card className="flex items-center justify-between gap-3">
-                  <div><p className="font-semibold text-ink">설문을 마쳐 주세요</p><p className="text-xs text-muted">실력·포지션 프로필이 아직 없어요.</p></div>
+                  <div><p className="font-semibold text-ink">설문을 마쳐 주세요</p><p className="text-xs text-muted">실력 · 포지션 프로필이 아직 없어요.</p></div>
                   <Button onClick={() => nav('/survey')}>설문하기</Button>
                 </Card>
               )}
@@ -71,7 +57,7 @@ export function ProfilePage() {
             {teams.length > 1 && (
               <div className="flex gap-1.5 overflow-x-auto px-1">
                 {teams.map((t) => (
-                  <button key={t.team_id} onClick={() => setChosen(t.team_id)} aria-pressed={current?.team_id === t.team_id} className={`min-h-11 shrink-0 rounded-full px-3 text-xs font-semibold ${current?.team_id === t.team_id ? 'bg-navy-800 text-white' : 'bg-sunken text-muted'}`}>
+                  <button key={t.team_id} onClick={() => setChosen(t.team_id)} aria-pressed={current?.team_id === t.team_id} className={`min-h-11 shrink-0 rounded-full px-3 text-xs font-semibold ${current?.team_id === t.team_id ? 'bg-inverse text-on-inverse' : 'bg-sunken text-muted'}`}>
                     {t.team_name}{u?.primary_team_id === t.team_id ? ' (기본)' : ''}
                   </button>
                 ))}
@@ -95,14 +81,14 @@ export function ProfilePage() {
                 </Card>
                 <Card className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs text-muted">이 동호회에서 내 실력 위치</p>
+                    <p className="text-xs text-muted">이 팀에서 내 실력 위치</p>
                     {current.self_rank_level ? (
                       <p className="mt-0.5"><Badge tone="court">{SELF_RANK_LABEL[current.self_rank_level]}</Badge></p>
                     ) : (
-                      <p className="mt-0.5 text-sm font-semibold text-brand-ink">아직 안 알려줬어요 — 배정 정확도에 가장 큰 영향을 줘요</p>
+                      <p className="mt-0.5 text-sm font-semibold text-brand-ink">아직 안 알려 줬어요. 팀을 고르게 나누는 데 가장 중요해요</p>
                     )}
                   </div>
-                  <Button variant="ghost" className="min-h-10 text-sm" onClick={() => nav(`/teams/${current.team_id}/self-rank`)}>{current.self_rank_level ? '수정' : '설정'}</Button>
+                  <Button variant="ghost" aria-label={current.self_rank_level ? '내 실력 위치 고치기' : '내 실력 위치 알려 주기'} className="shrink-0 text-sm" onClick={() => nav(`/teams/${current.team_id}/self-rank`)}>{current.self_rank_level ? '고치기' : '알려 주기'}</Button>
                 </Card>
               </section>
             )}
@@ -112,7 +98,7 @@ export function ProfilePage() {
             ) : (
               <section>
                 <SectionTitle>기록</SectionTitle>
-                <EmptyState title="아직 경기 기록이 없어요" desc="팀에 가입하고 경기 기록이 쌓이면 여기에 나와요." />
+                <EmptyState title="아직 경기 기록이 없어요" desc="팀에 가입하고 경기 기록이 쌓이면 여기에 보여요." />
               </section>
             )}
 
@@ -127,6 +113,67 @@ export function ProfilePage() {
       </Content>
       <TabBar />
     </Screen>
+  )
+}
+
+/** 계정 카드 — 사진 · 이름 · 로그인 수단. "고치기" 를 누르면 같은 카드에서 이름 · 닉네임 · 키를 고친다 (카카오 가입자는 키를 넣을 곳이 여기뿐) */
+function AccountCard({ user: u }: { user: UserDetail }) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [f, setF] = useState({ name: '', nickname: '', height: '' })
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const h = f.height ? Number(f.height) : null
+  const heightError = h !== null && (h < 120 || h > 250) ? '120~250 사이로 넣어 주세요.' : undefined  // 서버 범위(UserUpdate)와 같다
+  const save = useMutation({
+    // 닉네임 · 키는 비우면 null 로 보내 지운다
+    mutationFn: () => authApi.updateMe({ name: f.name.trim(), nickname: f.nickname.trim() || null, height_cm: h }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['profile'] }); setEditing(false); toast('프로필을 저장했어요.') },
+    onError: (e) => {
+      const fe: Record<string, string> = {}
+      if (e instanceof ApiError && e.code === 'VALIDATION_ERROR') e.details.forEach((d) => { if (d.field) fe[d.field.replace(/^body\./, '')] = d.reason })
+      setFieldErrors(fe)
+      toast(errorMessage(e, '프로필을 저장하지 못했어요.'), 'error')
+    },
+  })
+  if (editing) {
+    return (
+      <Card>
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save.mutate() }}>
+          <Field label="이름" autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={50} error={fieldErrors.name ?? (f.name.trim() ? undefined : '이름은 비울 수 없어요.')} required />
+          <Field label="닉네임 (선택)" autoComplete="nickname" value={f.nickname} onChange={(e) => setF({ ...f, nickname: e.target.value })} maxLength={50} hint="팀원에게 보이는 이름이에요. 비우면 이름을 써요." error={fieldErrors.nickname} />
+          <Field label="키 (cm)" type="text" inputMode="numeric" value={f.height} onChange={(e) => setF({ ...f, height: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="178" hint="골밑 적성 계산에만 쓰이고 다른 팀원에게 보이지 않아요." error={heightError ?? fieldErrors.height_cm} />
+          {/* 팀원 목록의 이름(players.display_name)은 가입할 때 정해지고 PATCH /me 로는 바뀌지 않는다 */}
+          <p className="text-xs text-muted">이미 들어간 팀의 팀원 목록에 보이는 이름은 그대로예요. 새로 가입하는 팀부터 바뀐 이름을 써요.</p>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setEditing(false)}>취소</Button>
+            <Button type="submit" full loading={save.isPending} disabled={!f.name.trim() || !!heightError}>저장</Button>
+          </div>
+        </form>
+      </Card>
+    )
+  }
+  return (
+    <Card className="space-y-2">
+      <div className="flex items-center gap-4">
+        <AvatarEditor user={u} />
+        <div className="min-w-0 flex-1">
+          <p className="text-lg font-bold text-ink">{u.nickname ?? u.name}</p>
+          <p className="truncate text-sm text-muted">{u.email ?? '이메일 없음 (카카오 계정)'}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {u.identities.map((i) => <Badge key={i.provider} tone={i.provider === 'KAKAO' ? 'warn' : 'navy'}>{i.provider === 'KAKAO' ? '카카오' : '이메일'}</Badge>)}
+            {!u.identities.some((i) => i.provider === 'KAKAO') && (
+              <button onClick={() => startKakao('link', (m) => toast(m, 'error'))} className="-my-3 flex min-h-11 items-center"><span className="rounded-full bg-[#FEE500] px-2.5 py-0.5 text-xs font-semibold text-[#191919]">카카오 연결</span></button>
+            )}
+            {u.global_role === 'ADMIN' && <Badge tone="court">관리자</Badge>}
+            {u.height_cm && <Badge>{u.height_cm}cm</Badge>}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <p className={`min-w-0 flex-1 text-xs ${u.height_cm ? 'text-muted' : 'font-semibold text-brand-ink'}`}>{u.height_cm ? '이름 · 닉네임 · 키' : '키를 넣으면 골밑 적성이 정확해져요'}</p>
+        <Button variant="ghost" aria-label="이름 · 닉네임 · 키 고치기" className="-my-1 shrink-0 text-sm" onClick={() => { setF({ name: u.name, nickname: u.nickname ?? '', height: u.height_cm ? String(u.height_cm) : '' }); setFieldErrors({}); save.reset(); setEditing(true) }}>고치기</Button>
+      </div>
+    </Card>
   )
 }
 
@@ -151,7 +198,7 @@ function AccountSection({ user, onLoggedOut }: { user: UserDetail; onLoggedOut: 
   const remove = useMutation({
     mutationFn: authApi.deleteMe,
     onSuccess: () => { toast('계정을 삭제했어요. 그동안 고마웠어요.'); onLoggedOut() },
-    onError: (e) => setMsg({ kind: 'error', text: errorMessage(e, '삭제하지 못했어요.') }),
+    onError: (e) => setMsg({ kind: 'error', text: errorMessage(e, '계정을 삭제하지 못했어요.') }),
   })
   return (
     <section className="space-y-2">
@@ -161,7 +208,7 @@ function AccountSection({ user, onLoggedOut }: { user: UserDetail; onLoggedOut: 
         <Card className="space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-ink">비밀번호 변경</p>
-            <Button variant="ghost" className="min-h-10 text-sm" onClick={() => setOpen((o) => !o)}>{open ? '닫기' : '바꾸기'}</Button>
+            <Button variant="ghost" className="text-sm" onClick={() => setOpen((o) => !o)}>{open ? '닫기' : '바꾸기'}</Button>
           </div>
           {open && (
             <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); change.mutate() }}>
@@ -174,7 +221,7 @@ function AccountSection({ user, onLoggedOut }: { user: UserDetail; onLoggedOut: 
       ) : (
         <Card><p className="text-sm text-muted">카카오로만 로그인하는 계정이에요. 이메일 비밀번호를 만들려면 로그인 화면의 '비밀번호 찾기'를 써 주세요.</p></Card>
       )}
-      <Button variant="danger" full onClick={onLoggedOut}>로그아웃</Button>
+      <Button variant="ghost" full className="border border-line" onClick={onLoggedOut}>로그아웃</Button>
       <button
         className="min-h-11 w-full text-center text-xs text-faint underline underline-offset-2"
         disabled={remove.isPending}
@@ -207,7 +254,7 @@ function PositionEditor({ current }: { current: Position[] }) {
           {current.length === 0 && <span className="text-sm text-muted">포지션 정보 없음</span>}
           {current.map((pos, i) => <Badge key={pos} tone={i === 0 ? 'court' : 'navy'}>{i === 0 ? `${pos} 선호` : pos}</Badge>)}
         </div>
-        <Button variant="ghost" className="min-h-10 text-sm" onClick={() => { setOrder(current); setEditing(true) }}>수정</Button>
+        <Button variant="ghost" aria-label="포지션 고치기" className="shrink-0 text-sm" onClick={() => { setOrder(current); setEditing(true) }}>고치기</Button>
       </Card>
     )
   }
@@ -220,8 +267,8 @@ function PositionEditor({ current }: { current: Position[] }) {
           return (
             <button key={pos} type="button" onClick={() => setOrder(idx >= 0 ? order.filter((x) => x !== pos) : [...order, pos])}
               aria-pressed={idx >= 0}
-              className={`relative min-h-11 flex-1 rounded-lg border text-sm font-bold ${idx >= 0 ? 'border-brand bg-brand text-on-brand' : 'border-line bg-surface text-ink'}`}>
-              {idx >= 0 && <span className="absolute -left-1 -top-1.5 flex size-5 items-center justify-center rounded-full bg-navy-800 text-[11px] text-white">{idx + 1}</span>}
+              className={`relative min-h-11 flex-1 rounded-lg border text-sm font-bold ${idx >= 0 ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-ink'}`}>
+              {idx >= 0 && <span className="absolute -left-1 -top-1.5 flex size-5 items-center justify-center rounded-full bg-brand text-[11px] text-on-brand">{idx + 1}</span>}
               {pos}
             </button>
           )
@@ -245,7 +292,7 @@ function RecordsSection({ teamName, playerId, many }: { teamName: string; player
       {q.isLoading ? <Spinner /> : !s ? (
         <LoadError message={errorMessage(q.error, '기록을 불러오지 못했어요.')} onRetry={() => q.refetch()} retrying={q.isFetching} />
       ) : s.quarters_played === 0 ? (
-        <EmptyState title="아직 경기 기록이 없어요" desc={`참석 ${s.events_attended}회 · 매니저가 쿼터를 기록하면 여기에 나와요.`} />
+        <EmptyState title="아직 경기 기록이 없어요" desc={`참석 ${s.events_attended}회 · 매니저가 경기를 기록하면 여기에 보여요.`} />
       ) : (
         <div className="space-y-2">
           <Card className="grid grid-cols-3 text-center">
@@ -295,7 +342,7 @@ function AvatarEditor({ user }: { user: UserDetail }) {
         {user.profile_image_url && !busy && (
           <button
             type="button" onClick={async () => { if (await confirm({ title: '프로필 사진을 지울까요?', body: '이름 첫 글자로 돌아가요.', confirmLabel: '지우기', danger: true })) remove.mutate() }}
-            aria-label="프로필 사진 삭제"
+            aria-label="프로필 사진 지우기"
             className="absolute -right-3.5 -top-3.5 flex size-11 items-center justify-center"
           >
             <span className="flex size-6 items-center justify-center rounded-full border border-line bg-surface text-xs text-muted shadow-sm">×</span>

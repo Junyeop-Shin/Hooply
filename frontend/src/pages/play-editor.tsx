@@ -15,7 +15,7 @@
  * 8. 저장하지 않은 편집은 이 탭에 보관한다(lib/play-draft) — 뒤로 가기 · 제스처 · 새로고침으로 나갔다 돌아오면 이어서 할지 묻는다.
  *    TopBar 뒤로 · 새로고침은 그 전에 한 번 더 묻는다
  */
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, errorMessage } from '../api/client'
@@ -24,8 +24,10 @@ import { teamPlaysApi } from '../api/tactics'
 import type { CourtPoint, OppDefense, Play, PlayAction, PlayActionType, PlayStep, RoleSource, ScreenCall, Situation, TacticRole, TeamPlayIn } from '../api/types'
 import { BottomAction, Content, Screen, TopBar, useFinish } from '../components/layout'
 import { ActionMark, Court, H, OOB_H, R, TONE, TacticBoard, W, sx, sy } from '../components/tactic-board'
-import { CIRCLED } from '../components/tactics'
-import { Alert, Button, Field, SectionTitle, Spinner } from '../components/ui'
+import { CIRCLED, ROLE_HINT } from '../components/tactics'
+import { Alert, Button, Field, LoadError, SectionTitle, Spinner } from '../components/ui'
+import { CORNER_Y, COURT_H, rimDistance, zoneOf } from '../lib/court'
+import { josa } from '../lib/josa'
 import { ACTION_LABEL, ROLE_LABEL, renderCounter, stepStates } from '../lib/tactics'
 import { useDebounced } from '../lib/typewriter'
 import { clearPlayDraft, playDraftKey, readPlayDraft, writePlayDraft, type PlayDraftBody } from '../lib/play-draft'
@@ -43,6 +45,17 @@ const autoCaption = (actions: PlayAction[]) =>
   actions.map((a) => `${a.slot}번 ${ACTION_LABEL[a.type]}${a.target ? ` → ${a.target}번` : ''}`).join(' · ').slice(0, 80)
 
 interface Pending { slot: number; type?: PlayActionType; target?: number }
+
+/** 좌표 → 사람이 부르는 자리 이름 (화면 읽기 · 키보드 안내용). 3점 · 미들 · 페인트 판정은 lib/court. 왼쪽 · 오른쪽은 화면 기준 */
+function spotName({ x, y }: CourtPoint): string {
+  if (y < 0) return '코트 밖'
+  const side = x < 0.35 ? '왼쪽 ' : x > 0.65 ? '오른쪽 ' : ''
+  const zone = zoneOf(x, y)
+  if (zone === 'paint') return rimDistance(x, y) < 2.5 ? '골밑' : '페인트존'
+  if (zone === 'three') return side ? `${side}${y * COURT_H <= CORNER_Y ? '코너' : '윙'}` : '탑'
+  return side ? `${side}미들` : '자유투 라인 뒤'
+}
+const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
 
 export function PlayEditorPage() {
   const { teamId: tid = '', playId: pidParam } = useParams()
@@ -62,7 +75,7 @@ export function PlayEditorPage() {
     return (
       <Screen>
         <TopBar title="전술 고치기" back={`/teams/${teamId}`} />
-        {existing.isLoading ? <Spinner page /> : <Content><Alert>{errorMessage(existing.error, '전술을 불러오지 못했어요.')}</Alert></Content>}
+        {existing.isLoading ? <Spinner page /> : <Content><LoadError message={errorMessage(existing.error, '전술을 불러오지 못했어요.')} onRetry={() => existing.refetch()} retrying={existing.isFetching} /></Content>}
       </Screen>
     )
   }
@@ -101,6 +114,7 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
   // AI 설명 — 설명을 받을 때의 움직임 · 역할(key)이 그대로일 때만 보인다
   const [aiReasons, setAiReasons] = useState<{ key: string; reasons: string[]; fallback: boolean } | null>(null)
   const [rolesFor, setRolesFor] = useState<string | null>(null) // 역할을 직접 고칠 때의 동작 (바뀌면 다시 확인하라고 알린다)
+  const [said, setSaid] = useState('') // 키보드로 옮긴 결과를 화면 읽기에 알리는 한 줄
 
   // 서버에 보낼 값 — 빈 단계는 빼고, 비어 있는 설명은 자동 문장으로
   const cleanSteps = useMemo(
@@ -193,6 +207,7 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
     if (!last) return
     setHistory((h) => h.slice(0, -1))
     restore(last)
+    setSaid('바로 앞에 바꾼 것을 되돌렸어요.')
   }
   const resetAll = async () => {
     if (!(await confirm(playId
@@ -225,7 +240,7 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
     if (!pendingDraft || asked.current) return
     asked.current = true
     const d = pendingDraft
-    confirm({ title: '저장하지 않은 편집 내용이 있어요', body: '이어서 할까요? 버리면 이 화면을 열었을 때의 내용으로 시작해요.', confirmLabel: '이어서 하기', cancelLabel: '버리기' }).then((ok) => {
+    confirm({ title: '저장하지 않고 그리던 전술이 있어요', body: '이어서 그릴까요? 버리면 이 화면을 열었을 때의 내용으로 시작해요.', confirmLabel: '이어서 하기', cancelLabel: '버리기' }).then((ok) => {
       if (ok) {
         setName(d.name); setSummary(d.summary); setOppDefense(d.oppDefense); setScreenCall(d.screenCall); setSituation(d.situation); setCounter(d.counter)
         setStart(d.start); setBall(d.ball); setSteps(d.steps); setEdited(new Set(d.edited)); setRoles(d.roles); setRoleSource(d.roleSource)
@@ -253,6 +268,7 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
     const actions = [...kept, a].sort((x, y) => x.slot - y.slot)
     setStep(k, { caption: edited.has(k) ? cur.caption : autoCaption(actions), actions })
     setPending(null)
+    setSaid(`${a.slot}번 ${ACTION_LABEL[a.type]} 동작을 넣었어요.`)
   }
   const removeAction = (i: number) => {
     if (k === null) return
@@ -297,13 +313,19 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
   }
 
   const prompt = k === null
-    ? '동그라미를 끌어 시작 위치를 정해요.'
-    : !pending ? '움직일 사람(동그라미)을 누르세요.'
+    ? '동그라미를 끌어 시작 위치를 정해 주세요.'
+    : !pending ? '움직일 사람(동그라미)을 눌러 주세요.'
       : !pending.type ? `${pending.slot}번이 무엇을 할까요?`
-        : pending.type === 'pass' || pending.type === 'handoff' ? `${pending.slot}번이 누구에게 ${ACTION_LABEL[pending.type]}할까요? 받을 사람을 누르세요.`
-          : pending.type === 'screen' && pending.target === undefined ? `${pending.slot}번이 누구에게 스크린을 걸까요? 동료를 누르세요.`
-            : pending.type === 'screen' ? '스크린을 설 자리를 코트에서 누르세요.'
-              : `${pending.slot}번이 어디로 ${ACTION_LABEL[pending.type]}할까요? 코트를 누르세요.`
+        : pending.type === 'pass' || pending.type === 'handoff' ? `${pending.slot}번이 누구에게 ${ACTION_LABEL[pending.type]}할까요? 받을 사람을 눌러 주세요.`
+          : pending.type === 'screen' && pending.target === undefined ? `${pending.slot}번이 누구에게 스크린을 걸까요? 동료를 눌러 주세요.`
+            : pending.type === 'screen' ? '스크린을 설 자리를 코트에서 눌러 주세요.'
+              : `${pending.slot}번이 어디로 ${ACTION_LABEL[pending.type]}할까요? 코트를 눌러 주세요.`
+  // 코트에서 목적지를 골라야 하는 때 — 키보드 커서가 여기서 출발한다. 스크린은 받는 동료 바로 옆(스크리너 쪽)에서
+  const mover = pending ? before.pos[pending.slot - 1] : null
+  const mate = pending?.target !== undefined ? before.pos[pending.target - 1] : null
+  const aimFrom: CourtPoint | null = k === null || !mover || !pending?.type ? null
+    : ['move', 'cut', 'dribble'].includes(pending.type) ? mover
+      : pending.type === 'screen' && mate ? { x: mate.x + Math.sign(mover.x - mate.x) * 0.06, y: mate.y + Math.sign(mover.y - mate.y) * 0.04 } : null
   const saveError = save.error instanceof ApiError ? save.error : null
 
   return (
@@ -315,9 +337,10 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
           <Field label="한 줄 설명 (선택)" value={summary} maxLength={80} onChange={(e) => setSummary(e.target.value)} placeholder="예: 빅맨 스크린 뒤 골밑으로" />
           <Choice label="상대 수비" value={oppDefense} onChange={setOppDefense} options={[['man', '맨투맨'], ['zone', '지역 (2-3)']]} />
           <Choice label="스크린 대응" value={screenCall} onChange={setScreenCall} options={[['switch', '스위치'], ['stay', '스테이']]} />
-          <p className="-mt-1 px-1 text-[11px] text-muted">
-            이 전술이 가정한 상대 수비예요. 전술판의 수비가 이대로 움직이고, 추천도 이 수비 상대로만 해요.
-            {screenCall === 'switch' ? ' 스위치: 스크린을 만나면 두 수비가 막을 사람을 바꿔요.' : ' 스테이: 스크린에 걸린 수비가 돌아서 끝까지 따라와요.'}
+          <p className="-mt-1 px-1 text-xs text-muted">
+            <span className="block">{oppDefense === 'zone' ? '지역 (2-3): 앞에 2명 · 뒤에 3명이 자리를 지켜요.' : '맨투맨: 한 사람씩 맡아서 막아요.'}</span>
+            <span className="block">{screenCall === 'switch' ? '스위치: 스크린을 만나면 막는 사람을 서로 바꿔요.' : '스테이: 스크린을 만나도 맡은 사람을 끝까지 따라가요.'}</span>
+            <span className="block">전술판의 상대 수비가 이대로 움직이고, 앱도 이 수비를 상대할 때만 이 전술을 추천해요.</span>
           </p>
           <Choice label="상황" value={situation} onChange={setSituation} options={[['half_court', '하프코트'], ['inbound', '인바운드']]} />
         </section>
@@ -330,14 +353,17 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
             </span>
           }>움직임 그리기</SectionTitle>
           <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label="단계">
-            <StepTab active={mode === 'start'} onClick={() => { setMode('start'); setPending(null) }}>시작 위치</StepTab>
+            <StepTab id="step-tab-start" active={mode === 'start'} onClick={() => { setMode('start'); setPending(null) }}>시작 위치</StepTab>
             {steps.map((s, i) => (
-              <StepTab key={i} active={mode === i} onClick={() => { setMode(i); setPending(null) }} warn={!s.actions.length}>{i + 1}단계</StepTab>
+              <StepTab key={i} id={`step-tab-${i}`} active={mode === i} onClick={() => { setMode(i); setPending(null) }} warn={!s.actions.length}>{i + 1}단계</StepTab>
             ))}
-            <StepTab active={false} onClick={addStep}>+ 단계</StepTab>
+            <StepTab id="step-tab-add" active={false} onClick={addStep}>+ 단계</StepTab>
           </div>
+          <div role="tabpanel" aria-labelledby={`step-tab-${mode}`} className="space-y-2">
           <p className="min-h-5 px-1 text-sm font-semibold text-ink" aria-live="polite">{prompt}</p>
+          <p className="sr-only" aria-live="polite">{said}</p>
           <EditorCourt
+            aimFrom={aimFrom} stage={pending ? `${pending.slot}${pending.type ?? ''}${pending.target ?? ''}` : ''} onSay={setSaid} onCancel={() => setPending(null)}
             positions={before.pos} holder={holder} inbound={situation === 'inbound'}
             actions={k !== null ? steps[k].actions : []} to={k !== null ? states[k + 1].pos : before.pos}
             selected={pending?.slot ?? null} targeting={pending?.target ?? null}
@@ -345,36 +371,40 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
             onDragStart={remember}
             onTapSlot={tapSlot} onTapCourt={tapCourt}
           />
+          {/* 손가락으로 쓰는 화면에는 필요 없는 안내 — 마우스 · 키보드가 있는 기기에서만 */}
+          <p className="hidden px-1 text-xs text-muted [@media(pointer:fine)]:block">
+            키보드로는 동그라미에서 {k === null ? '화살표 키로 옮겨요 (Shift 와 함께 누르면 크게).' : 'Enter 로 고르고, 목적지는 화살표 키로 옮긴 뒤 Enter 로 정해요.'}
+          </p>
           {k === null ? (
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-muted">처음 공</span>
               {[1, 2, 3, 4, 5].map((s) => (
-                <button key={s} type="button" aria-pressed={ball === s} onClick={() => { if (s !== ball) { remember(); setBall(s) } }} className={`min-h-10 min-w-10 rounded-full text-sm font-bold ${ball === s ? 'bg-brand text-on-brand' : 'border border-line bg-surface text-ink-2'}`}>{s}</button>
+                <button key={s} type="button" aria-pressed={ball === s} onClick={() => { if (s !== ball) { remember(); setBall(s) } }} aria-label={`처음 공 ${s}번`} className={`min-h-11 min-w-11 rounded-full border text-sm font-bold ${ball === s ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-ink-2'}`}>{s}</button>
               ))}
             </div>
           ) : (
             <div className="space-y-2">
               {pending && !pending.type && (
-                <div className="flex flex-wrap gap-1.5" aria-label="동작 고르기">
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="동작 고르기">
                   {(pending.slot === holder ? BALL_TYPES : OFF_TYPES).map((t) => (
-                    <button key={t} type="button" onClick={() => chooseType(t)} className="min-h-10 rounded-full border border-brand-line bg-brand-soft px-3.5 text-sm font-bold text-brand-ink">{ACTION_LABEL[t]}</button>
+                    <button key={t} type="button" onClick={() => chooseType(t)} className="min-h-11 rounded-full border border-brand-line bg-brand-soft px-3.5 text-sm font-bold text-brand-ink">{ACTION_LABEL[t]}</button>
                   ))}
-                  <button type="button" onClick={() => setPending(null)} className="min-h-10 px-2 text-sm text-muted">취소</button>
+                  <button type="button" onClick={() => setPending(null)} className="min-h-11 px-2 text-sm text-muted">취소</button>
                 </div>
               )}
               {holder === null && <Alert kind="warn">앞 단계에서 슛을 해서 공이 없어요. 이 단계는 지우거나 앞 단계를 고쳐 주세요.</Alert>}
               <ul className="space-y-1">
                 {steps[k].actions.map((a, i) => (
-                  <li key={i} className="flex min-h-10 items-center gap-2 rounded-xl bg-sunken px-3 text-sm">
+                  <li key={i} className="flex min-h-11 items-center gap-2 rounded-xl bg-sunken pl-3 text-sm">
                     <span className="flex-1 text-ink">{a.slot}번 {ACTION_LABEL[a.type]}{a.target ? ` → ${a.target}번` : ''}</span>
-                    <button type="button" onClick={() => removeAction(i)} aria-label={`${a.slot}번 ${ACTION_LABEL[a.type]} 지우기`} className="size-9 text-lg text-faint">×</button>
+                    <button type="button" onClick={() => removeAction(i)} aria-label={`${a.slot}번 ${ACTION_LABEL[a.type]} 지우기`} className="size-11 shrink-0 text-lg text-faint">×</button>
                   </li>
                 ))}
               </ul>
               <Field
                 label={`${k + 1}단계 설명`} value={steps[k].caption} maxLength={80}
                 onChange={(e) => { setEdited((s) => new Set(s).add(k)); setStep(k, { ...steps[k], caption: e.target.value }) }}
-                placeholder="비워 두면 동작으로 자동으로 적어요"
+                placeholder="비워 두면 앱이 동작을 보고 적어요"
               />
               <Button variant="danger" onClick={deleteStep}>{k + 1}단계 지우기</Button>
             </div>
@@ -385,6 +415,7 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
               {check.data.errors.map((e) => <span key={e} className="block">{e}</span>)}
             </Alert>
           )}
+          </div>
         </section>
 
         {playable && (
@@ -396,33 +427,33 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
 
         <section className="space-y-2">
           <SectionTitle action={
-            <button type="button" onClick={() => ai.mutate(reasonKey)} disabled={!playable || ai.isPending || !!explained} className="text-sm font-semibold text-brand-ink disabled:opacity-40">
+            <button type="button" onClick={() => ai.mutate(reasonKey)} disabled={!playable || ai.isPending || !!explained} className="-my-2 min-h-11 text-sm font-semibold text-brand-ink disabled:opacity-40">
               {ai.isPending ? 'AI가 읽는 중…' : 'AI로 이유 설명 받기'}
             </button>
           }>
             자리별 역할
           </SectionTitle>
           <p className="px-1 text-xs text-muted">
-            {roles === null ? '움직임에서 자동으로 뽑은 역할이에요. 추천할 때 이 역할에 맞는 사람을 앉혀요.'
+            {roles === null ? '앱이 움직임을 보고 붙인 역할이에요. 추천할 때 이 역할에 맞는 사람을 세워요.'
               : roleSource === 'MANAGER' ? '직접 정한 역할이에요.' : roleSource === 'AI' ? 'AI가 붙인 역할이에요.' : '움직임에서 뽑아 저장한 역할이에요.'}
-            {roles && rolesFor && rolesFor !== shape && ' 움직임을 바꿨다면 역할도 다시 확인해 보세요.'}
+            {roles && rolesFor && rolesFor !== shape && ' 움직임을 바꿨다면 역할도 다시 확인해 주세요.'}
             {explained && (explained.fallback ? ' AI를 쓸 수 없어 움직임에서 읽은 이유를 보여 줘요.' : ' 아래 설명은 AI가 전술을 읽고 쓴 거예요.')}
           </p>
           {ai.isError && <Alert>{errorMessage(ai.error, '이유를 받지 못했어요.')}</Alert>}
           <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
             {shownRoles.map((r, i) => (
               <li key={i} className="flex items-start gap-3 px-4 py-2.5">
-                <span className="w-5 pt-2 text-center text-sm font-bold text-brand-ink">{CIRCLED[i]}</span>
+                <span className="w-5 pt-2.5 text-center text-sm font-bold text-brand-ink">{CIRCLED[i]}</span>
                 <div className="min-w-0 flex-1">
                   <label className="sr-only" htmlFor={`role-${i}`}>{i + 1}번 역할</label>
                   <select
                     id={`role-${i}`} value={r}
                     onChange={(e) => { const next = [...shownRoles]; next[i] = e.target.value as TacticRole; setRoles(next); setRoleSource('MANAGER'); setRolesFor(shape) }}
-                    className="min-h-10 w-full rounded-xl border border-line bg-surface px-2 text-sm text-ink"
+                    className="min-h-11 w-full rounded-xl border border-line-field bg-surface px-2 text-base text-ink"
                   >
                     {ROLES.map((x) => <option key={x} value={x}>{ROLE_LABEL[x]}</option>)}
                   </select>
-                  {shownReasons?.[i] && <p className="mt-1 text-xs text-muted">{shownReasons[i]}</p>}
+                  <p className="mt-1 text-xs text-muted">{shownReasons?.[i] || ROLE_HINT[r]}</p>
                 </div>
               </li>
             ))}
@@ -449,19 +480,20 @@ function Editor({ teamId, playId, userId, initial, initialSource, updatedAt }: {
         )}
       </Content>
       <BottomAction>
+        {(!name.trim() || !playable) && <p className="mb-2 px-1 text-xs text-muted" role="status">{!name.trim() ? '전술 이름을 적으면 저장할 수 있어요.' : '움직임을 끝까지 그리면 저장할 수 있어요.'}</p>}
         <Button full loading={save.isPending} disabled={!name.trim() || !playable} onClick={() => save.mutate()}>
-          {!name.trim() ? '이름을 적어 주세요' : !playable ? '움직임을 완성해 주세요' : playId ? '고친 내용 저장' : '전술 저장'}
+          {playId ? '고친 내용 저장' : '전술 저장'}
         </Button>
       </BottomAction>
     </Screen>
   )
 }
 
-function StepTab({ active, warn, onClick, children }: { active: boolean; warn?: boolean; onClick: () => void; children: ReactNode }) {
+function StepTab({ id, active, warn, onClick, children }: { id: string; active: boolean; warn?: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
-      type="button" role="tab" aria-selected={active} onClick={onClick}
-      className={`min-h-10 shrink-0 rounded-full px-3.5 text-sm font-bold ${active ? 'bg-bar text-bar-ink' : warn ? 'border border-warn-line bg-warn-soft text-warn-ink' : 'border border-line bg-surface text-ink-2'}`}
+      type="button" role="tab" id={id} aria-selected={active} onClick={onClick}
+      className={`min-h-11 shrink-0 rounded-full px-3.5 text-sm font-bold ${active ? 'border border-inverse bg-inverse text-on-inverse' : warn ? 'border border-warn-line bg-warn-soft text-warn-ink' : 'border border-line bg-surface text-ink-2'}`}
     >
       {children}
     </button>
@@ -474,7 +506,7 @@ function Choice<T extends string>({ label, value, onChange, options }: { label: 
       <p className="mb-1.5 text-sm font-medium text-ink">{label}</p>
       <div role="radiogroup" aria-label={label} className="grid rounded-xl bg-sunken p-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
         {options.map(([v, text]) => (
-          <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)} className={`min-h-10 rounded-lg text-sm font-bold ${value === v ? 'bg-surface text-ink shadow' : 'text-muted'}`}>{text}</button>
+          <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)} className={`min-h-11 rounded-lg text-sm font-bold ${value === v ? 'bg-inverse text-on-inverse shadow' : 'text-muted'}`}>{text}</button>
         ))}
       </div>
     </div>
@@ -497,28 +529,74 @@ function CounterInput({ value, onChange }: { value: string; onChange: (v: string
       <textarea
         id="counter" ref={ref} rows={2} value={value} maxLength={120} onChange={(e) => onChange(e.target.value)}
         placeholder="예: {5}의 롤이 막히면 코너 {2}에게 빼 줘요"
-        className="block w-full resize-none rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/25"
+        className="block w-full resize-none rounded-xl border border-line-field bg-surface px-3.5 py-2.5 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/25"
       />
       <div className="flex items-center gap-1.5">
         <span className="text-xs text-muted">자리 넣기</span>
         {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} type="button" onClick={() => insert(n)} aria-label={`${n}번 자리 넣기`} className="min-h-9 min-w-9 rounded-full border border-line bg-surface text-sm font-bold text-brand-ink">{CIRCLED[n - 1]}</button>
+          <button key={n} type="button" onClick={() => insert(n)} aria-label={`${n}번 자리 넣기`} className="min-h-11 min-w-11 rounded-full border border-line bg-surface text-sm font-bold text-brand-ink">{CIRCLED[n - 1]}</button>
         ))}
       </div>
     </div>
   )
 }
 
-/** 편집용 코트 — 시작 위치에서는 끌어서 옮기고, 단계에서는 동그라미·코트를 눌러 동작을 넣는다 */
-function EditorCourt({ positions, to, holder, inbound, actions, selected, targeting, onDrag, onDragStart, onTapSlot, onTapCourt }: {
+type Nudge = (e: ReactKeyboardEvent, p: CourtPoint) => CourtPoint | null
+
+/** 키보드용 목적지 커서 — 화살표 키로 옮기고 Enter 로 정한다. 키보드로 포커스가 왔을 때만 보이고 터치는 통과시킨다 */
+function Aim({ from, nudge, onSay, onPick, onCancel }: { from: CourtPoint; nudge: Nudge; onSay: (msg: string) => void; onPick: (p: CourtPoint) => void; onCancel: () => void }) {
+  const ref = useRef<SVGGElement>(null)
+  const [p, setP] = useState(from)
+  useEffect(() => { ref.current?.focus({ preventScroll: true }) }, [])
+  return (
+    <g
+      ref={ref} role="button" tabIndex={0} aria-label="목적지 커서, 화살표 키로 옮기고 Enter 로 정해요" pointerEvents="none" className="opacity-0 outline-none focus-visible:opacity-100"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') { onCancel(); return }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(p); return }
+        const next = nudge(e, p)
+        if (next) { setP(next); onSay(`목적지 ${spotName(next)}`) }
+      }}
+    >
+      <circle cx={sx(p)} cy={sy(p)} r={R + 1.8} style={{ fill: 'var(--color-surface)', fillOpacity: 0.6, stroke: 'var(--color-ink)' }} strokeWidth={1.2} strokeDasharray="2 1.4" />
+      <path d={`M${sx(p) - 3},${sy(p)} h6 M${sx(p)},${sy(p) - 3} v6`} style={{ stroke: 'var(--color-ink)' }} strokeWidth={0.9} />
+    </g>
+  )
+}
+
+/** 편집용 코트 — 시작 위치에서는 끌어서(키보드는 화살표 키로) 옮기고, 단계에서는 동그라미·코트를 눌러 동작을 넣는다 */
+function EditorCourt({ positions, to, holder, inbound, actions, selected, targeting, aimFrom, stage, onDrag, onDragStart, onTapSlot, onTapCourt, onSay, onCancel }: {
   positions: CourtPoint[]; to: CourtPoint[]; holder: number | null; inbound: boolean; actions: PlayAction[]
   selected: number | null; targeting: number | null
+  /** 코트에서 목적지를 골라야 할 때 키보드 커서가 출발할 자리 */
+  aimFrom: CourtPoint | null
+  /** 지금 고르는 중인 것(누가 · 무엇을 · 누구에게) — 바뀌면 커서를 새로 놓고 포커스를 챙긴다 */
+  stage: string
   onDrag?: (slot: number, p: CourtPoint) => void; onDragStart?: () => void; onTapSlot: (slot: number) => void; onTapCourt: (p: CourtPoint) => void
+  onSay: (msg: string) => void; onCancel: () => void
 }) {
   const svg = useRef<SVGSVGElement>(null)
+  const slots = useRef<(SVGGElement | null)[]>([])
+  const lastSelected = useRef<number | null>(null)
   const [drag, setDrag] = useState<number | null>(null)
   const top = inbound ? OOB_H : 0
   const colors = TONE.neutral
+  const r3 = (v: number) => Math.round(v * 1000) / 1000
+  // 코트 밖으로 못 나가게 — 끌기 · 누르기 · 화살표 키가 같이 쓴다
+  const clamp = (x: number, y: number): CourtPoint => ({ x: r3(Math.min(0.97, Math.max(0.03, x))), y: r3(Math.min(0.97, Math.max(inbound ? -0.07 : 0.02, y))) })
+  const nudge: Nudge = (e, p) => {
+    const d = ARROWS[e.key]
+    if (!d) return null
+    e.preventDefault()  // 화면이 같이 스크롤되지 않게
+    const s = e.shiftKey ? 0.1 : 0.02
+    return clamp(p.x + d[0] * s, p.y + d[1] * s)
+  }
+  // 동작 칩 · 목적지 커서가 사라지면 포커스가 갈 곳을 잃는다 — 키보드로 이어 갈 수 있게 방금 고른 자리로 돌려놓는다
+  useEffect(() => {
+    const s = selected ?? lastSelected.current
+    if (s && (!document.activeElement || document.activeElement === document.body)) slots.current[s - 1]?.focus({ preventScroll: true })
+    lastSelected.current = selected
+  }, [stage, selected])
 
   const toCourt = (e: { clientX: number; clientY: number }): CourtPoint | null => {
     const el = svg.current
@@ -527,8 +605,7 @@ function EditorCourt({ positions, to, holder, inbound, actions, selected, target
     const pt = el.createSVGPoint()
     pt.x = e.clientX; pt.y = e.clientY
     const p = pt.matrixTransform(ctm.inverse())
-    const r3 = (v: number) => Math.round(v * 1000) / 1000
-    return { x: r3(Math.min(0.97, Math.max(0.03, p.x / W))), y: r3(Math.min(0.97, Math.max(inbound ? -0.07 : 0.02, p.y / H))) }
+    return clamp(p.x / W, p.y / H)
   }
   const move = (e: ReactPointerEvent<SVGSVGElement>) => {
     if (drag === null || !onDrag) return
@@ -559,13 +636,25 @@ function EditorCourt({ positions, to, holder, inbound, actions, selected, target
       {positions.map((p, i) => {
         const slot = i + 1
         const ring = selected === slot ? 'var(--color-court-500)' : targeting === slot ? 'var(--color-info-ink)' : null
+        const spot = spotName(p)
         return (
           <g
-            key={i} role="button" aria-label={`${slot}번`} className="cursor-pointer"
+            key={i} ref={(el) => { slots.current[i] = el }} role="button" tabIndex={0} className="group cursor-pointer outline-none"
+            aria-label={`${slot}번`} aria-describedby={`ed-spot-${slot}`} aria-pressed={onDrag ? undefined : selected === slot}
             onPointerDown={(e) => { if (onDrag) { e.preventDefault(); svg.current?.setPointerCapture(e.pointerId); onDragStart?.(); setDrag(slot) } }}
             onClick={(e) => { e.stopPropagation(); if (!onDrag) onTapSlot(slot) }}
+            onKeyDown={(e) => {
+              if (!onDrag) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTapSlot(slot) } return }
+              const next = nudge(e, p)
+              if (!next) return
+              if (!e.repeat) onDragStart?.()  // 키를 누르고 있는 동안은 되돌리기 한 번으로 묶는다
+              onDrag(slot, next)
+              onSay(`${slot}번 자리를 ${spotName(next)}${josa(spotName(next), '로')} 옮겼어요.`)
+            }}
           >
+            <desc id={`ed-spot-${slot}`}>{`${spot}${holder === slot ? ', 공을 가지고 있어요' : ''}${onDrag ? ', 화살표 키로 옮겨요' : ''}`}</desc>
             <circle cx={sx(p)} cy={sy(p)} r={R + 4} fill="transparent" />
+            <circle cx={sx(p)} cy={sy(p)} r={R + 3.2} className="opacity-0 group-focus-visible:opacity-100" style={{ fill: 'none', stroke: 'var(--color-ink)' }} strokeWidth={1} />
             {ring && <circle cx={sx(p)} cy={sy(p)} r={R + 1.8} style={{ fill: 'none', stroke: ring }} strokeWidth={1.2} />}
             <circle cx={sx(p)} cy={sy(p)} r={R} style={{ fill: colors.fill, stroke: colors.stroke }} strokeWidth={0.6} />
             <text x={sx(p)} y={sy(p) + 1.9} textAnchor="middle" fontSize={5.4} fontWeight={800} style={{ fill: colors.ink }}>{slot}</text>
@@ -573,6 +662,7 @@ function EditorCourt({ positions, to, holder, inbound, actions, selected, target
           </g>
         )
       })}
+      {aimFrom && <Aim key={stage} from={aimFrom} nudge={nudge} onSay={onSay} onPick={onTapCourt} onCancel={onCancel} />}
     </svg>
   )
 }

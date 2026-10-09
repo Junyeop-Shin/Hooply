@@ -13,7 +13,7 @@ test('프로필 사진 추가 → 팀원 목록 아바타에 반영 → 삭제',
   // 프로필 카드가 다 그려진 뒤에 판단한다 — 로딩 중에 보면 '사진 없음' 으로 잘못 읽는다
   await expect(page.getByRole('button', { name: /프로필 사진 (추가하기|바꾸기)/ })).toBeVisible()
   // 이전 실행이 남긴 사진이 있으면 먼저 지운다 (반복 실행 가능하게)
-  const remove = page.getByRole('button', { name: '프로필 사진 삭제' })
+  const remove = page.getByRole('button', { name: '프로필 사진 지우기' })
   if (await remove.isVisible()) { await remove.click(); await confirmDelete() }
   await expect(page.getByRole('button', { name: '프로필 사진 추가하기' })).toBeVisible()
 
@@ -34,7 +34,7 @@ test('프로필 사진 추가 → 팀원 목록 아바타에 반영 → 삭제',
 
   // 지우면 이름 첫 글자로 돌아간다
   await page.goto('/me')
-  await page.getByRole('button', { name: '프로필 사진 삭제' }).click()
+  await page.getByRole('button', { name: '프로필 사진 지우기' }).click()
   await confirmDelete()
   await expect(page.getByRole('button', { name: '프로필 사진 추가하기' })).toBeVisible()
   await expect(page.locator('img[src*="avatar"]')).toHaveCount(0)

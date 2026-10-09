@@ -13,7 +13,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { errorMessage, errorMessageWithDetails as errMsg } from '../api/client'
-import { confirm } from '../store/feedback'
+import { confirm, toast } from '../store/feedback'
 import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
 import { invalidateEvent } from '../lib/invalidate'
 import { fromConstraintSet, isEmptyDraft, keepAttendees, readAssignDraft, writeAssignDraft } from '../lib/assign-draft'
@@ -25,18 +25,16 @@ import { inSameLock, mergeLock } from '../lib/locks'
 import { BottomAction, Content, Screen, TopBar, useFinish } from '../components/layout'
 import { FirstTimeTip } from '../components/tutorial'
 import { AiExplainCard } from '../components/ai-cards'
-import { SquadCard, rosterKey, type Marks } from '../components/adopted'
+import { MarkLegend, SquadCard, rosterKey, type Marks } from '../components/adopted'
 import { THREE_TEAM_FROM, THREE_TEAM_SUGGEST_FROM, squadName, squadStyle } from '../lib/squads'
-import { josa } from '../lib/josa'
 import { useDebounced } from '../lib/typewriter'
 
 const STRATEGY_LABEL: Record<Strategy, string> = { SKILL: '실력 우선', CHEMISTRY: '친화도 우선', BALANCED: '종합' }
 const teamName = squadName
-/** 참석 N명을 T팀으로 가장 고르게: 21·3 → "7·7·7" */
-const splitText = (n: number, t: number) => Array.from({ length: t }, (_, i) => Math.floor(n / t) + (i < n % t ? 1 : 0)).join('·')
-/** "블랙으로" · "화이트로" · "레드로" — 받침에 맞춘다 */
-const toTeam = (no: number) => `${teamName(no)}${josa(teamName(no), '으로')}`
-/** from 팀 칸에서 to 팀 칸으로 — 칸이 오른쪽이면 "레드로 →", 왼쪽이면 "← 블랙으로" */
+/** 참석 N명을 T팀으로 가장 고르게: 21·3 → "7 · 7 · 7" */
+const splitText = (n: number, t: number) => Array.from({ length: t }, (_, i) => Math.floor(n / t) + (i < n % t ? 1 : 0)).join(' · ')
+const toTeam = (no: number) => `${teamName(no)} 팀으로`
+/** from 팀 칸에서 to 팀 칸으로 — 칸이 오른쪽이면 "레드 팀으로 →", 왼쪽이면 "← 블랙 팀으로" */
 const moveLabel = (from: number, to: number, text: string) => (to > from ? `${text} →` : `← ${text}`)
 const LOCK_COLORS = ['border-court-500 ring-brand-line', 'border-navy-500 ring-navy-200', 'border-emerald-500 ring-emerald-200', 'border-amber-500 ring-amber-200']
 
@@ -81,13 +79,13 @@ export function AssignPage() {
   const run = useMutation({
     mutationFn: () => assignmentsApi.run(id, body),
     onSuccess: (r) => nav(`/assignments/runs/${r.id}`),
-    onError: (e) => setMsg(errMsg(e, '팀을 나누지 못했어요.')),
+    onError: (e) => toast(errMsg(e, '팀을 나누지 못했어요.'), 'error'),
   })
   const qc = useQueryClient()
   const closeRsvp = useMutation({
     mutationFn: () => eventsApi.closeRsvp(id),
     onSuccess: () => { invalidateEvent(qc, id, ev.data?.team_id); setMsg('참석 응답을 마감했어요.') },
-    onError: (e) => setMsg(errMsg(e, '마감하지 못했어요.')),
+    onError: (e) => toast(errMsg(e, '마감하지 못했어요.'), 'error'),
   })
   const loadLast = useMutation({
     mutationFn: () => assignmentsApi.lastConstraints(id),
@@ -98,7 +96,7 @@ export function AssignPage() {
       setPins(Object.fromEntries(c.pins.filter((p) => ids.has(p.player_id)).map((p) => [p.player_id, p.squad_no])))
       setMsg('지난 일정의 조건을 불러왔어요. 이번에 불참인 사람은 뺐어요.')
     },
-    onError: (e) => setMsg(errMsg(e, '지난 일정의 배정 기록이 없어요.')),
+    onError: (e) => toast(errMsg(e, '지난 일정의 배정 기록이 없어요.'), 'error'),
   })
 
   useEffect(() => { setSelected((s) => s.filter((pid) => byId.has(pid))) }, [byId])
@@ -113,7 +111,7 @@ export function AssignPage() {
       const untouched = isEmptyDraft({ locks, seps, pins }) && !threeChosen
       const d = draft ? keepAttendees(draft, ids) : last && untouched ? keepAttendees(fromConstraintSet(last.constraints, last.team_count), ids) : null
       if (d) { setLocks(d.locks); setSeps(d.seps); setPins(d.pins); setThreeChosen(d.three) }
-      if (!draft && d && !isEmptyDraft(d)) setMsg('지난번 팀을 짤 때 걸어 둔 조건을 불러왔어요.')
+      if (!draft && d && !isEmptyDraft(d)) setMsg('지난번 팀을 나눌 때 걸어 둔 조건을 불러왔어요.')
       setHydrated(true)
     }
   }
@@ -128,7 +126,7 @@ export function AssignPage() {
   const sepIndexOf = (pid: number) => seps.findIndex((g) => g.includes(pid))
   const toggle = (pid: number) => setSelected((s) => (s.includes(pid) ? s.filter((x) => x !== pid) : [...s, pid]))
   const addLock = (ids: number[]) => { setLocks((l) => mergeLock(l, ids)); setSelected([]) }  // 이미 묶인 사람이 있으면 그 묶음에 합친다
-  const addSep = (ids: number[]) => { setSeps((l) => [...l, ids.slice(-2)]); setSelected([]) }  // 3명 이상이면 가장 오래 전에 고른 사람부터 뺀다
+  const addSep = (ids: number[]) => { setSeps((l) => [...l, ids]); setSelected([]) }  // 버튼이 2명일 때만 켜진다
   const pinTo = (sq: number) => { setPins((p) => ({ ...p, ...Object.fromEntries(selected.map((pid) => [pid, sq])) })); setSelected([]) }
   const unpin = (pid: number) => setPins((p) => { const n = { ...p }; delete n[pid]; return n })
   const nextTeam = (sq: number) => (sq % teams) + 1
@@ -150,6 +148,8 @@ export function AssignPage() {
   const checkFailed = validate.isError && settledBody === body
   const feasible = checkFailed || (current && (validate.data?.feasible ?? false))  // 이전 조건의 검사 결과로 켜지지 않게
   const locked = ev.data.quarter_count > 0  // 경기 기록이 있으면 서버가 422 ASSIGNMENT_LOCKED
+  const checking = attendees.length > 0 && !checkFailed && (!current || validate.isLoading)  // 0.3초 모으는 중이거나 확인 요청이 가는 중
+  const runHint = locked ? '경기 기록이 있어 다시 나눌 수 없어요.' : attendees.length === 0 ? '참석자가 있어야 나눌 수 있어요.' : checking ? '조건 확인 중…' : !feasible ? '위 안내대로 조건을 풀면 나눌 수 있어요.' : null
   const hasConstraints = locks.length > 0 || seps.length > 0 || Object.keys(pins).length > 0
   const loadLastAsk = async () => {
     if (hasConstraints && !(await confirm({ title: '지난 일정 조건으로 바꿀까요?', body: '지금 걸어 둔 묶기 · 갈라놓기 · 미리 배치는 지워져요.', confirmLabel: '불러오기' }))) return
@@ -162,17 +162,17 @@ export function AssignPage() {
       <Content>
         <FirstTimeTip id="assign" />
         {msg && <Alert kind="info">{msg}</Alert>}
-        {locked && <Alert kind="warn">경기 기록이 있는 일정은 팀을 다시 짤 수 없어요. 쿼터 기록을 먼저 지워 주세요.</Alert>}
+        {locked && <Alert kind="warn">경기 기록이 있는 일정은 팀을 다시 나눌 수 없어요. 경기 기록을 먼저 지워 주세요.</Alert>}
         {ev.data.rsvp_open && (
           <Card className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-ink">아직 참석 응답을 받고 있어요</p>
-              <p className="text-xs text-muted">지금 마감하면 인원이 확정되고 팀원은 응답을 바꿀 수 없어요.</p>
+              <p className="text-xs text-muted">지금 마감하면 참석자가 확정되고 팀원은 응답을 바꿀 수 없어요.</p>
             </div>
-            <Button variant="secondary" className="min-h-10 shrink-0 whitespace-nowrap text-sm" loading={closeRsvp.isPending} onClick={async () => { if (await confirm(CLOSE_RSVP_CONFIRM)) closeRsvp.mutate() }}>응답 마감</Button>
+            <Button variant="secondary" className="shrink-0 whitespace-nowrap text-sm" loading={closeRsvp.isPending} onClick={async () => { if (await confirm(CLOSE_RSVP_CONFIRM)) closeRsvp.mutate() }}>응답 마감</Button>
           </Card>
         )}
-        {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 짠 배정안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
+        {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 나눈 배정안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
 
         {canThree && (
           <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-line bg-surface p-4">
@@ -202,8 +202,8 @@ export function AssignPage() {
                   <Card key={s.guest.id} className={`flex items-center gap-3 py-3 ${off ? 'opacity-60' : ''}`}>
                     <p className="min-w-0 flex-1 text-sm leading-snug text-ink">
                       {group
-                        ? <><b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님 묶음({group.length}명)에 함께 넣을까요?</>
-                        : <><b>{s.guest.display_name}</b>(게스트)을 <b>{s.target.display_name}</b>님과 같은 팀으로 묶을까요?</>}
+                        ? <>게스트 <b>{s.guest.display_name}</b>님을 <b>{s.target.display_name}</b>님 묶음({group.length}명)에 함께 넣을까요?</>
+                        : <>게스트 <b>{s.guest.display_name}</b>님을 <b>{s.target.display_name}</b>님과 같은 팀으로 묶을까요?</>}
                     </p>
                     {off ? (
                       <button className="-my-2 min-h-11 px-2 text-xs font-semibold text-brand-ink" onClick={() => setDismissed((d) => d.filter((x) => x !== s.guest.id))}>무시 취소</button>
@@ -229,12 +229,12 @@ export function AssignPage() {
                   className="min-h-11 px-1.5 text-xs font-semibold text-danger-ink"
                   onClick={async () => { if (await confirm({ title: '조건을 모두 지울까요?', body: '묶기 · 갈라놓기 · 미리 배치가 모두 지워져요.', confirmLabel: '모두 지우기', danger: true })) { setLocks([]); setSeps([]); setPins({}); setSelected([]) } }}
                 >
-                  설정 초기화
+                  조건 모두 지우기
                 </button>
               )}
             </span>
           }>
-            대기 칸 · 참석자 {attendees.length}명 {Object.keys(activePins).length > 0 && `(사전 배치 ${Object.keys(activePins).length}명 제외)`}
+            대기 칸 · 참석자 {attendees.length}명 {Object.keys(activePins).length > 0 && `(미리 배치 ${Object.keys(activePins).length}명 제외)`}
           </SectionTitle>
           <Card>
             <div className="flex flex-wrap gap-2">
@@ -247,35 +247,39 @@ export function AssignPage() {
                   <button
                     key={p.id}
                     onClick={() => toggle(p.id)}
-                    className={`relative flex min-h-10 items-center gap-1.5 rounded-full border-2 bg-surface pl-1 pr-3 text-sm font-semibold ${on ? 'border-court-500 bg-brand-soft ring-2 ring-brand-line' : li >= 0 ? LOCK_COLORS[li % LOCK_COLORS.length] + ' ring-2' : si >= 0 ? 'border-dashed border-danger-line' : 'border-line'}`}
+                    aria-pressed={on}
+                    className={`relative flex min-h-11 items-center gap-1.5 rounded-full border-2 bg-surface pl-1 pr-3 text-sm font-semibold ${on ? 'border-court-500 bg-brand-soft ring-2 ring-brand-line' : li >= 0 ? LOCK_COLORS[li % LOCK_COLORS.length] + ' ring-2' : si >= 0 ? 'border-dashed border-danger-line' : 'border-line'}`}
                   >
                     <GradeDot grade={p.skill_grade} />
                     {p.display_name}
                     <span className="text-[10px] text-faint">{p.primary_position ?? '?'}</span>
                     {p.kind === 'GUEST' && <span className="text-[10px] text-faint">G</span>}
+                    {li >= 0 && <span className="text-[10px] font-bold text-muted">묶{li + 1}</span>}
+                    {si >= 0 && <span className="text-[10px] font-bold text-danger-ink">갈{si + 1}</span>}
                     {a.team_lock_request_player_id && li < 0 && <span className="absolute -right-1 -top-1.5 rounded-full bg-brand px-1.5 text-[9px] text-on-brand">제안</span>}
                   </button>
                 )
               })}
-              {pool.length === 0 && <p className="text-sm text-muted">참석 확정자가 없어요.</p>}
+              {pool.length === 0 && <p className="text-sm text-muted">아직 참석한다고 답한 사람이 없어요. 일정 화면에서 응답을 기다려 주세요.</p>}
             </div>
             {selected.length >= 2 && (
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="secondary" className="min-h-10 text-sm" onClick={() => addLock(selected)}>같은 팀으로 묶기 ({selected.length})</Button>
-                <Button variant="ghost" className="min-h-10 text-sm" onClick={() => addSep(selected)}>갈라놓기 (최대 2명)</Button>
+                <Button variant="secondary" className="text-sm" onClick={() => addLock(selected)}>같은 팀으로 묶기 ({selected.length})</Button>
+                <Button variant="ghost" className="text-sm" disabled={selected.length !== 2} onClick={() => addSep(selected)}>갈라놓기</Button>
+                {selected.length !== 2 && <p className="w-full text-xs text-muted">갈라놓기는 2명만 골라 주세요</p>}
               </div>
             )}
             {selected.length >= 1 && (
               <div className="mt-2 flex gap-2">
                 {squadNos.map((sq) => (
-                  <button key={sq} onClick={() => pinTo(sq)} className={`min-h-11 flex-1 rounded-xl border text-sm font-semibold ${squadStyle(sq).card}`}>{teamName(sq)}에 배치</button>
+                  <button key={sq} onClick={() => pinTo(sq)} className={`min-h-11 flex-1 rounded-xl border text-sm font-semibold ${squadStyle(sq).card}`}>{teamName(sq)} 팀에 배치</button>
                 ))}
               </div>
             )}
             {(locks.length > 0 || seps.length > 0) && (
               <div className="mt-3 space-y-1 text-xs text-muted">
-                {locks.map((g, i) => <p key={`l${i}`} className="flex items-center gap-1"><span className={`inline-block size-2 shrink-0 rounded-full ${['bg-court-500', 'bg-navy-500', 'bg-emerald-500', 'bg-amber-500'][i % 4]}`} /><span className="min-w-0 flex-1">묶음: {g.map((p) => byId.get(p)?.display_name).join(' · ')}</span> <button className="-my-2 min-h-11 shrink-0 px-2 font-semibold text-brand-ink" aria-label={`묶음 ${i + 1} 해제`} onClick={() => setLocks((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
-                {seps.map((g, i) => <p key={`s${i}`} className="flex items-center gap-1"><span className="min-w-0 flex-1">갈라놓기: {g.map((p) => byId.get(p)?.display_name).join(' ↔ ')}</span> <button className="-my-2 min-h-11 shrink-0 px-2 font-semibold text-brand-ink" aria-label={`갈라놓기 ${i + 1} 해제`} onClick={() => setSeps((l) => l.filter((_, j) => j !== i))}>해제</button></p>)}
+                {locks.map((g, i) => <p key={`l${i}`} className="flex items-center gap-1"><span className={`inline-block size-2 shrink-0 rounded-full ${['bg-court-500', 'bg-navy-500', 'bg-emerald-500', 'bg-amber-500'][i % 4]}`} /><span className="min-w-0 flex-1">묶{i + 1}: {g.map((p) => byId.get(p)?.display_name).join(' · ')}</span> <button className="-my-2 min-h-11 shrink-0 px-2 font-semibold text-brand-ink" aria-label={`묶음 ${i + 1} 풀기`} onClick={() => setLocks((l) => l.filter((_, j) => j !== i))}>풀기</button></p>)}
+                {seps.map((g, i) => <p key={`s${i}`} className="flex items-center gap-1"><span className="min-w-0 flex-1">갈{i + 1}: {g.map((p) => byId.get(p)?.display_name).join(' ↔ ')}</span> <button className="-my-2 min-h-11 shrink-0 px-2 font-semibold text-brand-ink" aria-label={`갈라놓기 ${i + 1} 풀기`} onClick={() => setSeps((l) => l.filter((_, j) => j !== i))}>풀기</button></p>)}
               </div>
             )}
           </Card>
@@ -288,15 +292,15 @@ export function AssignPage() {
             const narrow = teams === 3
             return (
               <div key={sq} className={`min-h-24 rounded-2xl border-2 ${narrow ? 'p-2' : 'p-3'} ${st.card}`}>
-                <p className={`${narrow ? 'text-xs' : 'text-sm'} font-bold`}>{teamName(sq)} {narrow ? '' : '사전 배치 '}({list.length}명)</p>
-                {list.length === 0 ? <p className={`mt-3 text-center text-[11px] ${st.sub}`}>{narrow ? '고른 뒤 배치' : '이름을 고른 뒤 배치하세요'}</p> : (
+                <p className={`${narrow ? 'text-xs' : 'text-sm'} font-bold`}>{teamName(sq)} 팀 {narrow ? '' : '미리 배치 '}({list.length}명)</p>
+                {list.length === 0 ? <p className={`mt-3 text-center text-[11px] ${st.sub}`}>{narrow ? '고른 뒤 배치해 주세요' : '이름을 고른 뒤 배치해 주세요'}</p> : (
                   <ul className={`mt-2 space-y-1 ${narrow ? 'text-xs' : 'text-sm'}`}>
                     {list.map((a) => (
                       <li key={a.player.id} className={narrow ? 'space-y-0.5' : 'flex items-center justify-between gap-2'}>
                         <span className="block truncate">{a.player.display_name}</span>
                         <span className="flex shrink-0 gap-2">
-                          <button onClick={() => flipPin(a.player.id)} className="-my-1 min-h-11 text-[11px] font-semibold opacity-80">{moveLabel(sq, nextTeam(sq), toTeam(nextTeam(sq)))}</button>
-                          <button onClick={() => unpin(a.player.id)} aria-label={`${a.player.display_name} 미리 배치 빼기`} className="-my-1 min-h-11 min-w-11 text-[11px] opacity-70">빼기</button>
+                          <button onClick={() => flipPin(a.player.id)} className={`-my-1 min-h-11 text-[11px] font-semibold ${st.sub}`}>{moveLabel(sq, nextTeam(sq), toTeam(nextTeam(sq)))}</button>
+                          <button onClick={() => unpin(a.player.id)} aria-label={`${a.player.display_name} 미리 배치 빼기`} className={`-my-1 min-h-11 min-w-11 text-[11px] ${st.sub}`}>빼기</button>
                         </span>
                       </li>
                     ))}
@@ -310,8 +314,8 @@ export function AssignPage() {
         {checkFailed && (
           <Alert kind="warn">
             <div className="flex items-center justify-between gap-3">
-              <span className="min-w-0 flex-1">조건을 미리 검사하지 못했어요. 그대로 실행해도 서버가 다시 검사해요.</span>
-              <button type="button" onClick={() => validate.refetch()} disabled={validate.isFetching} className="-my-2 min-h-11 shrink-0 px-2 text-sm font-semibold underline underline-offset-2 disabled:opacity-50">다시 검사</button>
+              <span className="min-w-0 flex-1">조건을 미리 확인하지 못했어요. 그대로 눌러도 팀을 나눌 때 다시 확인해요.</span>
+              <button type="button" onClick={() => validate.refetch()} disabled={validate.isFetching} className="-my-2 min-h-11 shrink-0 px-2 text-sm font-semibold underline underline-offset-2 disabled:opacity-50">다시 확인</button>
             </div>
           </Alert>
         )}
@@ -323,6 +327,7 @@ export function AssignPage() {
         )}
       </Content>
       <BottomAction>
+        {runHint && <p className="mb-2 px-1 text-xs text-muted" role="status">{runHint}</p>}
         <Button full loading={run.isPending} disabled={!feasible || locked} onClick={() => run.mutate()}>{teams === 3 ? '3팀으로 ' : ''}3가지 배정안 만들기</Button>
       </BottomAction>
     </Screen>
@@ -340,7 +345,6 @@ export function RunResultPage() {
   // 팀 번호 → 그 팀에서 고른 사람들 (많아야 두 팀). 묶음은 한 명을 탭해도 그룹 전체가 들어온다
   const [pick, setPick] = useState<Record<number, number[]>>({})
   const noPick: Record<number, number[]> = {}
-  const [msg, setMsg] = useState<string | null>(null)
   // 옮기기 · 되돌리기는 이 실행만 바뀐다. 확정은 일정 화면(배정 결과)도 바뀐다
   const refresh = (events = false) => {
     qc.invalidateQueries({ queryKey: ['runs', id] })
@@ -354,18 +358,18 @@ export function RunResultPage() {
   }
   const exchange = useMutation({
     mutationFn: ({ cid, a, b, to }: { cid: number; a: number[]; b: number[]; to?: number }) => assignmentsApi.exchange(cid, a, b, to),
-    onSuccess: () => { setPick(noPick); setMsg(null); refresh() },
-    onError: (e) => setMsg(errMsg(e, '옮기지 못했어요.')),
+    onSuccess: () => { setPick(noPick); refresh() },
+    onError: (e) => toast(errMsg(e, '옮기지 못했어요.'), 'error'),
   })
   const reset = useMutation({
     mutationFn: (cid: number) => assignmentsApi.reset(cid),
-    onSuccess: () => { setPick(noPick); setMsg(null); refresh() },
-    onError: (e) => setMsg(errMsg(e, '되돌리지 못했어요.')),
+    onSuccess: () => { setPick(noPick); refresh() },
+    onError: (e) => toast(errMsg(e, '되돌리지 못했어요.'), 'error'),
   })
   const adopt = useMutation({
     mutationFn: (cid: number) => assignmentsApi.adopt(cid),
     onSuccess: () => { refresh(true); finish(`/events/${run.data!.event_id}`, 2) },  // 일정 → 배정 → 배정안 을 되감아 일정으로. 뒤로는 일정 목록
-    onError: (e) => setMsg(errMsg(e, '확정하지 못했어요.')),
+    onError: (e) => toast(errMsg(e, '확정하지 못했어요.'), 'error'),
   })
 
   if (run.isLoading) return <Screen><TopBar title="배정 결과" back="/" /><Spinner page /></Screen>
@@ -409,25 +413,23 @@ export function RunResultPage() {
       <TopBar title="배정 결과" back={`/events/${r.event_id}/assign`} />
       <div className="grid grid-cols-3 border-b border-line bg-surface" role="tablist" aria-label="배정안">
         {r.candidates.map((c, i) => (
-          <button key={c.id} type="button" role="tab" aria-selected={tab === i} onClick={() => { setTab(i); setPick({}) }} className={`min-h-11 text-sm font-semibold ${tab === i ? 'border-b-2 border-court-500 text-brand-ink' : 'text-faint'}`}>
-            {STRATEGY_LABEL[c.strategy]}{c.is_adopted ? ' ✓' : ''}
+          <button key={c.id} type="button" role="tab" aria-selected={tab === i} onClick={() => { setTab(i); setPick({}) }} className={`flex min-h-11 flex-col items-center justify-center py-1.5 text-sm font-semibold ${tab === i ? 'border-b-2 border-court-500 text-brand-ink' : 'text-muted'}`}>
+            <span>{STRATEGY_LABEL[c.strategy]}{c.is_adopted ? ' ✓' : ''}</span>
+            <span className="text-[11px] font-normal text-muted">실력 차 {c.metrics.skill_spread}</span>
           </button>
         ))}
       </div>
       <Content>
+       <div role="tabpanel" aria-label={`${STRATEGY_LABEL[cand.strategy]} 배정안`} className="space-y-4">
         {r.warnings.map((w, i) => <Alert key={i} kind="warn">{w}</Alert>)}
-        {msg && <Alert>{msg}</Alert>}
-        <div className="rounded-xl bg-surface px-3 py-2 text-xs text-muted">
-          <div className="flex items-center justify-between">
-            <span>예상 실력 차이 <b className="text-ink">{cand.metrics.skill_spread}</b>점/쿼터</span>
-            <span title="실력 차이, 포지션, 같이 뛰고 싶은 사람, 게스트가 한쪽에 몰리지 않는지를 합친 점수예요">균형 점수 {cand.total_score} <span className="text-faint">(낮을수록 좋음)</span></span>
-          </div>
-          <p className="mt-0.5 text-[11px] text-faint">{three ? '가장 강한 팀과 가장 약한 팀이 붙었을 때' : '두 팀이 붙었을 때'} 한 쿼터에 날 것으로 예상되는 점수 차예요. 0에 가까울수록 균형이 좋아요.</p>
+        <div className="space-y-1 rounded-xl bg-surface px-3 py-2 text-xs text-muted">
+          <p>한 쿼터 예상 점수 차 <b className="text-ink">{cand.metrics.skill_spread}</b>점 · {three ? '가장 강한 팀과 가장 약한 팀이 붙었을 때' : '두 팀이 붙었을 때'} 한 쿼터에 날 것으로 예상되는 점수 차예요. 0에 가까울수록 고르게 나뉜 거예요.</p>
+          <p>균형 점수 <b className="text-ink">{cand.total_score}</b> · 실력 차 · 포지션 · 같이 뛰고 싶은 사람을 합친 점수예요. 낮을수록 고르게 나뉜 거예요.</p>
         </div>
         {cand.metrics.manually_edited && (
           <div className="flex items-center justify-between rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn-ink">
-            <span>이 안은 손으로 수정됐어요 (↔ 표시).</span>
-            <button className="-my-2 -mr-1 min-h-11 shrink-0 px-1 font-semibold text-brand-ink" disabled={reset.isPending} onClick={async () => { if (await confirm({ title: '손으로 옮긴 것을 모두 되돌릴까요?', body: '알고리즘이 처음 만든 배정안으로 돌아가요.', confirmLabel: '되돌리기' })) reset.mutate(cand.id) }}>수동 수정 초기화</button>
+            <span>직접 옮긴 사람이 있어요 (↔ 표시).</span>
+            <button className="-my-2 -mr-1 min-h-11 shrink-0 px-1 font-semibold text-brand-ink" disabled={reset.isPending} onClick={async () => { if (await confirm({ title: '직접 옮긴 것을 모두 되돌릴까요?', body: '앱이 처음 나눈 배정안으로 돌아가요.', confirmLabel: '되돌리기' })) reset.mutate(cand.id) }}>옮긴 것 되돌리기</button>
           </div>
         )}
         <div className={`grid gap-2 ${three ? 'grid-cols-3' : 'grid-cols-2'}`}>
@@ -435,6 +437,7 @@ export function RunResultPage() {
             <SquadCard key={s.squad_no} squad={s} picked={pick[s.squad_no] ?? []} onPick={(pid) => onPick(s.squad_no, pid)} showSkill marks={marks} narrow={three} />
           ))}
         </div>
+        <MarkLegend squads={cand.squads} marks={marks} />
         {!cand.is_adopted && hasPick && (
           <div className="space-y-2">
             {picked.length === 1 && cand.squads.filter((s) => s.squad_no !== picked[0][0]).map((s) => (
@@ -443,28 +446,32 @@ export function RunResultPage() {
               </Button>
             ))}
             {picked.length === 2 && (
-              <Button variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: [...picked[0][1]], b: [...picked[1][1]] })}>
-                {pickedSep ? '갈라놓은 두 사람의 팀을 서로 바꾸기 ↔' : `맞교체 ↔ (${teamName(picked[0][0])} ${label(picked[0][1])} ↔ ${teamName(picked[1][0])} ${label(picked[1][1])})`}
-              </Button>
+              <>
+                <p className="px-1 text-center text-xs text-muted">{teamName(picked[0][0])} 팀 {label(picked[0][1])} ↔ {teamName(picked[1][0])} 팀 {label(picked[1][1])}</p>
+                <Button variant="secondary" full loading={exchange.isPending} onClick={() => exchange.mutate({ cid: cand.id, a: [...picked[0][1]], b: [...picked[1][1]] })}>
+                  {pickedSep ? '갈라놓은 두 사람의 팀 맞바꾸기' : picked.every(([, ids]) => ids.length === 1) ? '두 사람 맞바꾸기' : '서로 맞바꾸기'}
+                </Button>
+              </>
             )}
-            {pickedSep && <p className="px-1 text-center text-xs text-muted">갈라놓기로 설정된 사람은 한 명만 옮길 수 없어요. 두 사람의 팀을 통째로 바꾸는 것만 가능해요.</p>}
-            {!pickedSep && picked.some(([, ids]) => ids.some((x) => marks.locked.has(x))) && <p className="px-1 text-center text-xs text-muted">묶인 사람은 그룹이 함께 선택되고 함께 움직여요.</p>}
+            {pickedSep && <p className="px-1 text-center text-xs text-muted">갈라놓은 사람은 한 명만 옮길 수 없어요. 두 사람의 팀을 통째로 맞바꿀 수만 있어요.</p>}
+            {!pickedSep && picked.some(([, ids]) => ids.some((x) => marks.locked.has(x))) && <p className="px-1 text-center text-xs text-muted">묶은 사람들은 함께 골라지고 함께 움직여요.</p>}
           </div>
         )}
         {!hasPick && !cand.is_adopted && (
           <p className="px-1 text-center text-xs text-faint">
-            {three ? '사람을 탭한 뒤 옮길 팀을 고르거나, 두 팀에서 골라 맞교체할 수 있어요.' : '한 명을 탭하면 다른 팀으로 옮기고, 양 팀에서 골라 맞교체할 수 있어요.'} 팀에는 최소 5명이 남아야 해요.
-            {(marks.locked.size > 0 || marks.pinned.size > 0 || marks.sepGroup.size > 0) && <><br />묶음은 함께 움직이고, 고정은 그대로, 분리는 짝과 팀을 바꿔요.</>}
+            {three ? '사람을 누른 뒤 옮길 팀을 고르거나, 두 팀에서 골라 맞바꿀 수 있어요.' : '한 명을 누르면 다른 팀으로 옮기고, 양 팀에서 골라 맞바꿀 수 있어요.'} 팀에는 최소 5명이 남아야 해요.
+            {(marks.locked.size > 0 || marks.pinned.size > 0 || marks.sepGroup.size > 0) && <><br />묶은 사람은 함께 움직이고, 미리 배치한 사람은 그대로, 갈라놓은 사람은 짝과 팀을 맞바꿔요.</>}
           </p>
         )}
         <AiExplainCard candidateId={cand.id} rosterKey={rosterKey(cand.squads)} fallbackText={cand.explanation} />
         <PositionTable squads={cand.squads} />
+       </div>
       </Content>
       <BottomAction>
         {cand.is_adopted ? (
           <Button full variant="secondary" onClick={() => finish(`/events/${r.event_id}`, 2)}>확정된 결과 보기</Button>
         ) : (
-          <Button full loading={adopt.isPending} onClick={async () => { if (await confirm({ title: `[${STRATEGY_LABEL[cand.strategy]}] 배정안으로 확정할까요?`, body: `참석자에게 공개돼요.${adoptedAny ? ' 기존 확정은 해제돼요.' : ''}`, confirmLabel: '확정' })) adopt.mutate(cand.id) }}>
+          <Button full loading={adopt.isPending} onClick={async () => { if (await confirm({ title: `[${STRATEGY_LABEL[cand.strategy]}] 배정안으로 확정할까요?`, body: `참석자에게 보여요.${adoptedAny ? ' 먼저 확정한 배정은 풀려요.' : ''}`, confirmLabel: '확정' })) adopt.mutate(cand.id) }}>
             이 배정안으로 확정
           </Button>
         )}
@@ -487,7 +494,7 @@ function constraintMarks(c: ConstraintSet): Marks {
 function PositionTable({ squads }: { squads: SquadView[] }) {
   return (
     <Card>
-      <p className="mb-2 text-sm font-bold text-ink">포지션 슬롯</p>
+      <p className="mb-2 text-sm font-bold text-ink">포지션별 인원</p>
       <div className="grid grid-cols-6 gap-1 text-center text-xs">
         <span />
         {POSITIONS.map((p) => <span key={p} className="font-semibold text-muted">{p}</span>)}
