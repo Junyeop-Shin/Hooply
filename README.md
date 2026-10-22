@@ -11,7 +11,10 @@
 
 ## 대표 화면
 
-<!-- 스크린샷을 docs/images/ 에 넣고 아래 칸의 "(이미지 자리)" 를 ![설명](docs/images/파일명.png) 로 바꾸세요 -->
+홈 · 다가오는 일정	참석 응답	AI 배정 설명
+<img src="docs/images/01-home.jpg" width="240">	<img src="docs/images/02-attendance.jpg" width="240">	<img src="docs/images/03-ai-explain.jpg" width="240">
+전술 추천 · 자리 배치	전술판 (단계별 재생)	내 기록 · 쿼터 성적
+<img src="docs/images/04-tactic-recommend.jpg" width="240">	<img src="docs/images/05-tactic-board.jpg" width="240">	<img src="docs/images/06-my-record.jpg" width="240">
 
 | 팀 배정안 3가지 비교 | 팀원이 보는 배정 결과 · AI 한마디 | 전술판 (상대 수비가 따라 움직임) | 경기 후 쿼터 기록 |
 | :---: | :---: | :---: | :---: |
