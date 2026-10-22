@@ -17,10 +17,6 @@
 | **전술 추천 · 자리 배치** | **전술판 (단계별 재생)** | **내 기록 · 쿼터 성적** |
 | <img src="docs/04-tactic-recommend.jpg" width="240"> | <img src="docs/05-tactic-board.jpg" width="240"> | <img src="docs/06-my-record.jpg" width="240"> |
 
-| 팀 배정안 3가지 비교 | 팀원이 보는 배정 결과 · AI 한마디 | 전술판 (상대 수비가 따라 움직임) | 경기 후 쿼터 기록 |
-| :---: | :---: | :---: | :---: |
-| (이미지 자리)<br>`docs/images/01-assign.png` | (이미지 자리)<br>`docs/images/02-result.png` | (이미지 자리)<br>`docs/images/03-tactic-board.png` | (이미지 자리)<br>`docs/images/04-quarters.png` |
-
 ## 5분 요약
 
 1. **문제** — 동호회 모임은 매주 12~14명이 오고, 인원이 모자라면 실력을 모르는 게스트를 2~4명 부릅니다. 팀은 매번 매니저의 감으로 나뉘고, 근거가 없어 불만이 쌓입니다.
