@@ -43,8 +43,6 @@ from app.schemas.game import (
 )
 from app.services import rating_service
 
-SIDE_LABEL = {Side.BLACK: DEFAULT_SQUAD_NAMES[0], Side.WHITE: DEFAULT_SQUAD_NAMES[1]}
-
 
 def _squad_names(db: Session, event: Event) -> dict[int, str]:
     """확정 배정의 팀 번호 → 이름. 배정이 없으면 2팀(블랙 · 화이트)."""
@@ -72,7 +70,7 @@ def _validate_matchup(db: Session, event: Event, home: int, away: int, names: di
 # ---------------------------------------------------------------------------
 
 
-def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn], kept: frozenset[int] = frozenset()) -> None:
+def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn], labels: dict[Side, str], kept: frozenset[int] = frozenset()) -> None:
     """사이드별 정확히 5명, 중복 없음, 새로 넣은 사람은 이 팀의 활동 중인 참가자. 위반은 400 / 422.
 
     `kept` = 이 쿼터에 이미 기록돼 있던 사람. 그 뒤 팀을 떠났거나 회원에게 이어 준 게스트여도 기록은 그대로 두어야
@@ -80,7 +78,7 @@ def _validate_lineups(db: Session, event: Event, lineups: list[LineupIn], kept: 
     for side in (Side.BLACK, Side.WHITE):
         n = sum(1 for lineup in lineups if lineup.side == side)
         if n != 5:
-            raise errors.InvalidLineupSize(f"{SIDE_LABEL[side]} 팀에 {n}명을 골랐어요. 팀마다 5명을 골라 주세요.")
+            raise errors.InvalidLineupSize(f"{labels[side]} 팀에 {n}명을 골랐어요. 팀마다 5명을 골라 주세요.")
     ids = [lineup.player_id for lineup in lineups]
     if len(set(ids)) != len(ids):
         raise errors.ValidationError("같은 사람이 두 번 들어 있어요.")
@@ -104,12 +102,13 @@ def _apply(
     db: Session, q: Quarter, event: Event, *, black_score: int, white_score: int, duration_min: int, lineups: list[LineupIn] | None,
     home: int = 1, away: int = 2, names: dict[int, str] | None = None,
 ) -> None:
+    names = names or _squad_names(db, event)
     _validate_matchup(db, event, home, away, names)
     q.black_score, q.white_score, q.duration_min = black_score, white_score, duration_min
     q.home_squad_no, q.away_squad_no = home, away
     if lineups is not None and {(x.player_id, x.side, x.position) for x in lineups} != {(x.player_id, x.side, x.position) for x in q.lineups}:
         # 라인업이 그대로면 검사 · 다시 넣기를 건너뛰고 마진만 다시 계산한다 (지난 쿼터 점수만 고치는 흔한 경우)
-        _validate_lineups(db, event, lineups, kept=frozenset(x.player_id for x in q.lineups))
+        _validate_lineups(db, event, lineups, {Side.BLACK: names[home], Side.WHITE: names[away]}, kept=frozenset(x.player_id for x in q.lineups))
         for old in list(q.lineups):
             db.delete(old)
         db.flush()

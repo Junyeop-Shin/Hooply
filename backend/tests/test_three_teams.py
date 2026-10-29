@@ -127,6 +127,78 @@ def test_three_teams_infeasible_separate_is_reported():
     assert not vr.feasible and vr.violations[0].code == "SEPARATE_INFEASIBLE"
 
 
+@pytest.mark.parametrize("team_count, n", [(3, 16), (2, 20)])
+def test_everyone_pinned_does_not_crash(team_count, n):
+    """모두 팀 칸에 미리 배치하면 옮길 사람이 없다 — 흔들기가 빈 목록에서 고르다 500 이 났다."""
+    roster = _roster(n, 2)
+    pins = [PinConstraint(player_id=r.id, squad_no=i % team_count + 1) for i, r in enumerate(roster)]
+    prep = a.prepare(roster, AssignmentRunRequest(team_count=team_count, constraints=ConstraintSet(pins=pins)))
+    assert a._validate_prepared(prep).feasible
+    found, _ = a.search_partitions(prep, {}, set(), ALL)
+    assert len(found) == 1
+    _squads_ok(prep, found[0].partition)
+
+
+def _tight_constraints(seed):
+    """큰 묶음 · 갈라놓기가 겹친 조건 — 탐욕 초기해가 답이 있는데도 못 찾던 조합 (seed 1: 16명, 묶음 3·4·2, 갈라놓기 2·3)."""
+    rng = random.Random(seed)
+    n = rng.randint(15, 18)
+    roster = _roster(n, seed)
+    ids = [r.id for r in roster]
+    rng.shuffle(ids)
+    k, locks, seps = 0, [], []
+    for _ in range(rng.randint(0, 3)):
+        g = rng.randint(2, 4)
+        locks.append(ids[k:k + g])
+        k += g
+    for _ in range(rng.randint(0, 2)):
+        g = rng.randint(2, 3)
+        seps.append(ids[k:k + g])
+        k += g
+    return roster, ConstraintSet(lock_groups=locks, separate_groups=seps)
+
+
+def test_tight_constraints_are_not_falsely_blocked():
+    roster, cons = _tight_constraints(1)
+    prep = a.prepare(roster, AssignmentRunRequest(team_count=3, constraints=cons))
+    assert not prep.violations
+    assert a._good_start(prep, random.Random(a.LS_SEED), a._sep_of(prep), 1, tries=60) is None  # 탐욕만으로는 못 찾는 경우다
+    assert a._validate_prepared(prep).feasible
+    found, _ = a.search_partitions(prep, {}, set(), ALL)
+    assert found
+    for sc in found:
+        _squads_ok(prep, sc.partition)
+
+
+def test_exact_partition_reports_truly_infeasible():
+    roster = _roster(16, 1)
+    ids = [r.id for r in roster]
+    # 4명 묶음 넷 — 한 팀 최대 6명이라 어느 팀이든 묶음 둘을 받을 수 없고, 묶음 넷을 세 팀에 나눌 수도 없다
+    prep = a.prepare(roster, AssignmentRunRequest(team_count=3, constraints=ConstraintSet(lock_groups=[ids[i:i + 4] for i in range(0, 16, 4)])))
+    assert a._exact_partition(prep) is None
+    assert not a._validate_prepared(prep).feasible
+
+
+def test_three_team_validate_does_not_warn_from_greedy_sizes():
+    """지역 탐색은 검사 단계의 초기해 인원(7:6:5)이 실제 후보안(6:6:6)과 다를 수 있어, 인원 경고는 run() 이 고른 안으로만 낸다."""
+    rng = random.Random(150)  # 18명, 묶음 셋 — 초기해는 7:6:5 인데 후보안은 모두 6:6:6 이던 조합
+    n = rng.randint(16, 21)
+    roster = _roster(n, 150)
+    ids = [r.id for r in roster]
+    rng.shuffle(ids)
+    k, locks = 0, []
+    for _ in range(rng.randint(1, 3)):
+        g = rng.randint(2, 4)
+        locks.append(ids[k:k + g])
+        k += g
+    seps = [ids[k:k + 3]] if rng.random() < 0.5 else []
+    prep = a.prepare(roster, AssignmentRunRequest(team_count=3, constraints=ConstraintSet(lock_groups=locks, separate_groups=seps)))
+    vr = a._validate_prepared(prep)
+    assert vr.feasible and not any("인원을" in w for w in vr.warnings)
+    found, _ = a.search_partitions(prep, {}, set(), ALL)
+    assert any(sorted(_squads_ok(prep, sc.partition)) == [6, 6, 6] for sc in found)
+
+
 # ---------------------------------------------------------------------------
 # API — 21명(회원 12 + 게스트 9)을 3팀으로: 실행 → 옮기기 · 맞교체 → 확정 → 쿼터 대진 → 팀별 요약
 # ---------------------------------------------------------------------------

@@ -681,6 +681,52 @@ def _good_start(prep: Prepared, rng: random.Random, sep_of: dict[int, set[int]],
     return best
 
 
+EXACT_BUDGET = 200_000  # 백트래킹이 살펴볼 최대 단계 — 조건 조합이 아무리 나빠도 1초 안에 끝나게
+
+
+def _exact_partition(prep: Prepared, budget: int = EXACT_BUDGET) -> tuple[int, ...] | None:
+    """미리 배치 · 갈라놓기 · 팀마다 5명 이상 · 한 팀 최대 인원을 지키는 편성 하나를 백트래킹으로 찾는다.
+    탐욕 초기해가 못 찾을 때만 쓴다 — 큰 묶음과 갈라놓기가 겹치면 탐욕은 답이 있어도 놓쳤다."""
+    t = prep.team_count
+    size = [len(ids) for ids in prep.supernodes]
+    cap = sum(size) - MIN_SQUAD * (t - 1)
+    sep_of = _sep_of(prep)
+    # 미리 배치를 먼저 — 그러면 그 뒤에 아직 빈 팀은 서로 바꿔도 같은 편성이라 하나만 시도하면 된다
+    order = sorted(range(len(size)), key=lambda i: (i not in prep.pins, -len(sep_of.get(i, ())), -size[i]))
+    rest = [0] * (len(order) + 1)
+    for k in range(len(order) - 1, -1, -1):
+        rest[k] = rest[k + 1] + size[order[k]]
+    assign: dict[int, int] = {}
+    load = [0] * t
+    steps = 0
+
+    def dfs(k: int) -> bool:
+        nonlocal steps
+        steps += 1
+        if steps > budget or sum(max(0, MIN_SQUAD - x) for x in load) > rest[k]:
+            return False
+        if k == len(order):
+            return True
+        i = order[k]
+        tried_empty = False
+        for s in ([prep.pins[i]] if i in prep.pins else range(t)):
+            if load[s] + size[i] > cap or any(assign.get(o) == s for o in sep_of.get(i, ())):
+                continue
+            if load[s] == 0 and i not in prep.pins:
+                if tried_empty:
+                    continue
+                tried_empty = True
+            assign[i] = s
+            load[s] += size[i]
+            if dfs(k + 1):
+                return True
+            del assign[i]
+            load[s] -= size[i]
+        return False
+
+    return tuple(assign[i] for i in range(len(size))) if dfs(0) else None
+
+
 def _canon(part: tuple[int, ...], pinned: bool) -> tuple[int, ...]:
     """미리 배치가 없으면 팀 이름만 바뀐 같은 편성을 하나로 — 처음 나온 순서로 팀 번호를 다시 매긴다."""
     if pinned:
@@ -745,6 +791,7 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
     mi = _move_index(free, prep.team_count)
     optima: dict[tuple[int, ...], tuple[int, ...]] = {}
     evaluated = 0
+    exact: list[tuple[int, ...] | None] = []  # 탐욕이 실패할 때만 한 번 구한다
     n_recent = len(recent_pairs)
 
     def descend(part: np.ndarray, cur: float, w: dict[str, float], max_spread: float) -> tuple[np.ndarray, float]:
@@ -765,6 +812,10 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
         for _ in range(LS_RESTARTS_2 if prep.team_count == 2 else LS_RESTARTS):
             start = _good_start(prep, rng, sep_of, ideal_spread)
             if start is None:
+                if not exact:
+                    exact.append(_exact_partition(prep))
+                start = exact[0]
+            if start is None:
                 break
             part = np.array(start, dtype=int)
             max_spread = max(ideal_spread, _spread(prep, start))  # 묶음 때문에 벌어진 인원보다 더 벌리지는 않는다
@@ -772,13 +823,13 @@ def search_partitions(prep: Prepared, pref_pairs: dict, recent_pairs: set, strat
             optima.setdefault(_canon(tuple(int(x) for x in part), bool(prep.pins)), ())
             # 흔들기: 서로 다른 팀의 두 노드를 두 번 맞바꾼 뒤 다시 내려간다. 더 나으면 거기서 이어 간다
             stale = 0
-            for _ in range(LS_KICKS):
+            for _ in range(LS_KICKS if len(free) >= 2 else 0):
                 if stale >= LS_PATIENCE:  # 연달아 나아지지 않으면 이 출발점은 여기까지
                     break
                 stale += 1
                 trial = part.copy()
                 for _ in range(2):
-                    x, y = rng.sample(free, 2) if len(free) >= 2 else (free[0], free[0])
+                    x, y = rng.sample(free, 2)
                     if trial[x] != trial[y] and st.size[x] == st.size[y]:
                         trial[x], trial[y] = trial[y], trial[x]
                 if len(sep) and not (trial[sep[:, 0]] != trial[sep[:, 1]]).all():
@@ -800,7 +851,7 @@ def first_partition(prep: Prepared) -> tuple[int, ...] | None:
     if prep.team_count == 2 and len(prep.supernodes) <= MAX_SUPERNODES:
         return next(enumerate_partitions(prep), None)
     ideal = _squad_sizes(sum(len(x) for x in prep.supernodes), prep.team_count)
-    c = _good_start(prep, random.Random(LS_SEED), _sep_of(prep), max(ideal) - min(ideal), tries=60)
+    c = _good_start(prep, random.Random(LS_SEED), _sep_of(prep), max(ideal) - min(ideal), tries=60) or _exact_partition(prep)
     if c is not None:
         prep.sizes = [sum(len(prep.supernodes[i]) for i, s in enumerate(c) if s == sq) for sq in range(prep.team_count)]
     return c
@@ -910,7 +961,8 @@ def _validate_prepared(prep: Prepared) -> ValidateResult:
         code = "SEPARATE_INFEASIBLE" if prep.separate_pairs else "LOCK_PARTITION_INFEASIBLE"
         msg = "갈라놓기 제약을 모두 만족하는 팀 구성이 없어요." if prep.separate_pairs else _partition_msg(prep)
         return ValidateResult(feasible=False, violations=[ConstraintViolation(code=code, message=msg)], warnings=prep.warnings)
-    _warn_uneven(prep, ideal)
+    if prep.team_count == 2 and len(prep.supernodes) <= MAX_SUPERNODES:  # 지역 탐색은 초기해 인원이라 실제 결과와 다를 수 있다 → run() 이 고른 안으로
+        _warn_uneven(prep, ideal)
     return ValidateResult(feasible=True, warnings=prep.warnings)
 
 
@@ -973,7 +1025,8 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
     else:  # 3팀, 또는 18명(묶음 뒤)이 넘는 2팀 — 완전 탐색은 너무 오래 걸린다
         scored, evaluated = search_partitions(prep, pref_pairs, recent, body.strategies)
         search = "local_search"
-        _warn_uneven(prep, _squad_sizes(len(roster), body.team_count))
+    if not scored:  # 검사는 통과했는데 탐색이 편성을 못 찾았다 — 500 대신 조건 오류로
+        raise errors.LockPartitionInfeasible(_partition_msg(prep))
     if any(s.hard_ok for s in scored):
         pool = [s for s in scored if s.hard_ok]
     else:
@@ -1002,11 +1055,20 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
         db.add(AssignmentConstraint(run_id=run_row.id, type=ConstraintType.PIN, player_id=p.player_id, squad_no=p.squad_no))
 
     used: set[tuple[int, ...]] = set()
+    picks: list[tuple[Strategy, Scored]] = []
     for strategy in body.strategies:
         w = STRATEGY_WEIGHTS[strategy]
         ordered = sorted(pool, key=lambda s: s.total(w))
         pick = next((s for s in ordered if s.partition not in used), ordered[0])  # 후보안끼리 편성이 달라야 고를 이유가 생긴다
         used.add(pick.partition)
+        picks.append((strategy, pick))
+    if search == "local_search":  # 인원 경고는 실제로 고른 후보안 기준 (벌어진 안이 하나라도 있으면 그 인원으로)
+        ideal = _squad_sizes(len(roster), body.team_count)
+        uneven = next((s for _st, s in picks if sorted(len(x) for x in s.squads) != sorted(ideal)), None)
+        if uneven is not None:
+            prep.sizes = [len(x) for x in uneven.squads]
+            _warn_uneven(prep, ideal)
+    for strategy, pick in picks:
         _persist_candidate(db, run_row, strategy, pick, prep)
     db.commit()
     players = {r.id: r.player for r in roster}
