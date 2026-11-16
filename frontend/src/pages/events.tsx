@@ -233,6 +233,11 @@ export function EventDetailPage() {
     onError: (e) => toast(errMsg(e, '일정을 지우지 못했어요.'), 'error'),
   })
   const closeRsvp = useMutation({ mutationFn: () => eventsApi.closeRsvp(id), onSuccess: refresh, onError: (e) => toast(errMsg(e, '마감하지 못했어요.'), 'error') })
+  const reopenRsvp = useMutation({
+    mutationFn: () => eventsApi.reopenRsvp(id),
+    onSuccess: () => { toast('응답을 다시 받아요. 팀원이 참석을 바꿀 수 있어요.'); refresh() },
+    onError: (e) => toast(errMsg(e, '응답을 다시 열지 못했어요.'), 'error'),
+  })
   const removeGuest = useMutation({
     mutationFn: (pid: number) => eventsApi.removeGuest(id, pid),
     onSuccess: refresh,
@@ -255,7 +260,11 @@ export function EventDetailPage() {
   att.data?.items.forEach((i) => groups[i.status].push(i))
   const surveyBlock = isManager && e.survey_open && e.status !== 'CANCELED' && <SurveyProgressCard eventId={id} responded={e.survey_responded} total={e.survey_total} onMsg={setMsg} />
   const attend = s?.attend ?? e.attend_count
-  const canAssign = !past && !e.adopted_candidate_id && e.quarter_count === 0
+  // 종료 시각이 지나도 경기 기록 전이면 팀을 나눌 수 있다 — 종이로 나누고 다음 날 기록하는 경우 (서버도 허용, docs/09 2-5)
+  const canAssign = e.status !== 'CANCELED' && !e.adopted_candidate_id && e.quarter_count === 0
+  // 미리 마감한 응답 다시 받기 — 팀 확정 전 · 기록 전 · 마감 시각 전만 (docs/09 2-2)
+  const deadlinePassed = !!e.rsvp_deadline && new Date(e.rsvp_deadline) <= new Date()
+  const canReopen = isManager && e.status === 'CLOSED' && !e.adopted_candidate_id && e.quarter_count === 0
   // 게스트 추가: 팀원은 응답을 받는 동안만, 매니저는 마감 · 확정 뒤에도 경기 기록 전까지 (확정 뒤 참석 변경은 매니저만 — docs/09)
   const canInvite = e.status !== 'CANCELED' && (isManager ? e.quarter_count === 0 : e.rsvp_open && !past)
   const openAttendance = () => { setShowAtt(true); requestAnimationFrame(() => attRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })) }
@@ -314,6 +323,20 @@ export function EventDetailPage() {
                 : isManager ? '응답이 마감됐어요. 매니저는 아래에서 참석을 바꾸거나 게스트를 추가할 수 있어요.'
                 : '응답이 마감됐어요. 참석을 바꾸거나 게스트를 부르려면 매니저에게 알려 주세요.'}
             </p>
+          )}
+          {canReopen && !past && (
+            deadlinePassed ? (
+              <p className="mt-1 text-xs text-muted">응답을 다시 받으려면 일정 고치기에서 응답 마감을 늦춰 주세요.</p>
+            ) : (
+              <div className="mt-1 flex justify-end">
+                <button
+                  onClick={() => reopenRsvp.mutate()} disabled={reopenRsvp.isPending}
+                  className="-mr-2 min-h-11 px-2 text-xs font-semibold text-brand-ink disabled:opacity-50"
+                >
+                  응답 다시 받기
+                </button>
+              </div>
+            )
           )}
           {canInvite && (
             <button onClick={() => setSheet('new')} className="mt-3 flex min-h-11 w-full items-center justify-between rounded-xl bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-ink">

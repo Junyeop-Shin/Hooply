@@ -115,7 +115,8 @@ def update_event(db: DB, me: EventManager, event: Annotated[Event, Depends(get_e
     """일정의 날짜·시간·장소·응답 마감·메모를 부분 수정한다.
 
     - **권한:** 팀 매니저 또는 ADMIN.
-    - **처리:** 본문에 포함된 필드만 덮어쓴다. 마감을 미래로 늘리면 응답이 다시 열린다.
+    - **처리:** 본문에 포함된 필드만 덮어쓴다(`null` 은 지우기, 날짜는 예외). 미리 마감한 일정(CLOSED)의 마감을
+      앞으로 늦추면 응답이 다시 열린다 — 팀을 확정한 일정은 그대로 마감.
     - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`, `400 VALIDATION_ERROR`.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절, FR-08.
@@ -135,6 +136,20 @@ def close_rsvp(db: DB, me: EventManager, event: Annotated[Event, Depends(get_eve
     - **설계서:** FR-08 (참석 투표 마감), S-11 · S-12.
     """
     return event_service.event_view(db, event_service.close_rsvp(db, event), me)
+
+
+@router.post("/events/{event_id}/rsvp:reopen", response_model=EventView, summary="응답 다시 받기")
+def reopen_rsvp(db: DB, me: EventManager, event: Annotated[Event, Depends(get_event_or_404)]):
+    """미리 마감한 참석 응답을 다시 연다 (실수로 마감했을 때).
+
+    - **권한:** 팀 매니저 또는 ADMIN.
+    - **처리:** `status` CLOSED → OPEN. 팀원이 다시 본인 응답을 바꿀 수 있다.
+    - **오류:** `400 VALIDATION_ERROR` — 마감한(CLOSED) 일정이 아님 · 팀을 확정한 일정(확정 뒤 참석 변경은 매니저만) ·
+      응답 마감 시각이 이미 지남(일정 고치기에서 마감을 늦추면 다시 열린다). `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-08, S-10, docs/09 2-2.
+    """
+    return event_service.event_view(db, event_service.reopen_rsvp(db, event), me)
 
 
 @router.delete("/events/{event_id}", status_code=204, summary="일정 삭제")

@@ -52,7 +52,7 @@
 | AiExplanation, AiMessage, AiTactics | AI 설명 (체인 A · B · C, 체인 D 는 RoleSuggestion) |
 | BadgeView, MonthlyMarginView, MonthlyMarginEntry, TutorialView, TutorialStep, TutorialUpdate | 기록 탭 배지 · 월간 코트 마진 · 시작 안내 |
 
-## 4. 엔드포인트 요약 (112개, `/health` 포함)
+## 4. 엔드포인트 요약 (113개, `/health` 포함)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -133,6 +133,7 @@
 | PATCH | `/events/{event_id}` | 일정 수정 — 보낸 칸만 바뀌고 `null` 은 지운다(날짜는 `null` 이면 그대로) | 200 |
 | DELETE | `/events/{event_id}` | 일정 삭제 (참석·배정·투표 함께 삭제, 경기 기록이 있으면 400) | 204 |
 | POST | `/events/{event_id}/rsvp:close` | 응답 미리 마감 | 200 |
+| POST | `/events/{event_id}/rsvp:reopen` | 미리 마감한 응답 다시 받기 — 팀 확정 전 · 마감 시각 전만(아니면 400). 일정 수정으로 마감을 앞으로 늦춰도 다시 열린다 | 200 · 400 · 403 |
 | PUT | `/events/{event_id}/attendance` | 내 참석 응답 | 200 |
 | PUT | `/events/{event_id}/attendances/{player_id}` | 매니저 대리 참석 등록 — 마감 · 확정 뒤에도 가능, 불참으로 바꾸면 확정 팀에서 빠진다(경기 기록 전) | 200 · 403 |
 | GET | `/events/{event_id}/attendances` | 참석 현황 · 포지션 분포 | 200 |
@@ -165,7 +166,7 @@
 | Method | Path | 기능 | 응답 코드 |
 | --- | --- | --- | --- |
 | POST | `/events/{event_id}/quarters` | 쿼터 1건 추가 | 201 · 400 · 409 |
-| PUT | `/events/{event_id}/quarters` | 쿼터 일괄 저장 — 쿼터마다 `home_squad_no` · `away_squad_no`(3팀 대진, 기본 1 · 2), 득점은 팀당 0~99 | 200 · 400 |
+| PUT | `/events/{event_id}/quarters` | 쿼터 일괄 저장 — 쿼터마다 `home_squad_no` · `away_squad_no`(3팀 대진, 기본 1 · 2), 득점은 팀당 0~99. 출전한 사람은 참석(ATTEND)으로 맞춘다(매니저가 대신 바꾼 것으로) | 200 · 400 |
 | GET | `/events/{event_id}/quarters` | 쿼터 기록 조회 — 요약에 `team_count` · 팀별 `squads[]{quarters, points_for, points_against, wins, losses}` | 200 |
 | PATCH | `/quarters/{quarter_id}` | 쿼터 수정 | 200 · 400 · 403 |
 | DELETE | `/quarters/{quarter_id}` | 쿼터 삭제 (마진 롤백) | 204 · 403 |

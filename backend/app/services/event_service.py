@@ -103,6 +103,27 @@ def close_rsvp(db: Session, event: Event) -> Event:
     return event
 
 
+def _deadline_passed(event: Event) -> bool:
+    dl = event.rsvp_deadline
+    if dl is None:
+        return False
+    return (dl if dl.tzinfo else dl.replace(tzinfo=UTC)) <= datetime.now(UTC)
+
+
+def reopen_rsvp(db: Session, event: Event) -> Event:
+    """미리 마감한 응답을 다시 받는다 (CLOSED → OPEN, docs/09 2-2). 팀을 확정한 뒤에는 안 된다 — 확정 뒤 참석 변경은
+    매니저만 하기로 했다. 마감 시각이 이미 지났으면 열어도 바로 닫혀 보이므로, 일정 고치기에서 마감을 늦추게 안내한다."""
+    if event.status != EventStatus.CLOSED:
+        raise errors.ValidationError("응답을 마감한 일정만 다시 받을 수 있어요.")
+    if assignment_service.adopted_candidate(db, event) is not None:
+        raise errors.ValidationError("팀을 확정한 일정은 응답을 다시 받을 수 없어요. 참석이 바뀌면 참석 관리에서 대신 바꿔 주세요.")
+    if _deadline_passed(event):
+        raise errors.ValidationError("응답 마감 시각이 지났어요. 일정 고치기에서 마감을 늦추면 다시 받을 수 있어요.")
+    event.status = EventStatus.OPEN
+    db.commit()
+    return event
+
+
 def update_event(db: Session, event: Event, body: EventUpdate) -> Event:
     old_date = event.event_date
     if "event_date" in body.model_fields_set and body.event_date is not None and body.event_date != old_date:
@@ -111,6 +132,12 @@ def update_event(db: Session, event: Event, body: EventUpdate) -> Event:
         if k == "event_date" and v is None:
             continue  # 날짜는 비울 수 없다 (None = 변경 없음)
         setattr(event, k, v)
+    # 미리 마감한 일정의 마감을 앞으로 늦추면 응답을 다시 받는다 (확정 전만 — 확정하면 CLOSED 로 남는다, docs/09 2-2)
+    if (
+        "rsvp_deadline" in body.model_fields_set and body.rsvp_deadline is not None and not _deadline_passed(event)
+        and event.status == EventStatus.CLOSED and assignment_service.adopted_candidate(db, event) is None
+    ):
+        event.status = EventStatus.OPEN
     if event.event_date != old_date:
         # 쿼터 재생 순서(첫 2회 게이트 포함)가 날짜에 따라 달라지므로 다시 계산
         from app.services import rating_service

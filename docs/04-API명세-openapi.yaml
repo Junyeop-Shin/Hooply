@@ -1192,6 +1192,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EventView'
+  /events/{event_id}/rsvp:reopen:
+    post:
+      summary: 응답 다시 받기
+      tags:
+      - 일정 · 참석
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventView'
   /events/{event_id}/attendance:
     put:
       summary: 내 참석 응답

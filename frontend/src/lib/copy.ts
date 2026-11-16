@@ -4,6 +4,6 @@ import type { ConfirmOptions } from '../store/feedback'
 /** 참석 응답 미리 마감 — 일정 화면(S-10)과 배정 실행 화면(S-12)이 같이 쓴다 */
 export const CLOSE_RSVP_CONFIRM: ConfirmOptions = {
   title: '참석 응답을 지금 마감할까요?',
-  body: '인원이 확정되고 팀원은 더 이상 응답을 바꿀 수 없어요. 매니저는 대신 바꿀 수 있어요.',
+  body: "팀원은 더 이상 응답을 바꿀 수 없어요. 매니저는 대신 바꿀 수 있어요. 팀을 확정하기 전에는 '응답 다시 받기'로 되돌릴 수 있어요.",
   confirmLabel: '마감하기',
 }

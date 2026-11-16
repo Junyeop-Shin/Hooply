@@ -34,6 +34,8 @@ export const eventsApi = {
     api<EventView>(`/events/${eventId}`, { method: 'PATCH', body: patch }),
   remove: (eventId: number) => api<void>(`/events/${eventId}`, { method: 'DELETE' }),  // 이력 없이 삭제 — 참석·배정·투표도 함께 지워진다
   closeRsvp: (eventId: number) => api<EventView>(`/events/${eventId}/rsvp:close`, { method: 'POST' }),
+  /** 미리 마감한 응답 다시 받기 — 확정 전 · 마감 시각 전만 */
+  reopenRsvp: (eventId: number) => api<EventView>(`/events/${eventId}/rsvp:reopen`, { method: 'POST' }),
   respond: (eventId: number, status: AttendanceStatus, note?: string) =>
     api<AttendanceView>(`/events/${eventId}/attendance`, { method: 'PUT', body: { status, note } }),
   setAttendance: (eventId: number, playerId: number, status: AttendanceStatus) =>

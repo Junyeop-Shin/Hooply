@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,12 +24,13 @@ from app.models import (
     AssignmentRun,
     AssignmentSquad,
     Event,
+    EventAttendance,
     Player,
     Quarter,
     QuarterLineup,
     User,
 )
-from app.models.enums import DEFAULT_SQUAD_NAMES, EventStatus, PlayerStatus, Side
+from app.models.enums import DEFAULT_SQUAD_NAMES, AttendanceStatus, EventStatus, PlayerStatus, Side
 from app.schemas.game import (
     LineupIn,
     LineupView,
@@ -41,7 +44,7 @@ from app.schemas.game import (
     QuarterView,
     SquadTally,
 )
-from app.services import rating_service
+from app.services import peer_service, rating_service
 
 
 def _squad_names(db: Session, event: Event) -> dict[int, str]:
@@ -136,6 +139,38 @@ def _sync_event_status(db: Session, event: Event) -> None:
         event.status = EventStatus.CLOSED
 
 
+def _mark_played_attending(db: Session, event: Event, by: User) -> None:
+    """이 회차에 한 쿼터라도 뛴 사람은 참석(ATTEND)으로 맞춘다 — 응답을 안 했거나 불참이었어도 (docs/09 2-1).
+
+    늦게 와서 경기 기록 화면의 "명단에 사람 넣기" 로 들어온 사람이 투표 · 참여율 · 배지에서 빠지던 문제. 매니저가
+    대신 바꾼 것으로 남긴다(registered_by). 반대로 참석인데 한 쿼터도 안 뛴 사람은 와서 쉬기만 했을 수도 있어서
+    서버가 바꾸지 않고, 화면이 저장 뒤 "불참으로 바꿀까요?" 라고 묻는다. 참석이 바뀌면 선호 조합의 '함께 참석'
+    분모가 달라지므로 다시 계산한다 (팀 잠금은 _guard 가 이미 잡았다).
+    """
+    played = set(db.scalars(
+        select(QuarterLineup.player_id).join(Quarter, Quarter.id == QuarterLineup.quarter_id).where(Quarter.event_id == event.id)
+    ).all())
+    if not played:
+        return
+    rows = {r.player_id: r for r in db.scalars(
+        select(EventAttendance).where(EventAttendance.event_id == event.id, EventAttendance.player_id.in_(played))
+    ).all()}
+    now = datetime.now(UTC)
+    changed = False
+    for pid in sorted(played):
+        row = rows.get(pid)
+        if row is None:
+            db.add(EventAttendance(event_id=event.id, player_id=pid, status=AttendanceStatus.ATTEND, responded_at=now, registered_by=by.id))
+        elif row.status != AttendanceStatus.ATTEND:
+            row.status, row.responded_at, row.registered_by = AttendanceStatus.ATTEND, now, by.id
+        else:
+            continue
+        changed = True
+    if changed:
+        db.flush()
+        peer_service.recompute_team_chemistry(db, event.team_id)
+
+
 def _finish(db: Session, event: Event) -> None:
     _sync_event_status(db, event)
     rating_service.recompute_team(db, event.team_id)
@@ -163,6 +198,7 @@ def add_quarter(db: Session, event: Event, by: User, body: QuarterIn) -> Quarter
     db.flush()
     _apply(db, q, event, black_score=body.black_score, white_score=body.white_score, duration_min=body.duration_min, lineups=body.lineups,
            home=body.home_squad_no, away=body.away_squad_no)
+    _mark_played_attending(db, event, by)
     _finish(db, event)
     return _load(db, q.id)
 
@@ -193,11 +229,12 @@ def bulk_save(db: Session, event: Event, by: User, body: QuarterBulkSave) -> Qua
             db.delete(q)
             deleted += 1
     db.flush()
+    _mark_played_attending(db, event, by)
     _finish(db, event)
     return QuarterBulkResult(created=created, updated=updated, deleted=deleted)
 
 
-def update_quarter(db: Session, q: Quarter, body: QuarterUpdate) -> Quarter:
+def update_quarter(db: Session, q: Quarter, body: QuarterUpdate, by: User) -> Quarter:
     event = db.get(Event, q.event_id)
     _guard(db, event)
     _apply(
@@ -209,6 +246,7 @@ def update_quarter(db: Session, q: Quarter, body: QuarterUpdate) -> Quarter:
         home=body.home_squad_no if body.home_squad_no is not None else q.home_squad_no,
         away=body.away_squad_no if body.away_squad_no is not None else q.away_squad_no,
     )
+    _mark_played_attending(db, event, by)
     _finish(db, event)
     return _load(db, q.id)
 

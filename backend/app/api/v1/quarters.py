@@ -106,7 +106,7 @@ def update_quarter(db: DB, user: CurrentUser, quarter_id: int, body: QuarterUpda
     - **설계서:** 7.3절 (`PATCH /quarters/{id}`), 13.2절 2항.
     """
     q = _manager_quarter(db, user, quarter_id)
-    return quarter_service.quarter_view(db, quarter_service.update_quarter(db, q, body))
+    return quarter_service.quarter_view(db, quarter_service.update_quarter(db, q, body, user))
 
 
 @router.delete("/quarters/{quarter_id}", status_code=204, responses=errors(_403="FORBIDDEN_ROLE"), summary="쿼터 삭제 (마진 롤백)")

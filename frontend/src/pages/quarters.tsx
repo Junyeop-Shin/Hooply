@@ -193,11 +193,28 @@ export function QuartersPage() {
       }))
       return quartersApi.bulkSave(id, payload)
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       flush.current = () => {}  // 화면을 떠날 때 방금 지운 임시 저장을 다시 쓰지 않게
       try { localStorage.removeItem(draftKey(id)) } catch { /* ignore */ }
       base.current = null  // 저장한 것이 곧 서버 기록 — 뒤따르는 재조회를 "다른 기기의 변경" 으로 보지 않는다
-      // 이 일정(쿼터 · 상태 · 쿼터 수)과 팀 일정 목록 · 리더보드 기간, 실력이 바뀐 팀원 · 프로필 · 기록
+      // 뛴 사람은 서버가 참석으로 맞춘다. 참석인데 한 쿼터도 안 뛴 사람은 안 왔을 수도, 와서 쉬기만 했을 수도 있어 묻는다 (docs/09 2-1)
+      const played = new Set((quarters ?? []).flatMap((q) => [...q.black, ...q.white]))
+      const idle = played.size > 0 ? attendIds.filter((pid) => !played.has(pid)) : []
+      if (idle.length > 0) {
+        const names = idle.map(nameOf)
+        const ok = await confirm({
+          title: `한 쿼터도 안 뛴 참석자가 ${idle.length}명 있어요`,
+          body: `${names.slice(0, 6).join(', ')}${names.length > 6 ? ` 외 ${names.length - 6}명` : ''}. 오지 않았다면 불참으로 바꿀까요? 참석 · 투표에서 빠져요. 와서 쉬기만 했다면 그대로 두세요.`,
+          confirmLabel: '불참으로 바꾸기', cancelLabel: '그대로 두기',
+        })
+        if (ok) {
+          try {
+            for (const pid of idle) await eventsApi.setAttendance(id, pid, 'ABSENT')
+            toast(`${idle.length}명을 불참으로 바꿨어요.`)
+          } catch (e) { toast(errMsg(e, '불참으로 바꾸지 못했어요. 참석 관리에서 바꿔 주세요.'), 'error') }
+        }
+      }
+      // 이 일정(쿼터 · 상태 · 쿼터 수 · 참석)과 팀 일정 목록 · 리더보드 기간, 실력이 바뀐 팀원 · 프로필 · 기록
       invalidateEvent(qc, id, teamId)
       qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['stats'] })
       goBack(`/events/${id}`)
