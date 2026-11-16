@@ -41,10 +41,10 @@
 | PlayerCardDetailed | PlayerCard + 실력 수치·사전값·6축·평균 마진·출전 쿼터·참여 횟수 (MANAGER/ADMIN 전용) |
 | TeamDetail, TeamMembershipView, TeamCreated | 팀 |
 | EventView, EventCreate/Update, AttendanceView, AttendanceList, AttendanceSummary | 일정·참석 |
-| EventGuestCreate/Update, GuestSimilar, GuestPresetView, MergeCandidate | 게스트 |
+| EventGuestCreate/Update, GuestSimilar, GuestSuggestion, GuestPresetView, MergeCandidate | 게스트 |
 | SurveyTemplateView, SurveyQuestionView, SurveyOptionView, SurveyResponseIn, MyProfile, TeamProfileSummary | 설문·프로필 |
 | RankingCreate, RankingView | 매니저 정렬 |
-| AssignmentRunRequest, ConstraintSet, PinConstraint, ValidateResult, ConstraintViolation, AssignmentRunView, CandidateView, SquadView, SwapRequest, SwapPair, AdoptedAssignment | 배정 |
+| AssignmentRunRequest, ConstraintSet, PinConstraint, ValidateResult, ConstraintViolation, AssignmentRunView, CandidateView, SquadView, SwapRequest, SwapPair, AdoptedAssignment, UnassignedAttendee, AdoptedAddRequest | 배정 |
 | QuarterIn, LineupIn, QuarterUpdate, QuarterBulkSave, QuarterBulkResult, QuarterView, QuarterListView, QuarterSummary, SquadTally | 경기 기록 (3팀이면 팀별 집계) |
 | VoteTargets, VoteCandidate, VoteIn, PostGameSurveyIn, ShareMessage, PlayerStats, MarginPoint, QuarterRecord, RatingChange, LeaderboardEntry | 투표·통계 |
 | AdminUserRow, PlayerRawData, RatingAdjust, AuditLogView | 관리자 |
@@ -52,7 +52,7 @@
 | AiExplanation, AiMessage, AiTactics | AI 설명 (체인 A · B · C, 체인 D 는 RoleSuggestion) |
 | BadgeView, MonthlyMarginView, MonthlyMarginEntry, TutorialView, TutorialStep, TutorialUpdate | 기록 탭 배지 · 월간 코트 마진 · 시작 안내 |
 
-## 4. 엔드포인트 요약 (110개, `/health` 포함)
+## 4. 엔드포인트 요약 (112개, `/health` 포함)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -134,12 +134,13 @@
 | DELETE | `/events/{event_id}` | 일정 삭제 (참석·배정·투표 함께 삭제, 경기 기록이 있으면 400) | 204 |
 | POST | `/events/{event_id}/rsvp:close` | 응답 미리 마감 | 200 |
 | PUT | `/events/{event_id}/attendance` | 내 참석 응답 | 200 |
-| PUT | `/events/{event_id}/attendances/{player_id}` | 매니저 대리 참석 등록 | 200 · 403 |
+| PUT | `/events/{event_id}/attendances/{player_id}` | 매니저 대리 참석 등록 — 마감 · 확정 뒤에도 가능, 불참으로 바꾸면 확정 팀에서 빠진다(경기 기록 전) | 200 · 403 |
 | GET | `/events/{event_id}/attendances` | 참석 현황 · 포지션 분포 | 200 |
-| POST | `/events/{event_id}/guests` | 회차에 게스트 등록 | 201 · 200 |
+| POST | `/events/{event_id}/guests` | 회차에 게스트 등록 — 응답 마감 뒤에는 매니저만(`422 RSVP_CLOSED`). `existing_player_id` 로 다시 부를 때 정보 수정은 등록한 사람 · 매니저만 반영 | 201 · 200 · 422 |
 | PATCH | `/events/{event_id}/guests/{player_id}` | 회차 게스트 수정 | 200 · 403 |
-| DELETE | `/events/{event_id}/guests/{player_id}` | 회차 게스트 삭제 (불참 처리) | 204 · 403 |
-| GET | `/events/{event_id}/guests/presets` | 이전에 초대한 게스트 목록 | 200 |
+| DELETE | `/events/{event_id}/guests/{player_id}` | 회차 게스트 삭제 (불참 처리, 확정 팀에서도 빠진다) | 204 · 403 |
+| GET | `/events/{event_id}/guests/suggest?q=` | 게스트 이름 자동완성 — 팀에 왔던 게스트 중 앞글자(자모 단위) 일치, 최근 온 순 8명. 이 일정 참석자 · 병합된 게스트 제외. 등급은 매니저에게만, `guest_grade` · `can_edit` 은 등록한 사람 · 매니저에게만 | 200 · 400 |
+| GET | `/events/{event_id}/guests/presets` | 이전에 초대한 게스트 목록 (화면에서는 더 쓰지 않음 — 자동완성으로 바뀜) | 200 |
 
 ### 팀 배정
 
@@ -151,10 +152,11 @@
 | POST | `/events/{event_id}/assignments:validate` | 배정 제약 실현가능성 검사. 쿼터 기록이 있는 일정이면 422 대신 200 으로 `violations[]` 에 `ASSIGNMENT_LOCKED` 하나만 담아 `feasible=false` | 200 |
 | GET | `/events/{event_id}/assignments/last-constraints` | 직전 회차 제약 불러오기 | 200 · 404 |
 | GET | `/assignments/runs/{run_id}` | 배정 실행 결과 조회 | 200 |
-| PATCH | `/assignments/candidates/{candidate_id}` | 후보안 선수 교체 — 3팀 일방 이동은 `exchanges[].to_squad_no` 또는 `moves[].to_squad_no`. swaps → moves → exchanges 를 한 번에 저장(하나라도 422 면 아무것도 안 바뀜) | 200 · 409 · 422 |
-| POST | `/assignments/candidates/{candidate_id}:reset` | 수동 수정 초기화 | 200 · 409 · 422 |
-| POST | `/assignments/candidates/{candidate_id}:adopt` | 후보안 확정 (같은 일정의 실행 · 확정은 일정 행을 잠가 차례로) | 200 · 409 · 422 |
-| GET | `/events/{event_id}/assignment/adopted` | 확정된 배정 결과 | 200 · 404 |
+| PATCH | `/assignments/candidates/{candidate_id}` | 후보안 선수 교체 — 3팀 일방 이동은 `exchanges[].to_squad_no` 또는 `moves[].to_squad_no`. swaps → moves → exchanges 를 한 번에 저장(하나라도 422 면 아무것도 안 바뀜). 확정한 안도 경기 기록 전까지 고칠 수 있다 | 200 · 422 |
+| POST | `/assignments/candidates/{candidate_id}:reset` | 수동 수정 초기화 (확정한 안도 경기 기록 전까지) | 200 · 422 |
+| POST | `/assignments/candidates/{candidate_id}:adopt` | 후보안 확정 (같은 일정의 실행 · 확정은 일정 행을 잠가 차례로). 같은 실행의 다른 안을 확정하면 확정이 옮겨 간다 | 200 · 409 · 422 |
+| GET | `/events/{event_id}/assignment/adopted` | 확정된 배정 결과 — 매니저에게는 `editable`(경기 기록 전) · `unassigned[]`(팀이 없는 참석자, 추천 팀 · 넣을 수 있는 팀 · 이유) | 200 · 404 |
+| POST | `/events/{event_id}/assignment/adopted:add` | 팀이 없는 참석자를 확정 팀에 넣기 (매니저, 다른 사람의 팀은 그대로, 묶기 · 갈라놓기 · 미리 배치를 어기는 팀이면 422) | 200 · 403 · 422 |
 | POST | `/assignments/candidates/{candidate_id}/ai-explanation` | AI 배정 설명 — LangChain 체인 A (매니저, 같은 배정이면 저장한 결과) | 200 · 403 · 404 · 429 |
 | GET | `/events/{event_id}/assignment/adopted/ai-message` | AI 한마디 — 체인 B (팀원, 내 것만, 팀마다 한 번 호출) | 200 · 403 · 404 · 429 |
 

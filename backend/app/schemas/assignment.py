@@ -22,7 +22,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.enums import Strategy
-from app.schemas.common import SquadView
+from app.schemas.common import PlayerCard, SquadView
 
 MAX_GROUPS = 30  # 묶기 · 갈라놓기 그룹 수 상한
 MAX_GROUP_SIZE = 30  # 그룹 하나의 인원 상한
@@ -195,6 +195,22 @@ class SwapRequest(BaseModel):
     exchanges: list[Exchange] = Field(default=[], max_length=MAX_GROUPS, description="그룹 단위 교환. 묶음은 자동으로 통째로 움직인다. moves 뒤에 적용")
 
 
+class UnassignedAttendee(BaseModel):
+    """확정 뒤 참석으로 바뀌어 아직 어느 팀에도 없는 사람 (매니저에게만). 앱이 넣을 팀을 추천한다."""
+
+    player: PlayerCard
+    recommended_squad_no: int | None = Field(default=None, description="넣으면 인원 · 균형이 가장 좋은 팀 번호. 넣을 수 있는 팀이 없으면 None")
+    allowed_squad_nos: list[int] = Field(default=[], description="넣을 수 있는 팀 번호 — 묶기 · 갈라놓기 · 미리 배치를 지킨다")
+    note: str | None = Field(default=None, description="넣을 팀이 정해진 이유 (예: 같은 팀으로 묶은 사람이 이 팀에 있어요)")
+
+
+class AdoptedAddRequest(BaseModel):
+    """확정한 배정에 사람 넣기 — `POST /events/{id}/assignment/adopted:add` (MANAGER)."""
+
+    player_id: int
+    squad_no: int = Field(ge=1, le=3)
+
+
 class AdoptedAssignment(BaseModel):
     """확정된 배정 — `POST /assignments/candidates/{id}:adopt` 응답, `GET /events/{id}/assignment/adopted`.
 
@@ -215,3 +231,7 @@ class AdoptedAssignment(BaseModel):
     adopted_at: datetime | None = None
     skill_spread: float | None = Field(default=None, description="가장 강한 팀과 가장 약한 팀의 예상 평균 실력 차이 (점/쿼터, 2팀이면 두 팀 차). 팀 단위 값이라 플레이어에게도 보여준다")
     total_score: float | None = Field(default=None, description="균형 점수 (낮을수록 균형). 목적함수 J")
+    editable: bool = Field(default=False, description="매니저가 이 확정 배정을 고칠 수 있는지 (쿼터 기록 전까지). 플레이어에게는 늘 false")
+    unassigned: list[UnassignedAttendee] = Field(
+        default=[], description="확정 뒤 참석으로 바뀌어 아직 팀이 없는 사람 (매니저에게만, editable 일 때)",
+    )

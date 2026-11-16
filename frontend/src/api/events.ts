@@ -7,7 +7,7 @@ import type {
   EventGuestInput,
   EventGuestUpdate,
   EventView,
-  GuestPreset,
+  GuestSuggestion,
   GuestSimilar,
   LockSuggestion,
   Page,
@@ -48,6 +48,7 @@ export const eventsApi = {
     api<AttendanceView>(`/events/${eventId}/guests/${playerId}`, { method: 'PATCH', body: patch }),
   removeGuest: (eventId: number, playerId: number) =>
     api<void>(`/events/${eventId}/guests/${playerId}`, { method: 'DELETE' }),
-  presets: (eventId: number) => api<{ items: GuestPreset[] }>(`/events/${eventId}/guests/presets`),
+  /** 게스트 이름 자동완성 — 팀에 게스트로 왔던 사람 중 이름이 q 로 시작하는 사람 (최근 온 순) */
+  suggestGuests: (eventId: number, q: string) => api<{ items: GuestSuggestion[] }>(`/events/${eventId}/guests/suggest?q=${encodeURIComponent(q)}`),
   suggestions: (eventId: number) => api<{ items: LockSuggestion[] }>(`/events/${eventId}/assignment/suggestions`),
 }

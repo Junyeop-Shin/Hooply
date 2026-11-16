@@ -226,6 +226,8 @@ export interface AttendanceView {
   team_lock_request_player_id: number | null
   team_lock_request_player_name: string | null
   can_edit: boolean
+  /** 게스트에게 고른 실력 등급 1~5 — can_edit 일 때만 */
+  guest_grade?: number | null
 }
 
 export interface AttendanceSummary {
@@ -277,6 +279,17 @@ export interface GuestPreset {
   existing_player_id: number | null
   use_count: number
   last_used_at: string
+}
+
+/** 게스트 이름 자동완성 — GET /events/{id}/guests/suggest?q= (게스트 행이 정본) */
+export interface GuestSuggestion {
+  player: PlayerCard
+  last_attended: string | null
+  attended_count: number
+  /** 고른 등급 1~5 — can_edit 일 때만 */
+  guest_grade: number | null
+  /** 초대한 사람 · 매니저만 true. 아니면 다시 초대할 때 기록만 이어 붙는다 */
+  can_edit: boolean
 }
 
 export interface GuestSimilar {
@@ -373,6 +386,17 @@ export interface AdoptedAssignment {
   adopted_at: string | null
   skill_spread: number | null
   total_score: number | null
+  /** 매니저가 고칠 수 있는지 (쿼터 기록 전까지). 팀원은 늘 false */
+  editable?: boolean
+  /** 확정 뒤 참석으로 바뀌어 아직 팀이 없는 사람 (매니저에게만) */
+  unassigned?: UnassignedAttendee[]
+}
+
+export interface UnassignedAttendee {
+  player: PlayerCard
+  recommended_squad_no: number | null
+  allowed_squad_nos: number[]
+  note: string | null
 }
 
 // --- 경기 기록 (F8) ---

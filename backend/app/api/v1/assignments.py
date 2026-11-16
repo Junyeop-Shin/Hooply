@@ -15,7 +15,8 @@ LOCK/SEPARATE/PIN 제약은 Union-Find 슈퍼노드로 축약해 어떤 전략�
 - GET   /assignments/runs/{run_id}                      후보안 3개 + 지표 + 설명 (구현됨)
 - PATCH /assignments/candidates/{candidate_id}          선수 교체 후 재계산 (구현됨)
 - POST  /assignments/candidates/{candidate_id}:adopt    후보안 확정 (구현됨)
-- GET   /events/{event_id}/assignment/adopted           확정 결과 (액터별 마스킹) (구현됨)
+- GET   /events/{event_id}/assignment/adopted           확정 결과 (액터별 마스킹 · 매니저에게 팀 없는 참석자와 추천 팀) (구현됨)
+- POST  /events/{event_id}/assignment/adopted:add       확정한 팀에 사람 넣기 (구현됨, docs/09)
 - GET   /events/{event_id}/assignment/suggestions       게스트 묶기 제안 목록 (구현됨, 게스트 기능 설계)
 """
 
@@ -28,6 +29,7 @@ from app.api.v1._docs import errors
 from app.core import errors as E
 from app.models import Event, Player
 from app.schemas.assignment import (
+    AdoptedAddRequest,
     AdoptedAssignment,
     AssignmentRunRequest,
     AssignmentRunView,
@@ -155,7 +157,7 @@ def get_run(db: DB, user: CurrentUser, run_id: int):
 
 @router.patch(
     "/assignments/candidates/{candidate_id}", response_model=CandidateView,
-    responses=errors(_409="ALREADY_ADOPTED", _422=("INVALID_SWAP", "ASSIGNMENT_LOCKED")), summary="후보안 선수 교체",
+    responses=errors(_422=("INVALID_SWAP", "ASSIGNMENT_LOCKED")), summary="후보안 선수 교체",
 )
 def swap_players(db: DB, user: CurrentUser, candidate_id: int, body: SwapRequest):
     """두 선수를 맞바꾸거나(`swaps`), 한 명을 옮기거나(`moves`), 그룹끼리 교환하고(`exchanges`) 지표·설명을 즉시 재계산한다 (F7).
@@ -164,8 +166,8 @@ def swap_players(db: DB, user: CurrentUser, candidate_id: int, body: SwapRequest
 
     - **권한:** 그 팀의 매니저 또는 ADMIN.
     - **처리:** 교체된 슬롯은 `is_manual_override=true`. 묶음(LOCK)·미리 배치(PIN)에 속한 사람은 개별로
-      옮길 수 없다. 확정된 후보안은 수정할 수 없다 (재배정 실행).
-    - **오류:** `422 INVALID_SWAP`, `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정, `409 ALREADY_ADOPTED`, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+      옮길 수 없다. 확정한 후보안도 쿼터 기록 전까지는 고칠 수 있고, 바뀐 팀이 플레이어에게 바로 보인다.
+    - **오류:** `422 INVALID_SWAP`, `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.
     - **설계서:** FR-22, F7, S-13 드래그 swap.
     """
@@ -179,14 +181,14 @@ def swap_players(db: DB, user: CurrentUser, candidate_id: int, body: SwapRequest
 
 @router.post(
     "/assignments/candidates/{candidate_id}:reset", response_model=CandidateView,
-    responses=errors(_409="ALREADY_ADOPTED", _422="ASSIGNMENT_LOCKED"), summary="수동 수정 초기화",
+    responses=errors(_422="ASSIGNMENT_LOCKED"), summary="수동 수정 초기화",
 )
 def reset_candidate(db: DB, user: CurrentUser, candidate_id: int):
     """매니저가 손으로 옮긴 것을 모두 되돌려 알고리즘이 낸 원래 편성으로 복원한다.
 
     - **권한:** 그 팀의 매니저 또는 ADMIN.
     - **처리:** 후보안에 저장된 원본 편성(`metrics.original_squads`)으로 슬롯을 되돌리고 지표를 재계산한다.
-    - **오류:** `409 ALREADY_ADOPTED`, `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+    - **오류:** `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.
     - **설계서:** F7 (사용자 요청으로 추가).
     """
@@ -205,9 +207,9 @@ def adopt_candidate(db: DB, user: CurrentUser, candidate_id: int):
     """후보안을 확정해 참석자에게 공개한다 (FR-23). 일정은 CLOSED(응답 마감·배정 단계)가 된다.
 
     - **권한:** 그 팀의 매니저 또는 ADMIN.
-    - **처리:** 같은 회차의 다른 확정을 해제하고 이 후보안을 `is_adopted=true` 로. 노쇼 등으로 재배정하면
-      새 run 을 실행해 다시 확정한다.
-    - **오류:** `409 ALREADY_ADOPTED` — 같은 run 안에 이미 확정된 다른 후보안, 또는 동시에 다른 안이 먼저 확정됨.
+    - **처리:** 같은 회차의 다른 확정을 해제하고(같은 run 의 다른 안이면 확정을 이 안으로 옮긴다) 이 후보안을
+      `is_adopted=true` 로. 늦게 온 사람 · 노쇼는 확정안을 고치거나(`adopted:add`, PATCH) 새 run 으로 다시 나눈다.
+    - **오류:** `409 ALREADY_ADOPTED` — 동시에 다른 run 의 안이 먼저 확정되며 이 run 이 지워짐.
       `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정 (기록을 먼저 지워야 편성을 바꿀 수 있다). `404`, `403`.
     - **상태:** `구현됨`.
     - **설계서:** FR-23, 6.2절 부분 유니크 인덱스.
@@ -233,5 +235,26 @@ def adopted_assignment(db: DB, me: EventMember, event: Annotated[Event, Depends(
     - **상태:** `구현됨`.
     - **설계서:** FR-24, S-14, 9.2절 표시 정책.
     """
+    player = db.get(Player, me.id) if me.id else me
+    return assignment_service.adopted_view(db, event, player)
+
+
+@router.post(
+    "/events/{event_id}/assignment/adopted:add", response_model=AdoptedAssignment,
+    responses=errors(_404="NOT_ADOPTED_YET", _422=("INVALID_SWAP", "ASSIGNMENT_LOCKED")), summary="확정한 팀에 사람 넣기",
+)
+def add_to_adopted(db: DB, me: EventManager, event: Annotated[Event, Depends(get_event_or_404)], body: AdoptedAddRequest):
+    """확정 뒤 참석으로 바뀐 사람(늦게 온 회원 · 새 게스트)을 확정한 팀에 넣는다. 다른 사람의 팀은 그대로다.
+
+    - **권한:** 팀 매니저 또는 ADMIN. 확정 뒤 참석 변경은 매니저만 한다 (일정이 응답 마감 상태).
+    - **처리:** 그 사람이 이 일정에 참석(ATTEND)이고 아직 어느 팀에도 없어야 한다. 이 실행의 미리 배치 · 묶기 ·
+      갈라놓기를 지키는 팀에만 넣을 수 있다(`GET …/adopted` 의 `unassigned[].allowed_squad_nos`). 넣은 뒤 지표 ·
+      설명을 다시 계산하고 매니저용 확정 결과를 돌려준다. 불참으로 바꾼 사람은 참석 API 에서 자동으로 빠진다.
+    - **오류:** `422 INVALID_SWAP` — 참석이 아니거나 이미 팀에 있음 · 제약에 어긋나는 팀, `422 ASSIGNMENT_LOCKED` —
+      쿼터 기록이 있는 일정(경기 기록 화면에서 명단에 넣는다), `404 NOT_ADOPTED_YET`, `403 FORBIDDEN_ROLE`.
+    - **상태:** `구현됨`.
+    - **설계서:** F7, docs/09 1장.
+    """
+    assignment_service.add_to_adopted(db, event, body.player_id, body.squad_no)
     player = db.get(Player, me.id) if me.id else me
     return assignment_service.adopted_view(db, event, player)

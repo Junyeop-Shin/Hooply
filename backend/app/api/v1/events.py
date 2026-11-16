@@ -49,6 +49,7 @@ from app.schemas.event import (
     EventUpdate,
     EventView,
     GuestPresetView,
+    GuestSuggestion,
 )
 from app.schemas.team import GuestSimilar
 from app.services import event_service, guest_service
@@ -267,6 +268,32 @@ def remove_event_guest(db: DB, me: EventMember, user: CurrentUser, event: Annota
     """
     guest = guest_service.require_guest(db, player_id)
     event_service.remove_event_guest(db, event, user, guest)
+
+
+@router.get("/events/{event_id}/guests/suggest", response_model=ItemList[GuestSuggestion], summary="게스트 이름 자동완성")
+def guest_suggest(
+    db: DB, me: EventMember, user: CurrentUser, event: Annotated[Event, Depends(get_event_or_404)],
+    q: Annotated[str, Query(min_length=1, max_length=50, description="입력한 이름 앞부분. 받침을 치기 전 글자도 잡힌다 (\"시\" → 신준엽)")],
+):
+    """이 팀에 게스트로 왔던 사람 중 이름이 `q` 로 시작하는 사람을 최근에 온 순으로 8명까지 돌려준다.
+
+    - **권한:** 팀원 누구나 (팀에 게스트로 왔던 사람 전체가 대상 — 내가 부른 사람만이 아니다).
+    - **처리:** 공백 · 대소문자 · 앞의 '게스트' 접두어를 무시하고 한글을 자모로 풀어 앞부분을 비교한다. 이 일정에 이미
+      참석인 게스트와 병합된 게스트는 뺀다. 실력 등급(A~E)은 매니저에게만, 고른 등급 1~5 는 고칠 수 있는 사람
+      (초대한 사람 · 매니저)에게만 싣는다.
+    - **오류:** `404 NOT_FOUND`, `403 NOT_A_MEMBER`, `400 VALIDATION_ERROR` — 빈 검색어.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-12, docs/09 (지난 초대 칩 목록을 대신한다).
+    """
+    manager = me.role == TeamRole.MANAGER or guest_service.is_manager(db, user, event.team_id)
+    items = []
+    for g, last, n in guest_service.suggest_guests(db, event, q):
+        editable = manager or g.created_by == user.id
+        items.append(GuestSuggestion(
+            player=to_card(g, include_grade=manager), last_attended=last, attended_count=n,
+            guest_grade=g.guest_grade if editable else None, can_edit=editable,
+        ))
+    return ItemList(items=items)
 
 
 @router.get("/events/{event_id}/guests/presets", response_model=ItemList[GuestPresetView], summary="이전에 초대한 게스트 목록")

@@ -32,6 +32,9 @@ export const assignmentsApi = {
   reset: (candidateId: number) => api<CandidateView>(`/assignments/candidates/${candidateId}:reset`, { method: 'POST' }),
   adopt: (candidateId: number) => api<CandidateView>(`/assignments/candidates/${candidateId}:adopt`, { method: 'POST' }),
   adopted: (eventId: number) => api<AdoptedAssignment>(`/events/${eventId}/assignment/adopted`),
+  /** 확정한 팀에 사람 넣기 (매니저, 쿼터 기록 전까지) */
+  addToAdopted: (eventId: number, playerId: number, squadNo: number) =>
+    api<AdoptedAssignment>(`/events/${eventId}/assignment/adopted:add`, { method: 'POST', body: { player_id: playerId, squad_no: squadNo } }),
   /** AI 배정 설명 (매니저용, LangChain 체인 A). 같은 배정이면 서버가 저장해 둔 결과를 준다 */
   aiExplanation: (candidateId: number) => api<AiExplanation>(`/assignments/candidates/${candidateId}/ai-explanation`, { method: 'POST' }),
   /** AI 한마디 (팀원용, 체인 B) — 내 것만 */

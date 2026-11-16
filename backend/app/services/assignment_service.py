@@ -31,7 +31,7 @@ from decimal import Decimal
 from statistics import mean, pstdev
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, contains_eager, selectinload
 
 from app.core import errors
@@ -55,6 +55,7 @@ from app.models.enums import (
     ConstraintType,
     EventStatus,
     PlayerKind,
+    PlayerStatus,
     Position,
     Strategy,
     TeamRole,
@@ -70,6 +71,7 @@ from app.schemas.assignment import (
     MovePlayer,
     PinConstraint,
     SwapPair,
+    UnassignedAttendee,
     ValidateResult,
 )
 from app.schemas.common import SquadView
@@ -1254,9 +1256,11 @@ def edit(
     """`PATCH /assignments/candidates/{id}` 한 번의 수정 — 맞교체 → 옮기기 → 그룹 교환 순으로 적용하고 **한 번만** 저장한다.
 
     어느 단계에서든 검증에 걸리면 아무것도 저장하지 않는다 (예전에는 swaps 를 저장한 뒤 moves 에서 422 가 나면 반만 바뀌었다).
+    확정한 배정안도 쿼터 기록 전까지는 고칠 수 있다 — 플레이어에게 바로 바뀐 팀이 보인다. 늦게 온 사람 한 명 때문에
+    전원을 다시 섞지 않게 하려는 것 (docs/09). 확정안을 고칠 때는 일정 행을 잠가 사람 넣기 · 빼기와 겹치지 않게 한다.
     """
     if cand.is_adopted:
-        raise errors.AlreadyAdopted("확정한 배정안은 고칠 수 없어요. 바꾸려면 일정 화면에서 '팀 다시 나누기'를 눌러 주세요.")
+        _lock_event(db, cand.run.event_id)
     ensure_unlocked(db, cand.run.event_id)
     if swaps:
         _apply_exchanges(cand, [Exchange(a_player_ids=[sw.player_id_a], b_player_ids=[sw.player_id_b]) for sw in swaps])
@@ -1379,9 +1383,9 @@ def _reload_slots(db: Session, cand: AssignmentCandidate) -> None:
 
 
 def reset_manual(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
-    """수동 수정을 모두 되돌려 알고리즘이 낸 원래 편성으로 복원한다."""
+    """수동 수정을 모두 되돌려 알고리즘이 낸 원래 편성으로 복원한다. 확정 뒤 넣은 사람은 넣은 팀에 그대로 둔다."""
     if cand.is_adopted:
-        raise errors.AlreadyAdopted("확정한 배정안은 고칠 수 없어요. 바꾸려면 일정 화면에서 '팀 다시 나누기'를 눌러 주세요.")
+        _lock_event(db, cand.run.event_id)
     ensure_unlocked(db, cand.run.event_id)
     original = cand.metrics.get("original_squads") or {}
     if not original:
@@ -1399,26 +1403,38 @@ def reset_manual(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
     return load_candidate(db, cand.id)
 
 
-def _recompute_candidate(db: Session, cand: AssignmentCandidate, *, manual: bool = True) -> None:
-    """고친 편성을 다시 채점한다. 명단은 지금의 참석 응답이 아니라 이 후보안에 든 사람들이다 — 배정 뒤 참석을 바꾼
-    사람이 1팀 점수에 섞이거나 빠지지 않게 (재배정은 따로 한다)."""
-    event = db.get(Event, cand.run.event_id)
-    ids = [s.player_id for sq in cand.squads for s in sq.slots]
-    roster = _roster_from(sorted(players_of(db, ids).values(), key=lambda p: p.display_name))
+def _score_layout(
+    db: Session, cand: AssignmentCandidate, layout: list[list[int]], *,
+    players: dict[int, Player] | None = None, pref_pairs: dict | None = None, recent_pairs: set | None = None,
+) -> tuple[Scored, Prepared, list[list[RosterPlayer]]]:
+    """팀 번호순 편성(`layout[i]` = i+1 번 팀의 player_id)을 이 후보안의 전략 · 제약으로 채점한다.
+
+    명단은 지금의 참석 응답이 아니라 편성에 든 사람들이다. 같은 채점 함수를 쓰려고 편성을 partition 형태로 다시 만든다.
+    """
+    ids = [pid for sq in layout for pid in sq]
+    if players is None:
+        players = players_of(db, ids)
+    roster = _roster_from(sorted((players[i] for i in ids if i in players), key=lambda p: p.display_name))
     rmap = {r.id: r for r in roster}
-    squads: list[list[RosterPlayer]] = []
-    for sq in sorted(cand.squads, key=lambda x: x.squad_no):
-        squads.append([rmap[s.player_id] for s in sq.slots if s.player_id in rmap])
+    squads = [[rmap[pid] for pid in sq if pid in rmap] for sq in layout]
     body = AssignmentRunRequest(team_count=cand.run.team_count, strategies=[cand.strategy], constraints=constraints_of(cand.run))
     prep = prepare(roster, body)
-    # 현재 편성을 partition 형태로 재구성해 같은 채점 함수를 쓴다
-    node_sq = {}
-    for i, s in enumerate(squads):
-        for r in s:
-            node_sq[prep.node_of[r.id]] = i
+    node_sq = {prep.node_of[r.id]: i for i, s in enumerate(squads) for r in s}
     partition = tuple(node_sq.get(n, 0) for n in range(len(prep.supernodes)))
-    sc = score_partition(prep, partition, _load_pref_pairs(db, list(rmap)), _load_recent_pairs(db, event))
+    if pref_pairs is None:
+        pref_pairs = _load_pref_pairs(db, list(rmap))
+    if recent_pairs is None:
+        recent_pairs = _load_recent_pairs(db, db.get(Event, cand.run.event_id))
+    sc = score_partition(prep, partition, pref_pairs, recent_pairs)
     sc.squads = squads
+    return sc, prep, squads
+
+
+def _recompute_candidate(db: Session, cand: AssignmentCandidate, *, manual: bool = True) -> None:
+    """고친 편성을 다시 채점한다. 명단은 지금의 참석 응답이 아니라 이 후보안에 든 사람들이다 — 배정 뒤 참석을 바꾼
+    사람이 1팀 점수에 섞이거나 빠지지 않게 (확정안에 사람을 넣고 빼는 건 `add_to_adopted` · `drop_from_adopted`)."""
+    layout = [[s.player_id for s in sq.slots] for sq in sorted(cand.squads, key=lambda x: x.squad_no)]
+    sc, prep, squads = _score_layout(db, cand, layout)
     cand.total_score = Decimal(str(round(sc.total(STRATEGY_WEIGHTS[cand.strategy]), 3)))
     positions: dict[int, Position | None] = {}
     for i, sq in enumerate(sorted(cand.squads, key=lambda x: x.squad_no)):
@@ -1440,8 +1456,8 @@ def adopt(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
     `roster_snapshot`·제약 덕분에 실력값이 바뀐 뒤에도 "그때 왜 이렇게 나눴는가" 를 설명할 수 있다.
     확정 전에는 지우지 않으므로, 재배정을 돌려 보는 동안에도 플레이어에게는 직전 확정안이 계속 보인다.
 
-    동시성: 일정 행을 `SELECT … FOR UPDATE` 로 잠근 뒤 후보안을 다시 읽는다. 같은 실행의 두 안을 동시에 확정하면 뒤에 온
-    쪽은 앞 쪽이 끝난 뒤의 상태를 보고 409 ALREADY_ADOPTED, 다른 실행의 안을 동시에 확정해도 서로를 지우다 교착되지 않는다
+    동시성: 일정 행을 `SELECT … FOR UPDATE` 로 잠근 뒤 후보안을 다시 읽는다. 같은 실행의 두 안을 확정하면 차례로 처리되어
+    나중 것이 확정으로 남는다(확정을 옮긴다). 다른 실행의 안을 동시에 확정해도 서로를 지우다 교착되지 않는다
     (앞 쪽이 지운 실행의 안이면 409).
     """
     event_id = cand.run.event_id
@@ -1455,9 +1471,12 @@ def adopt(db: Session, cand: AssignmentCandidate) -> AssignmentCandidate:
         raise errors.AlreadyAdopted("다른 배정안이 먼저 확정됐어요. 화면을 새로고침해 주세요.")
     cand = fresh
     run_row = cand.run
-    already = [c for c in run_row.candidates if c.is_adopted and c.id != cand.id]
-    if already:
-        raise errors.AlreadyAdopted()
+    # 같은 실행의 다른 안을 확정해 두었으면 확정을 이 안으로 옮긴다 (결과 화면이 "먼저 확정한 배정은 풀려요" 라고 묻는다).
+    # 부분 유니크 인덱스(실행당 확정 1개) 때문에 먼저 풀고 flush 한 뒤 이 안을 확정한다
+    for other in run_row.candidates:
+        if other.is_adopted and other.id != cand.id:
+            other.is_adopted = False
+    db.flush()
     cand.is_adopted = True
     event = db.get(Event, run_row.event_id)
     if event.status == EventStatus.OPEN:
@@ -1507,6 +1526,11 @@ def adopted_view(db: Session, event: Event, me: Player) -> AdoptedAssignment:
         raise errors.NotAdoptedYet()
     mask = me.role != TeamRole.MANAGER
     squads = squad_views(db, cand, mask=mask)
+    editable, unassigned = False, []
+    if not mask:
+        locked, attending = _lock_and_attending(db, event.id)
+        editable = not locked
+        unassigned = unassigned_attendees(db, event, cand, attending=attending) if editable else []
     my_sq, my_pos = None, None
     for sq in squads:
         if me.id in sq.assigned_positions:
@@ -1519,4 +1543,137 @@ def adopted_view(db: Session, event: Event, me: Player) -> AdoptedAssignment:
         my_assigned_position=my_pos.value if isinstance(my_pos, Position) else my_pos,
         adopted_at=cand.run.created_at if isinstance(cand.run.created_at, datetime) else None,
         skill_spread=cand.metrics.get("skill_spread"), total_score=float(cand.total_score) if cand.total_score is not None else None,
+        editable=editable, unassigned=unassigned,
     )
+
+
+# ---------------------------------------------------------------------------
+# 확정한 배정 고치기 — 늦게 온 사람 넣기 · 불참한 사람 빼기 (매니저, 쿼터 기록 전까지)
+# ---------------------------------------------------------------------------
+# 확정하면 일정이 응답 마감(CLOSED)이 되므로 그 뒤 참석 변경은 매니저만 한다(사용자 결정). 매니저가 늦게 온 사람을
+# 참석으로 바꾸거나 게스트를 등록하면 그 사람은 "아직 팀 없음" 으로 뜨고, 앱이 넣을 팀을 추천해 한 번에 넣는다.
+# 불참으로 바꾸면 확정 팀에서도 바로 빠진다. 전원을 다시 섞고 싶으면 '팀 다시 나누기'(확정 때 조건이 미리 채워진다).
+
+
+def _squad_no_of(cand: AssignmentCandidate) -> dict[int, int]:
+    return {s.player_id: sq.squad_no for sq in cand.squads for s in sq.slots}
+
+
+def _allowed_squads(cand: AssignmentCandidate, player_id: int) -> tuple[list[int], str | None]:
+    """확정안에 `player_id` 를 넣을 수 있는 팀 번호와 그 이유. 이 실행의 제약(미리 배치 → 묶기 → 갈라놓기)을 지킨다."""
+    where = _squad_no_of(cand)
+    nos = sorted(sq.squad_no for sq in cand.squads)
+    pin = next((c.squad_no for c in cand.run.constraints if c.type == ConstraintType.PIN and c.player_id == player_id), None)
+    if pin in nos:
+        return [pin], f"{SQUAD_NAMES[pin - 1]} 팀에 미리 배치한 사람이에요"
+    mates = sorted(m for m in _lock_groups_of(cand).get(player_id, set()) if m != player_id and m in where)
+    if mates:
+        return [where[mates[0]]], "같은 팀으로 묶은 사람이 이 팀에 있어요"
+    sep = _separate_group_of(cand)
+    if player_id in sep:
+        banned = {where[q] for q, g in sep.items() if g == sep[player_id] and q != player_id and q in where}
+        if banned:
+            return [n for n in nos if n not in banned], "갈라놓은 사람이 있는 팀에는 넣지 않아요"
+    return nos, None
+
+
+def _lock_and_attending(db: Session, event_id: int) -> tuple[bool, list[int]]:
+    """쿼터 기록이 있는지(잠김)와 참석(ATTEND)한 사람 — 확정 결과를 매번 읽는 화면이라 쿼리 하나로 (집계라 참석자가 없어도 한 줄)."""
+    locked, ids = db.execute(
+        select(
+            select(Quarter.id).where(Quarter.event_id == event_id).exists(),
+            func.array_agg(EventAttendance.player_id),
+        ).where(EventAttendance.event_id == event_id, EventAttendance.status == AttendanceStatus.ATTEND)
+    ).one()
+    return bool(locked), list(ids or [])
+
+
+def unassigned_attendees(
+    db: Session, event: Event, cand: AssignmentCandidate, *, attending: list[int] | None = None,
+) -> list[UnassignedAttendee]:
+    """참석(ATTEND)인데 확정안 어느 팀에도 없는 사람과 추천 팀.
+
+    추천: 넣을 수 있는 팀 중 **인원이 가장 적은 팀들** 안에서 이 후보안 전략의 목적함수가 가장 낮은 팀. 로테이션 공평이
+    먼저라 인원부터 맞춘다 (7:6 이면 6명 팀). 여러 명이 기다려도 한 명씩 따로 계산한다 — 하나를 넣으면 화면이 다시 받는다.
+    """
+    if attending is None:
+        attending = _lock_and_attending(db, event.id)[1]
+    where = _squad_no_of(cand)
+    waiting = [pid for pid in attending if pid not in where]
+    if not waiting:
+        return []
+    players = players_of(db, [*where, *waiting])
+    waiting = sorted(
+        (pid for pid in waiting if pid in players and players[pid].status == PlayerStatus.ACTIVE),
+        key=lambda pid: players[pid].display_name,
+    )
+    if not waiting:
+        return []
+    base = {sq.squad_no: [s.player_id for s in sq.slots] for sq in cand.squads}
+    nos = sorted(base)
+    pref = _load_pref_pairs(db, [*where, *waiting])
+    recent = _load_recent_pairs(db, event)
+    weights = STRATEGY_WEIGHTS[cand.strategy]
+    out = []
+    for pid in waiting:
+        allowed, note = _allowed_squads(cand, pid)
+        best = None
+        if allowed:
+            fewest = min(len(base[n]) for n in allowed)
+            scored = []
+            for no in (n for n in allowed if len(base[n]) == fewest):
+                layout = [base[n] + ([pid] if n == no else []) for n in nos]
+                sc, _, _ = _score_layout(db, cand, layout, players=players, pref_pairs=pref, recent_pairs=recent)
+                scored.append((sc.total(weights), no))
+            best = min(scored)[1]
+        out.append(UnassignedAttendee(
+            player=to_card(players[pid], include_grade=True), recommended_squad_no=best, allowed_squad_nos=allowed, note=note,
+        ))
+    return out
+
+
+def add_to_adopted(db: Session, event: Event, player_id: int, squad_no: int) -> None:
+    """확정안의 `squad_no` 팀에 참석자 한 명을 넣고 다시 채점한다. commit 까지."""
+    _lock_event(db, event.id)
+    ensure_unlocked(db, event.id)
+    found = adopted_candidate(db, event)
+    if found is None:
+        raise errors.NotAdoptedYet()
+    cand = load_candidate(db, found.id)
+    if player_id in _squad_no_of(cand):
+        raise errors.InvalidSwap("이미 팀에 있는 사람이에요.")
+    attends = db.scalar(select(EventAttendance.id).where(
+        EventAttendance.event_id == event.id, EventAttendance.player_id == player_id, EventAttendance.status == AttendanceStatus.ATTEND,
+    ))
+    if attends is None:
+        raise errors.InvalidSwap("참석으로 바꾼 사람만 팀에 넣을 수 있어요.")
+    allowed, note = _allowed_squads(cand, player_id)
+    if squad_no not in allowed:
+        raise errors.InvalidSwap(note or "없는 팀이에요.")
+    squad = next(sq for sq in cand.squads if sq.squad_no == squad_no)
+    db.add(AssignmentSlot(squad_id=squad.id, player_id=player_id, is_manual_override=True))
+    _reload_slots(db, cand)
+    _recompute_candidate(db, cand)
+    db.commit()
+
+
+def drop_from_adopted(db: Session, event: Event, player_id: int) -> bool:
+    """불참으로 바뀐 사람을 확정안에서 뺀다 (쿼터 기록 전까지). flush 까지 — commit 은 호출자. 뺐으면 True.
+
+    쿼터 기록이 있으면 그대로 둔다 — 그날 명단은 경기 기록 화면이 다룬다. 팀이 5명 밑으로 내려가도 막지 않는다
+    (불참은 막을 수 없다). 화면이 경고하고 매니저가 옮기거나 다시 나눈다.
+    """
+    found = adopted_candidate(db, event)
+    if found is None or player_id not in _squad_no_of(found) or is_locked(db, event.id):
+        return False
+    _lock_event(db, event.id)
+    cand = load_candidate(db, found.id)
+    slot = next((s for sq in cand.squads for s in sq.slots if s.player_id == player_id), None)
+    if slot is None:
+        return False
+    db.delete(slot)
+    _reload_slots(db, cand)
+    _recompute_candidate(db, cand)
+    db.flush()
+    return True
+

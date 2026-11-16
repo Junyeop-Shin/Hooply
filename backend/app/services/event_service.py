@@ -56,7 +56,7 @@ from app.schemas.event import (
     EventView,
     LockSuggestion,
 )
-from app.services import guest_service
+from app.services import assignment_service, guest_service
 from app.services.player_service import PLAYER_LOAD, to_card
 
 TEAM_COUNT_DEFAULT = 2  # 인원 부족 경고의 기준 팀 수 (3팀은 배정 화면에서 매니저가 고른다)
@@ -327,7 +327,14 @@ def set_attendance(
         row.team_lock_request_player_id = lock_request_player_id
     db.add(row)
     db.flush()
+    if status != AttendanceStatus.ATTEND:
+        _drop_from_adopted(db, event, player.id)
     return row
+
+
+def _drop_from_adopted(db: Session, event: Event, player_id: int) -> None:
+    """불참 처리 · 게스트 참석 취소 → 확정한 팀에서도 뺀다 (쿼터 기록 전까지, assignment_service.drop_from_adopted)."""
+    assignment_service.drop_from_adopted(db, event, player_id)
 
 
 @dataclass(slots=True)
@@ -371,6 +378,7 @@ def attendance_view(
         team_lock_request_player_id=row.team_lock_request_player_id if row else None,
         team_lock_request_player_name=lock_name,
         can_edit=can_edit,
+        guest_grade=player.guest_grade if can_edit else None,
     )
 
 
@@ -440,6 +448,10 @@ def register_guest(db: Session, event: Event, me: Player, by: User, body: EventG
     """게스트를 이 회차 참석자에 추가. 반환: (AttendanceView, None) 또는 (None, similar[]) 확인 요청."""
     if event.status == EventStatus.CANCELED:
         raise errors.ValidationError("취소된 일정에는 게스트를 등록할 수 없어요.")
+    is_manager = me.role == TeamRole.MANAGER or guest_service.is_manager(db, by, event.team_id)
+    if not rsvp_open(event) and not is_manager:
+        # 응답 마감 · 팀 확정 뒤 참석 변경은 매니저만 (사용자 결정, docs/09) — 확정한 팀이 매니저 모르게 바뀌지 않게
+        raise errors.RsvpClosed("응답이 마감돼서 매니저만 게스트를 추가할 수 있어요. 매니저에게 알려 주세요.")
     if body.preferred_position and body.preferred_position not in body.playable_positions:
         body = body.model_copy(update={"playable_positions": [body.preferred_position, *body.playable_positions]})  # 선호 포지션은 가능 포지션에 자동 포함
     team = db.get(Team, event.team_id)
@@ -447,12 +459,14 @@ def register_guest(db: Session, event: Event, me: Player, by: User, body: EventG
         guest = guest_service.require_guest(db, body.existing_player_id)
         if guest.team_id != event.team_id or guest.merged_into_player_id is not None:
             raise errors.NotFound("이 팀 게스트가 아니에요.")
-        # 재방문: 등록자가 새 정보를 주면 덮어쓴다 (등급은 지정했을 때만)
-        guest_service.update_guest(
-            db, guest, by, display_name=None, skill_grade=body.skill_grade,
-            preferred_position=body.preferred_position, playable_positions=body.playable_positions or None,
-            grade_given=body.skill_grade is not None, height_cm=body.height_cm,
-        )
+        # 재방문: 새 정보를 주면 고친다 — 단 '고치기' 와 같은 권한(그 게스트를 초대한 사람 · 매니저)일 때만.
+        # 그 밖의 팀원은 기록만 이어 붙인다. 등급을 볼 수 없는 팀원이 매니저가 매긴 등급을 모르고 덮어쓰지 않게 (docs/09)
+        if guest_service.can_manage_guest(db, by, guest):
+            guest_service.update_guest(
+                db, guest, by, display_name=None, skill_grade=body.skill_grade,
+                preferred_position=body.preferred_position, playable_positions=body.playable_positions or None,
+                grade_given=body.skill_grade is not None, height_cm=body.height_cm,
+            )
     else:
         similar = guest_service.find_similar(db, event.team_id, body.display_name)
         if similar and not body.force_new:
@@ -529,6 +543,9 @@ def update_event_guest(db: Session, event: Event, me: Player, by: User, guest: P
         row.status = body.status
         row.responded_at = datetime.now(UTC)
         row.registered_by = by.id
+        if body.status != AttendanceStatus.ATTEND:
+            db.flush()
+            _drop_from_adopted(db, event, guest.id)
     db.commit()
     db.refresh(guest)
     return attendance_view(db, row, guest, by, me.role == TeamRole.MANAGER)
@@ -542,6 +559,8 @@ def remove_event_guest(db: Session, event: Event, by: User, guest: Player) -> No
     if row is None:
         raise errors.NotFound("이 일정에 등록하지 않은 게스트예요.")
     db.delete(row)
+    db.flush()
+    _drop_from_adopted(db, event, guest.id)
     db.commit()
 
 

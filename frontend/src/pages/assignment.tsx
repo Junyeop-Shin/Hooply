@@ -11,11 +11,11 @@
  */
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { errorMessage, errorMessageWithDetails as errMsg } from '../api/client'
 import { confirm, toast } from '../store/feedback'
 import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
-import { invalidateEvent } from '../lib/invalidate'
+import { invalidateAssignment, invalidateEvent } from '../lib/invalidate'
 import { fromConstraintSet, isEmptyDraft, keepAttendees, readAssignDraft, writeAssignDraft } from '../lib/assign-draft'
 import { assignmentsApi } from '../api/assignments'
 import { eventsApi } from '../api/events'
@@ -341,42 +341,46 @@ export function RunResultPage() {
   const finish = useFinish()
   const qc = useQueryClient()
   const run = useQuery({ queryKey: ['runs', id], queryFn: () => assignmentsApi.getRun(id) })
-  const [tab, setTab] = useState(0)
+  // 확정한 일정에서 "팀 고치기" 로 왔으면 확정 결과 화면 하나만 되감는다 (배정 실행 화면을 거치지 않았다)
+  const fromEvent = (useLocation().state as { fromEvent?: boolean } | null)?.fromEvent === true
+  const backDepth = fromEvent ? 1 : 2
+  // 쿼터 기록이 생긴 일정은 확정안을 고칠 수 없다 (서버 422 ASSIGNMENT_LOCKED) — 일정을 같이 읽어 미리 잠근다
+  const ev = useQuery({ queryKey: ['events', run.data?.event_id], queryFn: () => eventsApi.get(run.data!.event_id), enabled: !!run.data })
+  const [chosenTab, setTab] = useState<number | null>(null)
   // 팀 번호 → 그 팀에서 고른 사람들 (많아야 두 팀). 묶음은 한 명을 탭해도 그룹 전체가 들어온다
   const [pick, setPick] = useState<Record<number, number[]>>({})
   const noPick: Record<number, number[]> = {}
-  // 옮기기 · 되돌리기는 이 실행만 바뀐다. 확정은 일정 화면(배정 결과)도 바뀐다
+  // 옮기기 · 되돌리기는 이 실행만 바뀐다. 확정이나 확정한 안을 고치면 일정 화면(배정 결과) · 전술 추천 · AI 도 바뀐다
   const refresh = (events = false) => {
     qc.invalidateQueries({ queryKey: ['runs', id] })
-    if (events && run.data) {
-      const eid = run.data.event_id
-      invalidateEvent(qc, eid)  // 일정 · 확정 배정 · 팀 일정 목록(내 팀 표시)
-      // 바뀐 팀에 맞는 전술 추천 · 전술판의 그날 배치 · AI 코치(캐시가 영원히 남는다) · AI 한마디
-      qc.invalidateQueries({ queryKey: ['tactics', 'recommend', eid] }); qc.invalidateQueries({ queryKey: ['tactics', 'event', eid] })
-      qc.invalidateQueries({ queryKey: ['ai', 'tactics', eid] }); qc.invalidateQueries({ queryKey: ['ai', 'message', eid] })
-    }
+    if (events && run.data) invalidateAssignment(qc, run.data.event_id, ev.data?.team_id)
   }
+  const isAdopted = (cid: number) => run.data?.candidates.some((c) => c.id === cid && c.is_adopted) ?? false
   const exchange = useMutation({
     mutationFn: ({ cid, a, b, to }: { cid: number; a: number[]; b: number[]; to?: number }) => assignmentsApi.exchange(cid, a, b, to),
-    onSuccess: () => { setPick(noPick); refresh() },
+    onSuccess: (_c, v) => { setPick(noPick); refresh(isAdopted(v.cid)) },
     onError: (e) => toast(errMsg(e, '옮기지 못했어요.'), 'error'),
   })
   const reset = useMutation({
     mutationFn: (cid: number) => assignmentsApi.reset(cid),
-    onSuccess: () => { setPick(noPick); refresh() },
+    onSuccess: (_c, cid) => { setPick(noPick); refresh(isAdopted(cid)) },
     onError: (e) => toast(errMsg(e, '되돌리지 못했어요.'), 'error'),
   })
   const adopt = useMutation({
     mutationFn: (cid: number) => assignmentsApi.adopt(cid),
-    onSuccess: () => { refresh(true); finish(`/events/${run.data!.event_id}`, 2) },  // 일정 → 배정 → 배정안 을 되감아 일정으로. 뒤로는 일정 목록
+    onSuccess: () => { refresh(true); finish(`/events/${run.data!.event_id}`, backDepth) },  // 일정 → 배정 → 배정안 을 되감아 일정으로. 뒤로는 일정 목록
     onError: (e) => toast(errMsg(e, '확정하지 못했어요.'), 'error'),
   })
 
   if (run.isLoading) return <Screen><TopBar title="배정 결과" back="/" /><Spinner page /></Screen>
   if (!run.data) return <Screen><TopBar title="배정 결과" back="/" /><Content><LoadError message={errMsg(run.error, '결과를 불러오지 못했어요.')} onRetry={() => run.refetch()} retrying={run.isFetching} /></Content></Screen>
   const r = run.data
+  const adoptedIdx = r.candidates.findIndex((c) => c.is_adopted)
+  const tab = chosenTab ?? Math.max(adoptedIdx, 0)  // 확정한 실행이면 확정한 안부터 연다
   const cand: CandidateView = r.candidates[Math.min(tab, r.candidates.length - 1)]
-  const adoptedAny = r.candidates.some((c) => c.is_adopted)
+  const adoptedAny = adoptedIdx >= 0
+  // 확정한 안도 쿼터 기록 전까지는 고칠 수 있다 — 바꾸면 팀원에게 바로 보인다
+  const editable = !(cand.is_adopted && (ev.data?.quarter_count ?? 0) > 0)
   // 제약 표시용: 이 run 에 걸린 묶기 / 갈라놓기 / 사전 배치
   const marks = constraintMarks(r.constraints)
   const squadOf = (pid: number) => cand.squads.find((s) => s.members.some((m) => m.id === pid))?.squad_no
@@ -384,7 +388,7 @@ export function RunResultPage() {
   const lockMates = (pid: number) => marks.lockGroups.get(pid) ?? [pid]  // 묶음이면 그룹 전체, 아니면 본인만
   const toggleMany = (list: number[], ids: number[]) => (ids.every((x) => list.includes(x)) ? list.filter((x) => !ids.includes(x)) : [...list.filter((x) => !ids.includes(x)), ...ids])
   const onPick = (squadNo: number, pid: number) => {
-    if (cand.is_adopted) return
+    if (!editable) return
     const partner = sepPartner(pid)
     const partnerSq = partner !== undefined ? squadOf(partner) : undefined
     if (partner !== undefined && partnerSq !== undefined && partnerSq !== squadNo) {
@@ -429,7 +433,7 @@ export function RunResultPage() {
         {cand.metrics.manually_edited && (
           <div className="flex items-center justify-between rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn-ink">
             <span>직접 옮긴 사람이 있어요 (↔ 표시).</span>
-            <button className="-my-2 -mr-1 min-h-11 shrink-0 px-1 font-semibold text-brand-ink" disabled={reset.isPending} onClick={async () => { if (await confirm({ title: '직접 옮긴 것을 모두 되돌릴까요?', body: '앱이 처음 나눈 배정안으로 돌아가요.', confirmLabel: '되돌리기' })) reset.mutate(cand.id) }}>옮긴 것 되돌리기</button>
+            <button className="-my-2 -mr-1 min-h-11 shrink-0 px-1 font-semibold text-brand-ink disabled:opacity-50" disabled={reset.isPending || !editable} onClick={async () => { if (await confirm({ title: '직접 옮긴 것을 모두 되돌릴까요?', body: '앱이 처음 나눈 배정안으로 돌아가요.', confirmLabel: '되돌리기' })) reset.mutate(cand.id) }}>옮긴 것 되돌리기</button>
           </div>
         )}
         <div className={`grid gap-2 ${three ? 'grid-cols-3' : 'grid-cols-2'}`}>
@@ -438,7 +442,8 @@ export function RunResultPage() {
           ))}
         </div>
         <MarkLegend squads={cand.squads} marks={marks} />
-        {!cand.is_adopted && hasPick && (
+        {cand.is_adopted && editable && <p className="rounded-xl bg-brand-soft px-3 py-2 text-xs text-brand-ink">확정한 팀이에요. 옮기거나 맞바꾸면 팀원에게 바로 보여요.</p>}
+        {editable && hasPick && (
           <div className="space-y-2">
             {picked.length === 1 && cand.squads.filter((s) => s.squad_no !== picked[0][0]).map((s) => (
               <Button key={s.squad_no} variant="secondary" full disabled={exchange.isPending} loading={exchange.isPending && exchange.variables?.to === s.squad_no} onClick={() => exchange.mutate({ cid: cand.id, a: [...picked[0][1]], b: [], to: s.squad_no })}>
@@ -457,7 +462,7 @@ export function RunResultPage() {
             {!pickedSep && picked.some(([, ids]) => ids.some((x) => marks.locked.has(x))) && <p className="px-1 text-center text-xs text-muted">묶은 사람들은 함께 골라지고 함께 움직여요.</p>}
           </div>
         )}
-        {!hasPick && !cand.is_adopted && (
+        {!hasPick && editable && (
           <p className="px-1 text-center text-xs text-faint">
             {three ? '사람을 누른 뒤 옮길 팀을 고르거나, 두 팀에서 골라 맞바꿀 수 있어요.' : '한 명을 누르면 다른 팀으로 옮기고, 양 팀에서 골라 맞바꿀 수 있어요.'} 팀에는 최소 5명이 남아야 해요.
             {(marks.locked.size > 0 || marks.pinned.size > 0 || marks.sepGroup.size > 0) && <><br />묶은 사람은 함께 움직이고, 미리 배치한 사람은 그대로, 갈라놓은 사람은 짝과 팀을 맞바꿔요.</>}
@@ -469,7 +474,7 @@ export function RunResultPage() {
       </Content>
       <BottomAction>
         {cand.is_adopted ? (
-          <Button full variant="secondary" onClick={() => finish(`/events/${r.event_id}`, 2)}>확정된 결과 보기</Button>
+          <Button full variant="secondary" onClick={() => finish(`/events/${r.event_id}`, backDepth)}>확정된 결과 보기</Button>
         ) : (
           <Button full loading={adopt.isPending} onClick={async () => { if (await confirm({ title: `[${STRATEGY_LABEL[cand.strategy]}] 배정안으로 확정할까요?`, body: `참석자에게 보여요.${adoptedAny ? ' 먼저 확정한 배정은 풀려요.' : ''}`, confirmLabel: '확정' })) adopt.mutate(cand.id) }}>
             이 배정안으로 확정

@@ -232,7 +232,7 @@ Table of Contents
 
 서비스 개요(1장)와 액터 정의(3장)를 화면(5장)까지 잇는 연결 고리입니다. 모든 FR은 **문제(P) → 기능(F) → 화면(S) → API** 로 추적됩니다. 정본은 `docs/01-서비스정의.md` 4.2절이며 아래 표는 그 사본입니다.
 
-> **v0.3 대비:** 번호를 구현 순서에 맞춰 다시 매겼다(v0.3 의 FR-01~34 와 번호가 다르다). v0.3 의 FR-26(로테이션 제안)은 F17 제외로 빠졌고, 게스트 본인 확인(FR-13a) · 지난 기록 · 기본 팀 · 프로필 사진(FR-35~37) · 3팀(FR-62 · 63)이 더해졌다. 전술 · AI 는 FR-38~61 로 `docs/07` 에 있다.
+> **v0.3 대비:** 번호를 구현 순서에 맞춰 다시 매겼다(v0.3 의 FR-01~34 와 번호가 다르다). v0.3 의 FR-26(로테이션 제안)은 F17 제외로 빠졌고, 게스트 본인 확인(FR-13a) · 지난 기록 · 기본 팀 · 프로필 사진(FR-35~37) · 3팀(FR-62 · 63) · 확정 뒤 팀 고치기(FR-64) · 게스트 자동완성(FR-65)이 더해졌다. 전술 · AI 는 FR-38~61 로 `docs/07` 에 있다.
 
 | ID | 요구사항 | 액터 | 기능 | 화면 | 주요 API |
 | --- | --- | --- | --- | --- | --- |
@@ -244,9 +244,9 @@ Table of Contents
 | FR-06 | 관리자 승인 후 5명 이상이면 팀이 활성화된다 | SYSTEM, ADMIN | F2, F12 | S-07, 관리자 콘솔 | `POST /admin/teams/{id}:approve` |
 | FR-07 | 팀장은 매니저 권한을 부여·회수하고, 매니저는 팀원을 제외한다. 매니저를 제외하는 것은 팀장만 할 수 있고, 팀장은 누구도 제외할 수 없다(`403 FORBIDDEN_NOT_OWNER`) | OWNER, MANAGER | F3 | S-08 | `PATCH /teams/{id}/players/{pid}/role`, `DELETE /teams/{id}/players/{pid}` |
 | FR-08 | 매니저는 일정을 등록·수정·취소하고 응답을 미리 마감할 수 있다 | MANAGER | F4 | S-09, S-10 | `POST/PATCH/DELETE /events…`, `POST /events/{id}/rsvp:close` |
-| FR-09 | 플레이어는 마감 전까지 참석/불참을 바꿀 수 있다 | PLAYER | F4 | S-10 | `PUT /events/{id}/attendance` |
-| FR-10 | 팀원 누구나 게스트를 이름으로 등록해 회차 참석자에 추가한다 | PLAYER | F13 | S-10, S-11 | `POST /events/{id}/guests` |
-| FR-11 | 게스트 등록 시 등급(1~5)·키·포지션을 지정할 수 있고 미지정 시 클럽 평균 | PLAYER | F13 | S-11 | 같은 API |
+| FR-09 | 플레이어는 마감 전까지 참석/불참을 바꿀 수 있다. 마감 · 확정 뒤에는 매니저만 바꾼다 | PLAYER | F4 | S-10 | `PUT /events/{id}/attendance` |
+| FR-10 | 팀원 누구나 게스트를 이름으로 등록해 회차 참석자에 추가한다. 응답 마감 뒤에는 매니저만(경기 기록 전이면 확정 뒤에도) | PLAYER | F13 | S-10, S-11 | `POST /events/{id}/guests` |
+| FR-11 | 게스트 등록 시 등급(1~5)·키·포지션을 지정할 수 있고 미지정 시 클럽 평균. 등급은 게스트 기록(`players.guest_grade`) 하나에 두고, 다시 부르며 정보를 바꾸는 것은 등록한 사람 · 매니저만 | PLAYER | F13 | S-11 | 같은 API |
 | FR-12 | 동명이인 게스트는 기존 레코드 재사용 여부를 확인한다 | SYSTEM | F13 | S-11 | 200 `similar[]` 응답 |
 | FR-13 | 게스트가 가입하면 기록을 병합·되돌릴 수 있다 | MANAGER | F13 | S-08 | `POST /players/{id}:merge`, `:unmerge` |
 | FR-13a | 같은 이름의 게스트 기록이 있으면 가입한 본인이 직접 확인해 가져오거나 거절할 수 있다 | PLAYER | F13 | S-04, S-07 | `GET /me/guest-claims`, `POST /players/{id}:claim` |
@@ -257,8 +257,8 @@ Table of Contents
 | FR-18 | 제약은 다음 회차에 해제되며 직전 회차 것만 불러올 수 있다 | SYSTEM | F15 | S-12 | `GET /events/{id}/assignments/last-constraints` |
 | FR-19 | 실현 불가능한 제약은 실행 전에 차단된다 | SYSTEM | F15 | S-12 | `POST /events/{id}/assignments:validate` |
 | FR-20 | 후보안은 예상 점수 차·균형 점수·포지션 커버리지와 설명을 보여준다 | MANAGER | F6 | S-13 | `GET /assignments/runs/{id}` |
-| FR-21 | 선수를 옮기거나 맞교체하면 지표가 즉시 재계산된다 | MANAGER | F7 | S-13 | `PATCH /assignments/candidates/{id}` |
-| FR-22 | 확정하면 참석자에게 결과가 공개된다 (실력 수치 비공개) | MANAGER, PLAYER | F7 | S-14 | `POST …:adopt`, `GET /events/{id}/assignment/adopted` |
+| FR-21 | 선수를 옮기거나 맞교체하면 지표가 즉시 재계산된다. 확정한 안도 경기 기록 전까지 고칠 수 있다 | MANAGER | F7 | S-13 | `PATCH /assignments/candidates/{id}` |
+| FR-22 | 확정하면 참석자에게 결과가 공개된다 (실력 수치 비공개). 같은 실행에서 다른 안을 확정하면 확정이 옮겨 간다 | MANAGER, PLAYER | F7 | S-14 | `POST …:adopt`, `GET /events/{id}/assignment/adopted` |
 | FR-23 | 매니저는 일정 시작 후 쿼터별 스코어(팀당 0~99점)와 출전 5명을 입력한다. 쿼터 기록이 생긴 일정은 배정을 다시 짜거나 바꿀 수 없다(`422 ASSIGNMENT_LOCKED`, 기록을 지우면 다시 가능) | MANAGER | F8 | S-15 | `PUT /events/{id}/quarters` |
 | FR-24 | 쿼터 저장 시 마진이 시간 정규화되고 잔차로 실력이 갱신된다 (첫 2회 미반영, 삭제 시 롤백) | SYSTEM | F10 | — | 서버 내부 |
 | FR-25 | 남의 실력은 매니저에게만 수치·등급으로 보인다. 플레이어는 **자기 등급만** 본다 | SYSTEM | F10 | S-08, S-14, S-17 | 응답 마스킹 |
@@ -276,6 +276,8 @@ Table of Contents
 | FR-37 | 프로필 사진을 올리고 바꾸거나 지울 수 있고, 팀원 목록·참석자·배정 결과의 아바타에 반영된다 | PLAYER | — | S-17 | `POST/DELETE /me/avatar`, `GET /users/{id}/avatar` |
 | FR-62 | 참석이 16명 이상이면 매니저가 "3팀으로 나누기"를 체크해 세 팀(21명이면 7·7·7)으로 배정할 수 있다. 묶기·갈라놓기·미리 배치는 똑같이 지킨다 | MANAGER | F5 | S-12, S-13 | `POST /events/{id}/assignments` `team_count=3` |
 | FR-63 | 3팀인 날은 쿼터마다 뛴 두 팀(대진)을 골라 기록하고, 결과는 팀별 쿼터 · 득실 · 승패로 본다 | MANAGER | F8 | S-15 | `quarters.home_squad_no · away_squad_no` |
+| FR-64 | 확정 뒤 참석으로 바뀐 사람은 "아직 팀이 없는 사람"으로 떠서 매니저가 추천 팀에 넣고(다른 사람의 팀은 그대로, 묶기 · 갈라놓기 · 미리 배치를 지킴), 불참으로 바뀐 사람은 자동으로 빠진다. 경기 기록 전까지 | MANAGER | F7 | S-10, S-14 | `POST /events/{id}/assignment/adopted:add` |
+| FR-65 | 게스트 이름을 치면 팀에 왔던 게스트가 앞글자 일치(자모 단위)로 최근 온 순 자동완성된다 | PLAYER | F13 | S-11 | `GET /events/{id}/guests/suggest?q=` |
 
 ### 전술 · AI 요구사항 (FR-38~61, 정본 `docs/07-AI전술-요구사항.md`)
 
@@ -383,7 +385,7 @@ S-09 일정 등록 → (팀원 참석 응답 · 게스트 초대) → S-10 참�
 | **미리 배치 초과** | 한 팀 칸에 정원 초과 배치 | 배치 거부 | `422 SQUAD_OVERFLOW` |
 | 빅맨 · 핸들러 부족 | 4·5번 또는 1번 가능 인원 \< 팀 수 | 경고 배너(차단 아님) | `200` \+ `warnings[]` |
 | RSVP 마감 후 응답 | 마감 시각 경과 | 토글 비활성 \+ "응답이 마감됐어요" (매니저는 대리 변경 가능) | `422 RSVP_CLOSED` |
-| 노쇼 / 당일 인원 변동 | 확정 후 참석자 변경 | 경기 기록 전이면 매니저 "팀 다시 나누기". 경기 기록에서 늦게 온 사람 · 당일 게스트를 명단에 추가 | 배정 재실행 |
+| 노쇼 / 당일 인원 변동 | 확정 후 참석자 변경 (매니저만) | 경기 기록 전이면 늦게 온 사람은 "아직 팀이 없는 사람"에서 추천 팀에 넣고(다른 사람의 팀은 그대로), 불참은 자동으로 빠지며, 전원 다시 섞으려면 "팀 다시 나누기"(조건 유지). 경기 기록 뒤에는 경기 기록 화면에서 명단에 추가 | `POST …/adopted:add` · 배정 재실행 |
 | **기록 뒤 재배정** | 쿼터 기록이 있는 일정에서 배정 실행 · 수정 · 초기화 · 확정 | 재배정 버튼 대신 "경기 기록을 먼저 지워 주세요" 안내 | `422 ASSIGNMENT_LOCKED` |
 | **쿼터 수 변경** | 예정보다 일찍 끝나거나 더 뜀 | 쿼터 카드 추가 · 삭제 자유. 삭제 시 지표 롤백(팀 전체 재계산) | `PUT /events/{id}/quarters` |
 | **쿼터 출전 인원 오류** | 한 팀에 5명이 아닌 인원 | 저장 버튼 비활성 \+ "블랙 팀에 4명을 골랐어요" | `400 INVALID_LINEUP_SIZE` |
@@ -406,7 +408,7 @@ S-09 일정 등록 → (팀원 참석 응답 · 게스트 초대) → S-10 참�
 
 # 6\. 데이터 모델 (ERD)
 
-PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이그레이션 **0001~0027**. 컬럼 단위 정의는 `docs/03-데이터모델.md` 가 정본이다(모델 메타데이터에서 추출). 이 장은 설계 원칙과 구조를 요약한다.
+PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이그레이션 **0001~0028**. 컬럼 단위 정의는 `docs/03-데이터모델.md` 가 정본이다(모델 메타데이터에서 추출). 이 장은 설계 원칙과 구조를 요약한다.
 
 ## 6\.1 설계 원칙
 
@@ -479,7 +481,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 | --- | --- | --- |
 | `users` | email(NULL 허용, 소문자 — CHECK) · password_hash(NULL 허용) · name · nickname · height_cm · global_role · primary_team_id · position_prefs · 튜토리얼 상태 · token_version | 카카오 계정은 이메일이 없을 수 있다(11.5절). 식별은 `id`, 로그인 수단은 `auth_identities`. 비밀번호를 바꾸거나 재설정하면 `token_version` 이 올라가 다른 기기의 토큰이 무효가 된다 |
 | `teams` | team_code(8자) · owner_user_id(팀장) · status(PENDING/ACTIVE/ARCHIVED) · approval_status · approved_by · min_members | 관리자 승인 + 5명 이상이면 ACTIVE |
-| `players` | team_id · user_id(NULL = 게스트) · kind · display_name · role(MANAGER/PLAYER) · status · created_by · merged_into_player_id · height_cm | UNIQUE(team_id, user_id), CHECK (kind = GUEST) = (user_id IS NULL). 병합은 포인터라 되돌릴 수 있다 |
+| `players` | team_id · user_id(NULL = 게스트) · kind · display_name · role(MANAGER/PLAYER) · status · created_by · merged_into_player_id · height_cm · guest_grade | UNIQUE(team_id, user_id), CHECK (kind = GUEST) = (user_id IS NULL). 병합은 포인터라 되돌릴 수 있다 |
 | `player_profiles` | prior_overall · prior_source · skill_overall · 6축 · skill_confidence · quarters_played · cumulative_residual · self_rank_level · admin_adjust | 실력은 **팀 단위**. 자기 위치는 팀마다. 재계산은 `prior_overall + admin_adjust`(관리자 보정)에서 출발한다 |
 | `assignment_runs → candidates → squads → slots` | team_count(2·3) · params · roster_snapshot / strategy · total_score · metrics · explanation · is_adopted / squad_no · squad_name(블랙 · 화이트 · 레드) / player_id · assigned_position · is_manual_override | 한 회차에 남는 배정은 확정한 실행 하나. 채택 후보는 run 당 1개(부분 유니크) |
 | `assignment_constraints` | run_id · type(LOCK/SEPARATE/PIN) · group_no · player_id · squad_no | 제약은 회차별 (9.6절) |
@@ -493,7 +495,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 
 - `users.birth_year` 삭제(0003) — 수집하지 않는다. 키는 가입 폼 · 프로필에서
 - `teams` 에 승인 상태와 팀장, `users` 에 기본 팀 · 포지션 선호 · 튜토리얼 상태가 더해졌다
-- `quarters.duration_min` 기본값 10 → **8**(0013, 실제 운영 쿼터 길이), 3팀 대진 `home_squad_no · away_squad_no`(0024)
+- `quarters.duration_min` 기본값 10 → **8**(0013, 실제 운영 쿼터 길이), 3팀 대진 `home_squad_no · away_squad_no`(0024), 게스트 등급을 게스트 기록 하나에 `players.guest_grade`(0028 — 전에는 초대한 사람마다의 사본 `guest_invite_presets` 가 다시 부를 때 매니저가 고친 값을 되돌렸다)
 - 하드닝(0025 · 0026) — 관리자 보정 오프셋 `player_profiles.admin_adjust` · 토큰 세대 `users.token_version`, 값 범위 CHECK(쿼터 점수 · 길이 · 번호, 팀 수 · 팀 번호, 정렬 순위, 게스트 등급, 선호 점수, 자기 병합 금지, 이메일 소문자 — 일정 시각 순서 CHECK 는 자정을 넘기는 일정을 받으려고 0027 에서 지웠다), 중복 단독 인덱스 9개 정리, 팀 전술 참조에 `team_play_id` 외래키, 팀당 활성 정렬 하나(부분 유니크), 탈퇴 회원 비식별화 소급
 - 상태값 23종을 PostgreSQL ENUM 타입으로(0017), 조회 · 삭제 경로 외래키 인덱스
 - 새 테이블: guest_invite_presets · guest_claims · user_avatars · revoked_tokens · user_badges · event_play_assignments · llm_results · team_plays · tactic_comments · tactic_stars
@@ -503,7 +505,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 
 # 7\. API 명세
 
-엔드포인트 110개(`/health` 포함). 정본은 FastAPI 가 코드에서 만든 `docs/04-API명세-openapi.yaml` 이고, 요약 표는 `docs/04-API명세.md` 에 있다. 각 함수 docstring 에 권한 · 처리 · 오류 · 설계서 절이 적혀 있다.
+엔드포인트 112개(`/health` 포함). 정본은 FastAPI 가 코드에서 만든 `docs/04-API명세-openapi.yaml` 이고, 요약 표는 `docs/04-API명세.md` 에 있다. 각 함수 docstring 에 권한 · 처리 · 오류 · 설계서 절이 적혀 있다.
 
 ## 7\.1 공통 규약
 
@@ -524,8 +526,8 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 | 팀 · 참가자 | 9 | `POST /teams` · `POST /teams/join` · `GET/PATCH /teams/{id}` · `GET /teams/{id}/players` · `PATCH …/players/{pid}/role` |
 | 게스트 관리 | 8 | `POST /events/{id}/guests` · `GET /teams/{id}/guests` · `POST /players/{id}:merge` · `:unmerge` · `:claim` |
 | 매니저 실력 정렬 | 3 | `GET /teams/{id}/rankings/latest` · `POST /teams/{id}/rankings` |
-| 일정 · 참석 | 13 | `POST /teams/{id}/events` · `PUT /events/{id}/attendance` · `PUT /events/{id}/attendances/{pid}` · `GET /events/{id}/attendances` · `POST /events/{id}/rsvp:close` |
-| 팀 배정 | 10 | `POST /events/{id}/assignments` · `:validate` · `GET …/last-constraints` · `PATCH /assignments/candidates/{id}` · `:adopt` · `GET /events/{id}/assignment/adopted` |
+| 일정 · 참석 | 14 | `POST /teams/{id}/events` · `PUT /events/{id}/attendance` · `PUT /events/{id}/attendances/{pid}` · `GET /events/{id}/attendances` · `POST /events/{id}/rsvp:close` |
+| 팀 배정 | 11 | `POST /events/{id}/assignments` · `:validate` · `GET …/last-constraints` · `PATCH /assignments/candidates/{id}` · `:adopt` · `GET /events/{id}/assignment/adopted` · `POST …/adopted:add` |
 | 경기 기록 | 5 | `PUT /events/{id}/quarters`(일괄) · `GET /events/{id}/quarters` · `DELETE /quarters/{id}` |
 | 경기 후 설문 · 통계 | 10 | `GET/POST /events/{id}/post-game-survey` · `GET /players/{id}/stats` · `GET /teams/{id}/stats/leaderboard` · `/stats/monthly-margin` · `GET /me/badges` |
 | 전술 | 17 | `GET /tactics/presets` · `GET /events/{id}/tactics/recommend` · `PUT …/tactics/{key}/slots` · `/teams/{id}/plays` CRUD · `:check` · `:ai-roles` · 댓글 · 별표 |
@@ -1089,7 +1091,7 @@ POST /api/v1/events/{event_id}/assignments
 | 레이어 | 선택 | 선정 이유 · 쓰임 |
 | --- | --- | --- |
 | **Backend** | **FastAPI** (Python 3.12) | ① 알고리즘 코드(NumPy)와 같은 언어 ② **Pydantic 스키마가 곧 OpenAPI 명세** → `docs/04-API명세-openapi.yaml` 을 코드에서 생성 ③ 구조가 명시적 |
-| ORM / 마이그레이션 | SQLAlchemy 2.0 \+ Alembic | ERD 를 코드로, 스키마 이력 0001~0027. 배포할 때 `alembic upgrade head` 를 먼저 돌린다. CI 는 `alembic check` 로 모델과 마이그레이션이 어긋나지 않았는지 확인한다 |
+| ORM / 마이그레이션 | SQLAlchemy 2.0 \+ Alembic | ERD 를 코드로, 스키마 이력 0001~0028. 배포할 때 `alembic upgrade head` 를 먼저 돌린다. CI 는 `alembic check` 로 모델과 마이그레이션이 어긋나지 않았는지 확인한다 |
 | 검증 | Pydantic v2 | Request/Response 스키마, 비밀번호는 `SecretStr` |
 | **Database** | **PostgreSQL** — 운영 **Neon**(18), 로컬 Docker(16) | JSONB(배정 파라미터 · 전술 본문 · AI 결과), 부분 유니크 인덱스, ENUM 타입 |
 | 인증 | JWT(python\-jose) \+ passlib(bcrypt), 카카오 OAuth | refresh 회전 · 폐기 목록, 토큰 세대(비밀번호 변경 · 재설정 시 다른 기기 로그아웃), 로그인 경로 요청 제한. 운영 환경에서 기본 JWT 키면 서버가 시작을 거부한다 |
@@ -1203,7 +1205,7 @@ MVP에서는 **카카오 먼저** 만드는 편이 낫습니다. 이메일 경�
 | 1 | 서비스명 · 목적 · 페인포인트 · 액터 · 기능 요구사항 | ✅ HOOPLY, `docs/01` |
 | 2 | 화면 설계 · ERD · API 명세 · 배정 알고리즘 검증 | ✅ `docs/02` · `03` · `04`, 시뮬레이션(`scripts/simulate_rating.py`) |
 | 3 | 애플리케이션 개발 (9.8절 순서) | ✅ 운영 중 — https://hooply-green.vercel.app |
-| 4 | 테스트 · 디버깅 | ✅ pytest 259개 · Vitest 103개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
+| 4 | 테스트 · 디버깅 | ✅ pytest 265개 · Vitest 103개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
 | 5 | AI 설명 · 전술 (14장) | ✅ `docs/07` v1.9, AI 검증 `docs/eval_result.md` |
 | 6 | 데모 · 포트폴리오 | ✅ `docs/05` 데모 시나리오, 데모 데이터 매주 자동 갱신 |
 

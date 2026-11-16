@@ -289,10 +289,15 @@ def test_swap_adopt_and_player_view(client, club):
     assert r.status_code == 200 and r.json()["is_adopted"] is True
     assert client.get(f"{API}/events/{eid}", headers=m).json()["status"] == "CLOSED"
     assert client.get(f"{API}/events/{eid}", headers=m).json()["adopted_candidate_id"] == cand["id"]
-    # 같은 run 의 다른 후보안 확정 → 409, 확정안 수정 → 409
+    # 같은 run 의 다른 후보안 확정 → 확정이 옮겨 간다. 다시 처음 안으로 되돌린다 (docs/09)
     r = client.post(f"{API}/assignments/candidates/{run['candidates'][1]['id']}:adopt", headers=m)
-    assert r.status_code == 409 and r.json()["code"] == "ALREADY_ADOPTED"
-    assert client.patch(f"{API}/assignments/candidates/{cand['id']}", json={"swaps": [{"player_id_a": a, "player_id_b": b}]}, headers=m).status_code == 409
+    assert r.status_code == 200 and r.json()["is_adopted"] is True
+    assert client.get(f"{API}/events/{eid}", headers=m).json()["adopted_candidate_id"] == run["candidates"][1]["id"]
+    assert client.post(f"{API}/assignments/candidates/{cand['id']}:adopt", headers=m).status_code == 200
+    # 확정안도 쿼터 기록 전까지는 고칠 수 있다 — 맞바꾼 것을 다시 맞바꿔 원래대로
+    r = client.patch(f"{API}/assignments/candidates/{cand['id']}", json={"swaps": [{"player_id_a": a, "player_id_b": b}]}, headers=m)
+    assert r.status_code == 200 and r.json()["is_adopted"] is True
+    assert client.patch(f"{API}/assignments/candidates/{cand['id']}", json={"swaps": [{"player_id_a": a, "player_id_b": b}]}, headers=m).status_code == 200
 
     # 플레이어 뷰: 수치·등급 마스킹, 내 팀·포지션, 문장 설명
     me = club["members"][1]

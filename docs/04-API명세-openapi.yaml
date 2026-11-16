@@ -1369,6 +1369,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /events/{event_id}/guests/suggest:
+    get:
+      summary: 게스트 이름 자동완성
+      tags:
+      - 일정 · 참석
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList_GuestSuggestion_'
   /events/{event_id}/guests/presets:
     get:
       summary: 이전에 초대한 게스트 목록
@@ -1548,12 +1571,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CandidateView'
-        '409':
-          description: ALREADY_ADOPTED
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: INVALID_SWAP / ASSIGNMENT_LOCKED
           content:
@@ -1578,12 +1595,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CandidateView'
-        '409':
-          description: ALREADY_ADOPTED
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: ASSIGNMENT_LOCKED
           content:
@@ -1640,6 +1651,42 @@ paths:
                 $ref: '#/components/schemas/AdoptedAssignment'
         '404':
           description: NOT_ADOPTED_YET
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /events/{event_id}/assignment/adopted:add:
+    post:
+      summary: 확정한 팀에 사람 넣기
+      tags:
+      - 팀 배정
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdoptedAddRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdoptedAssignment'
+        '404':
+          description: NOT_ADOPTED_YET
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: INVALID_SWAP / ASSIGNMENT_LOCKED
           content:
             application/json:
               schema:
@@ -3072,6 +3119,18 @@ components:
       - onboarding_completed
       - created_at
       - deleted_at
+    AdoptedAddRequest:
+      properties:
+        player_id:
+          type: integer
+        squad_no:
+          type: integer
+          maximum: 3.0
+          minimum: 1.0
+      type: object
+      required:
+      - player_id
+      - squad_no
     AdoptedAssignment:
       properties:
         run_id:
@@ -3106,6 +3165,12 @@ components:
         total_score:
           type: number
           nullable: true
+        editable:
+          type: boolean
+        unassigned:
+          items:
+            $ref: '#/components/schemas/UnassignedAttendee'
+          type: array
       type: object
       required:
       - run_id
@@ -3356,6 +3421,9 @@ components:
           nullable: true
         can_edit:
           type: boolean
+        guest_grade:
+          type: integer
+          nullable: true
       type: object
       required:
       - player
@@ -3948,6 +4016,24 @@ components:
       type: object
       required:
       - similar
+    GuestSuggestion:
+      properties:
+        player:
+          $ref: '#/components/schemas/PlayerCard'
+        last_attended:
+          type: string
+          format: date
+          nullable: true
+        attended_count:
+          type: integer
+        guest_grade:
+          type: integer
+          nullable: true
+        can_edit:
+          type: boolean
+      type: object
+      required:
+      - player
     IdentityView:
       properties:
         provider:
@@ -3998,6 +4084,15 @@ components:
         items:
           items:
             $ref: '#/components/schemas/GuestPresetView'
+          type: array
+      type: object
+      required:
+      - items
+    ItemList_GuestSuggestion_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/GuestSuggestion'
           type: array
       type: object
       required:
@@ -6109,6 +6204,23 @@ components:
       - state
       - path
       - tips_seen
+    UnassignedAttendee:
+      properties:
+        player:
+          $ref: '#/components/schemas/PlayerCard'
+        recommended_squad_no:
+          type: integer
+          nullable: true
+        allowed_squad_nos:
+          items:
+            type: integer
+          type: array
+        note:
+          type: string
+          nullable: true
+      type: object
+      required:
+      - player
     UserDetail:
       properties:
         id:

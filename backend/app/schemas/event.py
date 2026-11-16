@@ -111,6 +111,7 @@ class AttendanceView(BaseModel):
     )
     team_lock_request_player_name: str | None = None
     can_edit: bool = Field(default=False, description="호출자가 이 게스트 등록을 수정·삭제할 수 있는지 (등록자 본인 또는 매니저)")
+    guest_grade: int | None = Field(default=None, description="게스트에게 고른 실력 등급 1~5. can_edit 일 때만 (고치기 폼을 채운다)")
 
 
 class AttendanceSummary(BaseModel):
@@ -181,6 +182,19 @@ class LockSuggestion(BaseModel):
     guest: PlayerCard
     target: PlayerCard = Field(description="같은 팀을 요청한 상대 (보통 등록자 본인)")
     requested_by_user_id: int | None = None
+
+
+class GuestSuggestion(BaseModel):
+    """게스트 이름 자동완성 한 건 — `GET /events/{id}/guests/suggest?q=` (팀원 누구나).
+
+    고르면 `existing_player_id` 로 그 게스트 기록을 이어 붙인다. 폼은 이 값(게스트 행이 정본)으로 채운다.
+    """
+
+    player: PlayerCard = Field(description="게스트 카드. 실력 등급(A~E)은 매니저에게만")
+    last_attended: date | None = Field(default=None, description="마지막으로 참석한 일정 날짜 (취소된 일정 제외)")
+    attended_count: int = Field(default=0, description="참석한 일정 수")
+    guest_grade: int | None = Field(default=None, description="고른 실력 등급 1~5 — can_edit 일 때만")
+    can_edit: bool = Field(default=False, description="이 게스트의 정보를 바꿀 수 있는지 (초대한 사람 · 매니저). 아니면 다시 초대할 때 기록만 이어 붙는다")
 
 
 class GuestPresetView(BaseModel):

@@ -16,15 +16,18 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import unicodedata
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core import errors
+from app.core.config import get_settings
 from app.db.session import lock_team_stats
-from app.models import Player, PlayerPosition, PlayerProfile, SkillRatingHistory, Team, User
+from app.models import Event, Player, PlayerPosition, PlayerProfile, SkillRatingHistory, Team, User
 from app.models.enums import (
     GlobalRole,
     PlayerKind,
@@ -121,6 +124,7 @@ def apply_guest_grade(db: Session, guest: Player, grade: int | None, by_user_id:
         prof.prior_source = PriorSource.MANAGER
         prof.skill_confidence = max(prof.skill_confidence, GUEST_GRADE_CONFIDENCE)
     prof.prior_overall = after
+    guest.guest_grade = grade  # 다시 초대 · 고치기 폼은 이 값으로 채운다 (0028)
     if prof.quarters_played == 0:
         prof.skill_overall = after + (prof.admin_adjust or Decimal(0))  # 쿼터가 있으면 아래 rating 재계산이 덮어쓴다
     if before != after:
@@ -178,6 +182,54 @@ def find_similar(db: Session, team_id: int, display_name: str) -> list[Player]:
             .order_by(Player.joined_at.desc())
         ).all()
     )
+
+
+def _name_key(name: str | None) -> str:
+    """자동완성 비교용: 공백 제거 · 소문자 · 앞의 '게스트' 접두어 제거(`_norm_name`) 뒤 한글을 자모로 푼다(NFD).
+    그래서 아직 받침을 치지 않은 "시" 도 "신준엽" 의 앞부분으로 잡힌다."""
+    return unicodedata.normalize("NFD", _norm_name(unicodedata.normalize("NFC", name or "")))
+
+
+def suggest_guests(db: Session, event: Event, q: str, limit: int = 8) -> list[tuple[Player, date | None, int]]:
+    """이 팀에 게스트로 왔던 사람 중 이름이 `q` 로 시작하는 사람 — 최근에 온 순. 이 일정에 이미 참석인 사람은 뺀다.
+
+    반환 (게스트, 마지막으로 온 날, 온 횟수). 오늘까지의 일정만 센다 — 다음 주 일정에 미리 등록해 둔 것을 "지난번" 으로
+    보이지 않게. 취소된 일정은 세지 않는다. 팀 게스트는 많아야 수백 명이라
+    이름 비교는 파이썬에서 한다 (한글 자모 비교를 SQL 로 옮기지 않는다).
+    """
+    from app.models import EventAttendance
+    from app.models.enums import AttendanceStatus, EventStatus
+
+    key = _name_key(q)
+    if not key:
+        return []
+    guests = db.scalars(
+        select(Player).where(
+            Player.team_id == event.team_id, Player.kind == PlayerKind.GUEST, Player.status == PlayerStatus.ACTIVE,
+            Player.merged_into_player_id.is_(None),
+        )
+    ).all()
+    hits = [g for g in guests if _name_key(g.display_name).startswith(key)]
+    if not hits:
+        return []
+    ids = [g.id for g in hits]
+    here = set(db.scalars(select(EventAttendance.player_id).where(
+        EventAttendance.event_id == event.id, EventAttendance.player_id.in_(ids), EventAttendance.status == AttendanceStatus.ATTEND,
+    )).all())
+    stats = {pid: (last, n) for pid, last, n in db.execute(
+        select(EventAttendance.player_id, func.max(Event.event_date), func.count())
+        .join(Event, Event.id == EventAttendance.event_id)
+        .where(
+            EventAttendance.player_id.in_(ids), EventAttendance.status == AttendanceStatus.ATTEND, Event.status != EventStatus.CANCELED,
+            Event.event_date <= datetime.now(ZoneInfo(get_settings().timezone)).date(),
+        )
+        .group_by(EventAttendance.player_id)
+    ).all()}
+    rows = [(g, *stats.get(g.id, (None, 0))) for g in hits if g.id not in here]
+    rows.sort(key=lambda r: (r[1] is None, -(r[1].toordinal() if r[1] else 0), r[0].display_name))
+    top = rows[:limit]
+    loaded = {p.id: p for p in db.scalars(select(Player).where(Player.id.in_([r[0].id for r in top])).options(*PLAYER_LOAD)).all()}
+    return [(loaded[g.id], last, n) for g, last, n in top]
 
 
 def search_guests(db: Session, team_id: int, q: str | None) -> list[Player]:

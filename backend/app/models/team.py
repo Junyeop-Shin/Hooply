@@ -96,6 +96,7 @@ class Player(CreatedAtMixin, Base):
     __tablename__ = "players"
     __table_args__ = (
         CheckConstraint("height_cm IS NULL OR height_cm BETWEEN 120 AND 250", name="ck_players_height_cm"),
+        CheckConstraint("guest_grade IS NULL OR guest_grade BETWEEN 1 AND 5", name="ck_players_guest_grade"),
         # 회원은 한 팀에 한 번만. 게스트(NULL)는 제외되는 부분 유니크
         # (Postgres 는 NULL 을 서로 다른 값으로 취급하지만, WHERE 절로 의도를 명시한다)
         Index(
@@ -137,6 +138,9 @@ class Player(CreatedAtMixin, Base):
     team: Mapped[Team] = relationship(back_populates="players")
     # 회원이면 로그인 계정. 게스트는 None. (user_id FK 가 셋이라 어느 것인지 명시)
     height_cm: Mapped[int | None] = mapped_column(SmallInteger)  # 게스트 키 (회원은 users.height_cm). 평균 신장 계산용
+    # 게스트를 등록 · 수정한 사람이 고른 실력 등급 1~5 (미지정 NULL). 사전값(prior_overall)은 이 값으로 계산한다 (0028).
+    # 다시 초대하거나 고칠 때 폼을 이 값으로 채운다 — 초대한 사람마다 따로 둔 사본(guest_invite_presets)이 아니라
+    guest_grade: Mapped[int | None] = mapped_column(SmallInteger)
     user: Mapped["User | None"] = relationship("User", foreign_keys=[user_id])  # noqa: F821
     # 실력·포지션 프로필. 문자열 참조는 profile.py 가 team.py 를 import 하므로 순환을 피하기 위함
     profile: Mapped["PlayerProfile | None"] = relationship(  # noqa: F821

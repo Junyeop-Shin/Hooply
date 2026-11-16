@@ -2,17 +2,18 @@
  * 확정된 팀 배정 표시 (S-14) — 일정 화면의 "팀 배정 결과", 팀 일정 탭의 확정 요약, 배정 결과 화면의 팀 카드.
  * 일정 · 팀 화면이 배정 실행 페이지(pages/assignment) 전체를 끌어오지 않도록 따로 둔다.
  */
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { assignmentsApi } from '../api/assignments'
 import { teamsApi } from '../api/teams'
-import type { EventView, PlayerCard, SquadView } from '../api/types'
+import type { AdoptedAssignment, EventView, PlayerCard, SquadView, UnassignedAttendee } from '../api/types'
 import { announceShare, shareImage } from '../lib/kakao'
 import { errorMessage } from '../api/client'
 import { toast } from '../store/feedback'
 import { fmtEvent } from '../lib/format'
+import { invalidateAssignment } from '../lib/invalidate'
 import { isChunkLoadError } from '../lib/stale-chunk'
-import { squadStyle } from '../lib/squads'
+import { squadName, squadStyle } from '../lib/squads'
 import { AiExplainCard, AiMessageCard } from './ai-cards'
 import { FirstTimeTip } from './tutorial'
 import { Badge, Card, GradeDot, LoadError, SectionTitle, Spinner } from './ui'
@@ -96,6 +97,19 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
     onSuccess: announceShare,  // 다른 공유와 같이 토스트로
     onError: (err) => toast(isChunkLoadError(err) ? '새 버전이 나왔어요. 새로고침한 뒤 다시 눌러 주세요.' : err instanceof Error ? err.message : '공유하지 못했어요.', 'error'),
   })
+  const nav = useNavigate()
+  const qc = useQueryClient()
+  // 확정 뒤 참석으로 바뀐 사람을 확정한 팀에 넣는다 (매니저). 응답이 곧 새 확정 결과라 캐시를 바로 바꾸고 전술 · AI 는 다시 받는다
+  const add = useMutation({
+    mutationFn: ({ pid, squad }: { pid: number; squad: number }) => assignmentsApi.addToAdopted(id, pid, squad),
+    onSuccess: (next: AdoptedAssignment, { pid, squad }) => {
+      const who = view.data?.unassigned?.find((u) => u.player.id === pid)?.player.display_name
+      qc.setQueryData(['events', id, 'adopted'], next)
+      invalidateAssignment(qc, id, e.team_id)
+      toast(`${who ?? '선택한 사람'}님을 ${squadName(squad)} 팀에 넣었어요.`)
+    },
+    onError: (err) => toast(errorMessage(err, '팀에 넣지 못했어요.'), 'error'),
+  })
   if (view.isLoading) return <Spinner />
   // 확정된 일정에서만 그리므로 못 받은 것은 오류다 — 비워 두면 배정이 사라진 줄 안다
   if (!view.data) return <LoadError message={errorMessage(view.error, '팀 배정 결과를 불러오지 못했어요.')} onRetry={() => view.refetch()} retrying={view.isFetching} />
@@ -143,11 +157,68 @@ export function AdoptedSection({ event: e }: { event: EventView }) {
         </div>
       )}
       <MarkLegend squads={v.squads} />
-      {!isManager && <p className="px-1 text-center text-xs text-faint">실력 수치는 표시하지 않아요. 등급은 경기 기록이 저장될 때마다 갱신돼요.</p>}
+      {isManager && v.editable && (
+        <>
+          {v.squads.filter((s) => s.members.length < 5).map((s) => (
+            <p key={s.squad_no} className="rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn-ink">{s.squad_name} 팀이 {s.members.length}명이에요. 다른 팀에서 옮기거나, 사람을 더 넣거나, 전원 다시 나눠 주세요.</p>
+          ))}
+          {(v.unassigned ?? []).length > 0 && (
+            <Card className="space-y-3 border-brand-line">
+              <div>
+                <p className="text-sm font-bold text-ink">아직 팀이 없는 사람 {v.unassigned!.length}명</p>
+                <p className="text-xs text-muted">확정한 뒤 참석으로 바뀐 사람이에요. 넣을 팀을 고르면 다른 사람의 팀은 그대로예요.</p>
+              </div>
+              {v.unassigned!.map((u) => <UnassignedRow key={u.player.id} u={u} squads={v.squads} busy={add.isPending} onAdd={(squad) => add.mutate({ pid: u.player.id, squad })} />)}
+            </Card>
+          )}
+          <button
+            onClick={() => nav(`/assignments/runs/${v.run_id}`, { state: { fromEvent: true } })}
+            className="flex min-h-11 w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left text-sm font-semibold text-ink"
+          >
+            <span>팀 고치기 <span className="font-normal text-muted">· 옮기기 · 맞바꾸기</span></span><span aria-hidden>→</span>
+          </button>
+        </>
+      )}
+      {!isManager && <p className="px-1 text-center text-xs text-faint">실력 수치는 표시하지 않아요. 등급은 경기 기록이 저장될 때마다 갱신돼요. 참석이 바뀌면 매니저에게 알려 주세요.</p>}
     </section>
   )
 }
 
+
+
+/** 팀이 없는 참석자 한 줄 — 팀마다 넣기 버튼, 앱이 추천한 팀은 진하게. 넣을 수 없는 팀(묶기 · 갈라놓기 · 미리 배치)은 빠진다 */
+function UnassignedRow({ u, squads, busy, onAdd }: { u: UnassignedAttendee; squads: SquadView[]; busy: boolean; onAdd: (squad: number) => void }) {
+  const p = u.player
+  const allowed = squads.filter((s) => u.allowed_squad_nos.includes(s.squad_no))
+  return (
+    <div className="space-y-1.5">
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+        <GradeDot grade={p.skill_grade} />{p.display_name}
+        {p.kind === 'GUEST' && <Badge>게스트</Badge>}
+        <span className="text-xs font-normal text-muted">{p.primary_position ?? p.playable_positions[0] ?? '포지션 미입력'}</span>
+      </p>
+      {allowed.length === 0 ? (
+        <p className="text-xs text-muted">조건 때문에 넣을 수 있는 팀이 없어요. 전원 다시 나눠 주세요.</p>
+      ) : (
+        <div className={`grid gap-1.5 ${allowed.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          {allowed.map((s) => {
+            const rec = s.squad_no === u.recommended_squad_no
+            return (
+              <button
+                key={s.squad_no} type="button" disabled={busy} onClick={() => onAdd(s.squad_no)}
+                className={`min-h-11 rounded-xl border px-2 py-1 text-sm font-semibold disabled:opacity-50 ${rec ? `${squadStyle(s.squad_no).card} ring-2 ring-brand-line` : 'border-line bg-surface text-ink'}`}
+              >
+                {s.squad_name} 팀에 넣기
+                <span className={`block text-[10px] font-normal ${rec ? '' : 'text-muted'}`}>{rec ? '추천 · ' : ''}지금 {s.members.length}명</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {u.note && <p className="text-[11px] text-muted">{u.note}</p>}
+    </div>
+  )
+}
 
 
 /** 팀 상세 일정 탭에서 확정된 배정을 대시보드처럼 보여준다: 내 팀(왼쪽) / 상대 팀(오른쪽) / 균형 점수 */

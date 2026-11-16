@@ -9,8 +9,8 @@ import { errorMessage as errMsg } from '../api/client'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
 import { announceShare, shareText } from '../lib/kakao'
-import { POSITIONS, localISODate, type AttendanceView, type EventGuestInput, type EventGuestUpdate, type EventView, type GuestPreset, type PlayerCard, type Position } from '../api/types'
-import { invalidateEvent } from '../lib/invalidate'
+import { POSITIONS, localISODate, type AttendanceView, type EventGuestInput, type EventGuestUpdate, type EventView, type GuestSuggestion, type PlayerCard, type Position } from '../api/types'
+import { invalidateAssignment, invalidateEvent } from '../lib/invalidate'
 import { confirm, toast } from '../store/feedback'
 import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
 import { fmtEvent } from '../lib/format'
@@ -18,6 +18,7 @@ import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, LoadError, Sheet, 
 import { BottomAction, Content, Screen, TopBar, useFinish, useGoBack } from '../components/layout'
 import { EventTactics } from '../components/tactics'
 import { AdoptedSection } from '../components/adopted'
+import { useDebounced } from '../lib/typewriter'
 
 
 
@@ -190,7 +191,9 @@ export function EventDetailPage() {
   const [msg, setMsg] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ ABSENT: true })
   const [showAtt, setShowAtt] = useState(false)
-  const refresh = () => invalidateEvent(qc, id, ev.data?.team_id)
+  // 확정한 일정이면 불참 처리 · 게스트 취소로 팀이 바뀌므로 전술 추천 · AI 도 다시 받는다
+  const refresh = () => (ev.data?.adopted_candidate_id ? invalidateAssignment : invalidateEvent)(qc, id, ev.data?.team_id)
+  const attRef = useRef<HTMLElement>(null)
 
   // 참석 응답은 누르는 즉시 바뀐 것처럼 보여 준다 (체육관 통신이 느려도). 실패하면 원래대로 돌린다
   const rsvpKey = ['rsvp', id]
@@ -248,6 +251,9 @@ export function EventDetailPage() {
   const surveyBlock = isManager && e.survey_open && e.status !== 'CANCELED' && <SurveyProgressCard eventId={id} responded={e.survey_responded} total={e.survey_total} onMsg={setMsg} />
   const attend = s?.attend ?? e.attend_count
   const canAssign = !past && !e.adopted_candidate_id && e.quarter_count === 0
+  // 게스트 추가: 팀원은 응답을 받는 동안만, 매니저는 마감 · 확정 뒤에도 경기 기록 전까지 (확정 뒤 참석 변경은 매니저만 — docs/09)
+  const canInvite = e.status !== 'CANCELED' && (isManager ? e.quarter_count === 0 : e.rsvp_open && !past)
+  const openAttendance = () => { setShowAtt(true); requestAnimationFrame(() => attRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })) }
   // 매니저의 다음 할 일 하나 — 화면 아래에 고정한다 (경기 기록이 있으면 보기 · 고치기, 팀을 나누기 전이면 팀 나누기, 시작했으면 기록)
   const toQuarters = () => nav(`/events/${id}/quarters`)
   const action = !isManager || e.status === 'CANCELED' ? null
@@ -297,8 +303,14 @@ export function EventDetailPage() {
               </button>
             </div>
           )}
-          {!e.rsvp_open && <p className="mt-2 text-xs text-muted">{e.status === 'OPEN' && !past ? '응답이 마감됐어요.' : '응답 기한이 지난 일정이에요.'}</p>}
-          {e.status !== 'CANCELED' && e.rsvp_open && !past && (
+          {!e.rsvp_open && (
+            <p className="mt-2 text-xs text-muted">
+              {past ? '응답 기한이 지난 일정이에요.'
+                : isManager ? '응답이 마감됐어요. 매니저는 아래에서 참석을 바꾸거나 게스트를 추가할 수 있어요.'
+                : '응답이 마감됐어요. 참석을 바꾸거나 게스트를 부르려면 매니저에게 알려 주세요.'}
+            </p>
+          )}
+          {canInvite && (
             <button onClick={() => setSheet('new')} className="mt-3 flex min-h-11 w-full items-center justify-between rounded-xl bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-ink">
               + 게스트로 초대할 사람이 있어요 <span>→</span>
             </button>
@@ -388,12 +400,23 @@ export function EventDetailPage() {
           <>
             {/* 배정이 확정되면 이 화면이 곧 팀 배정 결과다 — 팀 배정(설명 포함) → 이 팀에 맞는 전술 */}
             <AdoptedSection event={e} />
-            {isManager && s && !past && (
+            {isManager && e.status !== 'CANCELED' && (
               e.quarter_count > 0 ? (
-                // 경기 기록이 붙은 배정은 바꿀 수 없다 (서버 422 ASSIGNMENT_LOCKED)
-                <p className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted">경기 기록이 있는 일정은 팀을 다시 나눌 수 없어요. 경기 기록을 먼저 지워 주세요.</p>
+                // 경기 기록이 붙은 배정은 바꿀 수 없다 (서버 422 ASSIGNMENT_LOCKED). 늦게 온 사람은 경기 기록 화면의 명단에 넣는다
+                <p className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted">경기 기록이 있는 일정은 팀을 고치거나 다시 나눌 수 없어요. 늦게 온 사람은 경기 기록 화면에서 명단에 넣어 주세요.</p>
               ) : (
-                <Button variant="secondary" full onClick={() => nav(`/events/${id}/assign`)}>팀 다시 나누기</Button>
+                // 확정 뒤 참석 변경은 매니저만. 더한 사람은 위 "아직 팀이 없는 사람" 에 뜨고, 불참으로 바꾸면 팀에서 빠진다
+                <Card className="space-y-2">
+                  <div>
+                    <p className="text-sm font-bold text-ink">참석이 바뀌었나요?</p>
+                    <p className="text-xs text-muted">새로 온 사람을 더하면 위에 "아직 팀이 없는 사람"으로 떠요. 불참으로 바꾸면 팀에서 빠져요.</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button variant="secondary" className="text-sm" onClick={() => setSheet('new')}>+ 게스트 추가</Button>
+                    <Button variant="secondary" className="text-sm" onClick={openAttendance}>회원 참석 바꾸기</Button>
+                  </div>
+                  <Button variant="ghost" full className="text-sm" onClick={() => nav(`/events/${id}/assign`)}>팀 다시 나누기 <span className="font-normal text-muted">· 전원 다시 섞기</span></Button>
+                </Card>
               )
             )}
             <EventTactics event={e} />
@@ -401,7 +424,7 @@ export function EventDetailPage() {
             {quarterBlock}
             {/* 참석 현황은 매니저만 — 팀원에게는 누가 불참했는지 보여 줄 필요가 없다 */}
             {isManager && (
-              <section className="space-y-3">
+              <section ref={attRef} className="scroll-mt-16 space-y-3">
                 <button onClick={() => setShowAtt(!showAtt)} className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left" aria-expanded={showAtt}>
                   <span className="text-sm font-semibold text-ink">참석 현황 · 관리 <span className="font-normal text-muted">참석 {e.attend_count}명</span></span>
                   <span className="text-xs text-faint">{showAtt ? '접기 ▴' : '펼치기 ▾'}</span>
@@ -503,10 +526,13 @@ function AttendeeRow({ a, isMe, onEdit, onRemove, onSetStatus, showGrade }: { a:
 }
 
 /* ---------- 게스트 등록/수정 바텀시트 (S-10 · S-11 공용) ---------- */
+/** "2026-11-08" → "11/8" */
+const shortDate = (iso: string) => { const [, mo, d] = iso.split('-').map(Number); return `${mo}/${d}` }
+
 function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId: number; editing: AttendanceView | null; onClose: () => void; onDone: () => void; showGrade: boolean }) {
   const [name, setName] = useState(editing?.player.display_name ?? '')
   const [gradeValue, setGradeState] = useState<number | null>(null)
-  const [gradeTouched, setGradeTouched] = useState(false)  // 고칠 때 등급을 건드렸을 때만 보낸다 (null = 미지정으로 되돌리기)
+  const [gradeTouched, setGradeTouched] = useState(false)  // 고칠 때 · 다시 초대할 때는 등급을 건드렸을 때만 보낸다 (null = 미지정으로 되돌리기)
   const setGrade = (g: number | null) => { setGradeState(g); setGradeTouched(true) }
   const [height, setHeight] = useState<string>(editing?.player.height_cm ? String(editing.player.height_cm) : '')
   const [pref, setPref] = useState<Position | null>(editing?.player.primary_position ?? null)
@@ -514,20 +540,46 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
   const [lock, setLock] = useState<boolean>(editing ? editing.team_lock_request_player_id !== null : true)
   const [similar, setSimilar] = useState<PlayerCard[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [reuseId, setReuseId] = useState<number | undefined>(undefined) // 불러온 이전 게스트의 레코드 id
-  const presets = useQuery({ queryKey: ['events', eventId, 'guest-presets'], queryFn: () => eventsApi.presets(eventId) })
-  // 고칠 때: 등급(1~5)은 카드에 실리지 않으므로 내가 초대했던 기록에서 채워 보여 준다. 건드리지 않으면 보내지 않는다
-  const presetGrade = editing ? presets.data?.items.find((x) => x.existing_player_id === editing.player.id)?.skill_grade ?? null : null
-  const grade = gradeTouched || !editing ? gradeValue : (presetGrade ?? gradeValue)
+  // 자동완성에서 고른 지난 게스트 — 그 기록에 이어 붙인다. "다른 사람이에요" 를 누르면 같은 이름이어도 새 게스트로
+  const [reuse, setReuse] = useState<GuestSuggestion | null>(null)
+  const [forceNew, setForceNew] = useState(false)
+  // 고칠 때: 등급(1~5)은 게스트 행에서 온다 (can_edit 이라 실려 있다). 건드리지 않으면 보내지 않는다
+  const grade = gradeTouched ? gradeValue : editing ? (editing.guest_grade ?? null) : gradeValue
+  // 남이 초대한 게스트를 다시 부를 때는 정보를 바꿀 수 없다 — 기록만 이어 붙는다 (서버도 무시한다)
+  const readOnly = reuse !== null && !reuse.can_edit
 
-  const applyPreset = (pr: GuestPreset) => {
-    setName(pr.display_name); setGradeState(pr.skill_grade); setHeight(pr.height_cm ? String(pr.height_cm) : ''); setPref(pr.preferred_position); setPlayable(pr.playable_positions); setLock(pr.team_lock_request)
-    setReuseId(pr.existing_player_id ?? undefined)
+  // 이름 자동완성: 팀에 게스트로 왔던 사람 중 이름이 이 글자로 시작하는 사람 (받침 치기 전 "시" 도 "신준엽" 에 걸린다)
+  const typed = useDebounced(name.trim(), 200)
+  const suggest = useQuery({
+    queryKey: ['events', eventId, 'guest-suggest', typed],
+    queryFn: () => eventsApi.suggestGuests(eventId, typed),
+    enabled: !editing && !reuse && !forceNew && !similar && typed.length > 0,
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  })
+  const options = !editing && !reuse && !forceNew && name.trim() ? (suggest.data?.items ?? []) : []
+
+  const pick = (sg: GuestSuggestion) => {
+    const p = sg.player
+    setReuse(sg); setName(p.display_name); setHeight(p.height_cm ? String(p.height_cm) : ''); setPref(p.primary_position); setPlayable(p.playable_positions)
+    setGradeState(sg.guest_grade); setGradeTouched(false); setError(null)
   }
+  const unpick = () => { setReuse(null); setForceNew(true); setGradeState(null); setGradeTouched(false) }  // 같은 이름의 다른 사람 — 입력은 비우지 않는다
+  const onName = (v: string) => { setName(v); setReuse(null); setForceNew(false) }
 
   const create = useMutation({
-    mutationFn: (extra: Partial<EventGuestInput>) =>
-      eventsApi.registerGuest(eventId, { display_name: name.trim(), skill_grade: grade, height_cm: height ? Number(height) : null, preferred_position: pref, playable_positions: playable, team_lock_request: lock, ...(reuseId ? { existing_player_id: reuseId } : {}), ...extra }),
+    mutationFn: (extra: Partial<EventGuestInput>) => {
+      const reuseId = extra.existing_player_id ?? reuse?.player.id
+      const input: EventGuestInput = { display_name: name.trim(), team_lock_request: lock }
+      if (!readOnly) {
+        // 새 게스트는 전부, 지난 게스트는 바꾼 것만 (등급은 건드렸을 때만 — 비워 보내면 지금 등급이 그대로 남는다)
+        Object.assign(input, { height_cm: height ? Number(height) : null, preferred_position: pref, playable_positions: playable })
+        if (!reuseId || gradeTouched) input.skill_grade = grade
+      }
+      if (reuseId) input.existing_player_id = reuseId
+      else if (forceNew) input.force_new = true
+      return eventsApi.registerGuest(eventId, { ...input, ...extra })
+    },
     onSuccess: (r) => (r.kind === 'similar' ? setSimilar(r.similar) : onDone()),
     onError: (e) => setError(errMsg(e, '등록하지 못했어요.')),
   })
@@ -546,20 +598,7 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
 
   return (
     <Sheet label={editing ? '게스트 고치기' : '게스트 초대'} title={editing ? '게스트 고치기' : '게스트 초대'} onClose={onClose}>
-        <p className="mb-4 text-xs text-muted">이름만 있으면 돼요. 실력을 알면 등급까지 넣어 주세요.</p>
-        {!editing && !similar && presets.data && presets.data.items.length > 0 && (
-          <div className="mb-4">
-            <p className="mb-1.5 text-sm font-medium text-ink">이전에 초대한 사람 불러오기</p>
-            <div className="flex flex-wrap gap-1.5">
-              {presets.data.items.map((pr) => (
-                <button key={pr.id} type="button" onClick={() => applyPreset(pr)} aria-pressed={name === pr.display_name} className={`min-h-11 rounded-full border px-3 text-sm ${name === pr.display_name ? 'border-inverse bg-inverse font-semibold text-on-inverse' : 'border-line bg-surface text-ink'}`}>
-                  {pr.display_name}{pr.skill_grade ? ` · ${pr.skill_grade}` : ''}{pr.preferred_position ? ` · ${pr.preferred_position}` : ''}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1 text-[11px] text-muted">고르면 지난번 정보를 그대로 채워요.</p>
-          </div>
-        )}
+        <p className="mb-4 text-xs text-muted">{editing ? '이름만 있으면 돼요. 실력을 알면 등급까지 넣어 주세요.' : '이름을 치면 전에 왔던 게스트가 아래에 떠요. 처음 온 사람이면 끝까지 입력해 주세요.'}</p>
 
         {similar ? (
           <div className="space-y-2">
@@ -576,29 +615,65 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
           </div>
         ) : (
           <div className="space-y-4">
-            <Field label="이름" value={name} onChange={(e) => { setName(e.target.value); setReuseId(undefined) }} placeholder="게스트 이름을 입력해 주세요" maxLength={50} autoFocus />
-            <Field label="키 (cm, 선택)" type="text" inputMode="numeric" value={height} onChange={(e) => setHeight(e.target.value.replace(/\D/g, '').slice(0, 3))} placeholder="키를 입력해 주세요" hint="팀 평균 키를 계산할 때만 써요." />
             <div>
-              <p className="mb-1.5 text-sm font-medium text-ink">대략적인 실력 <span className="text-faint">(선택)</span></p>
-              <div className="grid grid-cols-5 gap-1.5">
-                {[1, 2, 3, 4, 5].map((g) => (
-                  <button key={g} type="button" onClick={() => setGrade(grade === g ? null : g)} aria-pressed={grade === g} className={`min-h-11 rounded-xl border text-sm font-bold ${grade === g ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-ink'}`}>{g}</button>
-                ))}
+              <Field
+                label="이름" value={name} onChange={(e) => onName(e.target.value)} placeholder="게스트 이름을 입력해 주세요" maxLength={50} autoFocus
+                autoComplete="off" role="combobox" aria-autocomplete="list" aria-expanded={options.length > 0} aria-controls="guest-suggest"
+              />
+              {options.length > 0 && (
+                <ul id="guest-suggest" role="listbox" aria-label="전에 왔던 게스트" className="mt-1 overflow-hidden rounded-xl border border-line bg-surface">
+                  {options.map((sg) => (
+                    <li key={sg.player.id} role="option" aria-selected={false} className="border-b border-line last:border-b-0">
+                      <button type="button" onClick={() => pick(sg)} className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold text-ink">{sg.player.display_name}</span>
+                          <span className="block truncate text-[11px] text-muted">
+                            {sg.last_attended ? `지난번 ${shortDate(sg.last_attended)} · ${sg.attended_count}번 왔어요` : '참석 기록 없음'}
+                            {sg.player.primary_position ? ` · ${sg.player.primary_position}` : ''}
+                            {sg.player.height_cm ? ` · ${sg.player.height_cm}cm` : ''}
+                          </span>
+                        </span>
+                        {showGrade && <GradeDot grade={sg.player.skill_grade} />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {reuse && (
+                <div className="mt-2 flex items-center gap-2 rounded-xl bg-brand-soft px-3 py-2 text-xs text-brand-ink">
+                  <span className="min-w-0 flex-1">{reuse.last_attended ? `지난번(${shortDate(reuse.last_attended)})에 온 분의 기록에 이어서 써요.` : '전에 등록한 게스트의 기록에 이어서 써요.'}</span>
+                  <button type="button" onClick={unpick} className="-my-2 min-h-11 shrink-0 px-1 font-semibold underline underline-offset-2">다른 사람이에요</button>
+                </div>
+              )}
+              {forceNew && <p className="mt-1 text-[11px] text-muted">같은 이름이어도 새 게스트로 추가해요.</p>}
+            </div>
+            {readOnly && <Alert kind="info">다른 팀원이 초대했던 게스트라 정보는 그대로 두고 참석만 추가해요. 고칠 게 있으면 매니저에게 알려 주세요.</Alert>}
+            <Field label="키 (cm, 선택)" type="text" inputMode="numeric" value={height} onChange={(e) => setHeight(e.target.value.replace(/\D/g, '').slice(0, 3))} placeholder="키를 입력해 주세요" hint="팀 평균 키를 계산할 때만 써요." disabled={readOnly} />
+            {!readOnly && (
+              <div>
+                <p className="mb-1.5 text-sm font-medium text-ink">대략적인 실력 <span className="text-faint">(선택)</span></p>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[1, 2, 3, 4, 5].map((g) => (
+                    <button key={g} type="button" onClick={() => setGrade(grade === g ? null : g)} aria-pressed={grade === g} className={`min-h-11 rounded-xl border text-sm font-bold ${grade === g ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-ink'}`}>{g}</button>
+                  ))}
+                </div>
+                <p className={`mt-1 text-[11px] ${grade === null ? 'text-warn-ink' : 'text-muted'}`}>
+                  {grade === null
+                    ? '비워 두면 팀 평균으로 계산해요. 대략이라도 고르면 팀을 더 고르게 나눌 수 있어요 (1 초보 … 5 최상위).'
+                    : '1 초보 … 5 우리 팀 최상위. 나중에 바꿀 수 있어요.'}
+                </p>
               </div>
-              <p className={`mt-1 text-[11px] ${grade === null ? 'text-warn-ink' : 'text-muted'}`}>
-                {grade === null
-                  ? '비워 두면 팀 평균으로 계산해요. 대략이라도 고르면 팀을 더 고르게 나눌 수 있어요 (1 초보 … 5 최상위).'
-                  : '1 초보 … 5 우리 팀 최상위. 나중에 바꿀 수 있어요.'}
-              </p>
-            </div>
-            <div>
-              <p className="mb-1.5 text-sm font-medium text-ink">선호 포지션 <span className="text-faint">(선택)</span></p>
-              <PosChips value={pref ? [pref] : []} onChange={(v) => { const np = v[v.length - 1] ?? null; setPref(np); if (np && !playable.includes(np)) setPlayable([...playable, np]) }} single />
-            </div>
-            <div>
-              <p className="mb-1.5 text-sm font-medium text-ink">가능 포지션 <span className="text-faint">(선택)</span></p>
-              <PosChips value={playable} onChange={setPlayable} />
-            </div>
+            )}
+            <fieldset disabled={readOnly} className="space-y-4 disabled:opacity-60">
+              <div>
+                <p className="mb-1.5 text-sm font-medium text-ink">선호 포지션 <span className="text-faint">(선택)</span></p>
+                <PosChips value={pref ? [pref] : []} onChange={(v) => { const np = v[v.length - 1] ?? null; setPref(np); if (np && !playable.includes(np)) setPlayable([...playable, np]) }} single />
+              </div>
+              <div>
+                <p className="mb-1.5 text-sm font-medium text-ink">가능 포지션 <span className="text-faint">(선택)</span></p>
+                <PosChips value={playable} onChange={setPlayable} />
+              </div>
+            </fieldset>
             <label className="flex items-center justify-between rounded-xl bg-surface-2 px-4 py-3">
               <span className="text-sm font-medium text-ink">나와 같은 팀으로 묶어 주세요<br /><span className="text-[11px] font-normal text-muted">매니저에게 제안으로 알려요</span></span>
               <input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} className="size-5 accent-brand" />
