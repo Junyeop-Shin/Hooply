@@ -439,24 +439,32 @@ function RosterEditor({
   onGuestAdded: () => void
 }) {
   const [q, setQ] = useState('')
-  const [guestName, setGuestName] = useState('')
+  const [guestName, setGuestNameRaw] = useState('')
+  // 같은 이름의 지난 게스트가 있으면 새로 만들기 전에 묻는다 — 예전에는 늘 새로 만들어 같은 사람 기록이 둘로 갈라졌다 (docs/09 2-7)
+  const [similar, setSimilar] = useState<{ sq: number; people: PlayerCard[] } | null>(null)
+  const setGuestName = (v: string) => { setGuestNameRaw(v); setSimilar(null) }
   const inSquad = Object.fromEntries(squadNos.map((sq) => [sq, new Set((pool[sq] ?? []).map((p) => p.id))])) as Record<number, Set<number>>
   const inAny = (pid: number) => squadNos.some((sq) => inSquad[sq].has(pid))
   const attend = new Set(attendIds)
   const rows = [...people.values()]
     .filter((p) => squadNos.some((sq) => !inSquad[sq].has(p.id) || removable(sq, p.id)))
     .filter((p) => !q.trim() || p.display_name.includes(q.trim()))
-    // 아직 어느 명단에도 없는 사람(늦게 온 회원·게스트)이 먼저, 그다음 참석 응답자, 그다음 이름순
-    .sort((a, b) => Number(inAny(b.id)) - Number(inAny(a.id)) || Number(attend.has(b.id)) - Number(attend.has(a.id)) || a.display_name.localeCompare(b.display_name, 'ko'))
+    // 아직 어느 명단에도 없는 사람(늦게 온 회원·게스트)이 먼저, 그다음 참석 응답자, 그다음 이름순 — 40명에서 자르므로 순서가 중요하다
+    .sort((a, b) => Number(inAny(a.id)) - Number(inAny(b.id)) || Number(attend.has(b.id)) - Number(attend.has(a.id)) || a.display_name.localeCompare(b.display_name, 'ko'))
     .slice(0, 40)
 
+  // existing: 고른 지난 게스트(기록을 이어 붙인다) · forceNew: "다른 사람이에요" — 둘 다 없으면 서버가 같은 이름을 찾아 similar 로 돌려준다
   const addGuest = useMutation({
-    mutationFn: async (sq: number) => {
-      const res = await eventsApi.registerGuest(eventId, { display_name: guestName.trim(), force_new: true })
-      if (res.kind !== 'registered') throw new Error('등록하지 못했어요.')
-      return { sq, player: res.view.player }
+    mutationFn: async ({ sq, existing, forceNew }: { sq: number; existing?: number; forceNew?: boolean }) => {
+      const res = await eventsApi.registerGuest(eventId, {
+        display_name: guestName.trim(), ...(existing ? { existing_player_id: existing } : {}), ...(forceNew ? { force_new: true } : {}),
+      })
+      return res.kind === 'registered' ? { sq, player: res.view.player, similar: null } : { sq, player: null, similar: res.similar }
     },
-    onSuccess: ({ sq, player }) => { onAdd(sq, player.id); setGuestName(''); onGuestAdded() },
+    onSuccess: ({ sq, player, similar: same }) => {
+      if (!player) { setSimilar({ sq, people: same ?? [] }); return }
+      onAdd(sq, player.id); setGuestName(''); onGuestAdded()
+    },
     onError: (e) => onError(errMsg(e, '게스트를 등록하지 못했어요.')),
   })
 
@@ -503,14 +511,34 @@ function RosterEditor({
           />
           {squadNos.map((sq) => (
             <button
-              key={sq} disabled={!guestName.trim() || addGuest.isPending} onClick={() => addGuest.mutate(sq)}
+              key={sq} disabled={!guestName.trim() || addGuest.isPending} onClick={() => addGuest.mutate({ sq })}
               className={`min-h-11 shrink-0 rounded-lg border px-3 text-xs font-semibold disabled:opacity-40 ${squadStyle(sq).card}`}
             >
               +{nameOf(sq)}
             </button>
           ))}
         </div>
-        <p className="mt-1 text-[11px] text-faint">이 일정 참석자로도 함께 등록돼요. 실력 등급은 나중에 참석자 화면에서 지정할 수 있어요.</p>
+        {similar && (
+          <div className="mt-2 space-y-1.5 rounded-xl border border-brand-line bg-surface p-2.5">
+            <p className="text-xs font-semibold text-ink">전에 온 같은 이름 게스트가 있어요. 같은 사람인가요?</p>
+            {similar.people.map((p) => (
+              <button
+                key={p.id} type="button" disabled={addGuest.isPending} onClick={() => addGuest.mutate({ sq: similar.sq, existing: p.id })}
+                className="flex min-h-11 w-full items-center justify-between rounded-lg border border-line px-3 text-left text-sm"
+              >
+                <span className="text-ink">{p.display_name} <span className="text-xs text-muted">{[p.primary_position, p.height_cm ? `${p.height_cm}cm` : null].filter(Boolean).join(' · ')}</span></span>
+                <span className="text-xs font-semibold text-brand-ink">이 사람이에요 → {nameOf(similar.sq)}</span>
+              </button>
+            ))}
+            <button
+              type="button" disabled={addGuest.isPending} onClick={() => addGuest.mutate({ sq: similar.sq, forceNew: true })}
+              className="min-h-11 w-full rounded-lg text-xs font-semibold text-muted underline"
+            >
+              다른 사람이에요 · 새 게스트로 {nameOf(similar.sq)}에 넣기
+            </button>
+          </div>
+        )}
+        <p className="mt-1 text-[11px] text-faint">이 일정 참석자로도 함께 등록돼요. 전에 왔던 게스트는 위 '이름으로 찾기'에서도 찾을 수 있어요.</p>
       </div>
     </div>
   )

@@ -6,7 +6,7 @@ export const teamsApi = {
     api<{ id: number; team_code: string }>('/teams', { method: 'POST', body: input }),
   join: (team_code: string) => api<TeamDetail>('/teams/join', { method: 'POST', body: { team_code } }),
   get: (teamId: number) => api<TeamDetail>(`/teams/${teamId}`),
-  update: (teamId: number, patch: { name?: string; description?: string; home_court?: string }) =>
+  update: (teamId: number, patch: { name?: string; description?: string | null; home_court?: string | null }) =>
     api<TeamDetail>(`/teams/${teamId}`, { method: 'PATCH', body: patch }),
   regenerateCode: (teamId: number) =>
     api<{ team_code: string }>(`/teams/${teamId}/code:regenerate`, { method: 'POST' }),

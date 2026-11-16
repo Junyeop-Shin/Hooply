@@ -216,6 +216,9 @@ export interface EventCreateInput {
   memo?: string
 }
 
+/** 일정 수정 — 보낸 칸만 바뀐다. null 은 그 칸을 지운다(날짜는 지울 수 없다) */
+export type EventUpdateInput = { [K in keyof EventCreateInput]?: EventCreateInput[K] | null }
+
 export interface AttendanceView {
   player: PlayerCard
   status: AttendanceStatus

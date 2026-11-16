@@ -115,7 +115,7 @@ def update_team(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_
     """팀명·소개·홈 코트 등 팀 정보를 부분 수정한다.
 
     - **권한:** 팀 매니저 또는 ADMIN.
-    - **처리:** 본문에 포함된 필드만 `teams` 행에 덮어쓰고 커밋한다. `team_code`·`status`·
+    - **처리:** 본문에 포함된 필드만 `teams` 행에 덮어쓰고 커밋한다. 소개 · 홈 코트는 `null` 이면 지우고, 팀명 `null` 은 무시한다. `team_code`·`status`·
       `owner_user_id`는 이 경로로 바꿀 수 없다.
     - **오류:** `404 NOT_FOUND` — 팀 없음. `403 NOT_A_MEMBER` — 비소속.
       `403 FORBIDDEN_ROLE` — 매니저가 아님. `400 VALIDATION_ERROR`.
@@ -123,6 +123,8 @@ def update_team(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_
     - **설계서:** 7.3절 (`PATCH /teams/{team_id}`), 3.2절 팀 매니저 기능.
     """
     for k, v in body.model_dump(exclude_unset=True).items():
+        if k == "name" and v is None:
+            continue  # 팀명은 비울 수 없다 (None = 변경 없음). 소개 · 홈 코트는 null 이면 지운다
         setattr(team, k, v)
     db.commit()
     return _detail(db, team, me if me.id else None)

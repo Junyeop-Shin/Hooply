@@ -46,7 +46,7 @@ class EventCreate(BaseModel):
 
 
 class EventUpdate(EventCreate):
-    """일정 수정 — `PATCH /events/{id}` (MANAGER 전용). 모든 필드가 선택이며 None 은 '변경 없음'."""
+    """일정 수정 — `PATCH /events/{id}` (MANAGER 전용). 보낸 필드만 바뀐다. `null` 은 그 칸을 지운다 — 날짜만 예외로 `null` 이면 '변경 없음'."""
 
     event_date: date | None = None
 

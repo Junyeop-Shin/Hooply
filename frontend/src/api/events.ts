@@ -6,6 +6,7 @@ import type {
   EventCreateInput,
   EventGuestInput,
   EventGuestUpdate,
+  EventUpdateInput,
   EventView,
   GuestSuggestion,
   GuestSimilar,
@@ -29,7 +30,7 @@ export const eventsApi = {
     return api<Page<EventView>>(`/teams/${teamId}/events${qs ? `?${qs}` : ''}`)
   },
   get: (eventId: number) => api<EventView>(`/events/${eventId}`),
-  update: (eventId: number, patch: Partial<EventCreateInput>) =>
+  update: (eventId: number, patch: EventUpdateInput) =>
     api<EventView>(`/events/${eventId}`, { method: 'PATCH', body: patch }),
   remove: (eventId: number) => api<void>(`/events/${eventId}`, { method: 'DELETE' }),  // 이력 없이 삭제 — 참석·배정·투표도 함께 지워진다
   closeRsvp: (eventId: number) => api<EventView>(`/events/${eventId}/rsvp:close`, { method: 'POST' }),

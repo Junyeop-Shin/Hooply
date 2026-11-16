@@ -1,6 +1,7 @@
 /**
  * S-09 일정 등록 — "최근 일정과 같게 채우기"는 입력만 채우고 저장하지 않는다(폼 제출 금지),
  * 날짜·마감은 +7일, 시작 시각을 바꾸면 종료가 +2시간 따라오되 직접 고친 뒤에는 유지된다.
+ * 고치기에서 비운 칸은 null 로 보내 지운다 (docs/09 2-8).
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
@@ -9,7 +10,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventView } from '../api/types'
 
-vi.mock('../api/events', () => ({ eventsApi: { list: vi.fn(), create: vi.fn() } }))
+vi.mock('../api/events', () => ({ eventsApi: { list: vi.fn(), create: vi.fn(), get: vi.fn(), update: vi.fn() } }))
 
 import { eventsApi } from '../api/events'
 import { EventCreatePage } from './events'
@@ -22,12 +23,15 @@ const lastEvent = {
   survey_responded: 8, survey_total: 12,
 } as EventView
 
-function renderPage() {
+function renderPage(path = '/teams/1/events/new') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/teams/1/events/new']}>
-        <Routes><Route path="/teams/:teamId/events/new" element={<EventCreatePage />} /></Routes>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/teams/:teamId/events/new" element={<EventCreatePage />} />
+          <Route path="/events/:eventId/edit" element={<EventCreatePage />} />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -39,6 +43,18 @@ describe('EventCreatePage', () => {
   beforeEach(() => {
     vi.mocked(eventsApi.list).mockResolvedValue({ items: [lastEvent], meta: { page: 1, size: 50, total: 1, has_next: false } })
     vi.mocked(eventsApi.create).mockResolvedValue({ ...lastEvent, id: 9 })
+    vi.mocked(eventsApi.get).mockResolvedValue({ ...lastEvent, status: 'OPEN' })
+    vi.mocked(eventsApi.update).mockResolvedValue({ ...lastEvent, memo: null })
+  })
+
+  it('고치기에서 메모 · 응답 마감을 비우고 저장하면 null 로 보내 지운다', async () => {
+    const user = userEvent.setup()
+    renderPage('/events/5/edit')
+    await vi.waitFor(() => expect(input('메모 (선택)')).toHaveValue('회비 5,000원'))
+    await user.clear(input('메모 (선택)'))
+    await user.clear(input('응답 마감 (선택)'))
+    await user.click(screen.getByRole('button', { name: '고친 내용 저장' }))
+    expect(eventsApi.update).toHaveBeenCalledWith(5, expect.objectContaining({ memo: null, rsvp_deadline: null, title: '일요 정기전' }))
   })
 
   it('채우기는 값만 넣고 일정을 만들지 않는다 (날짜·마감은 일주일 뒤)', async () => {

@@ -9,7 +9,7 @@ import { errorMessage as errMsg } from '../api/client'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
 import { announceShare, shareText } from '../lib/kakao'
-import { POSITIONS, localISODate, type AttendanceView, type EventGuestInput, type EventGuestUpdate, type EventView, type GuestSuggestion, type PlayerCard, type Position } from '../api/types'
+import { POSITIONS, localISODate, type AttendanceView, type EventCreateInput, type EventGuestInput, type EventGuestUpdate, type EventUpdateInput, type EventView, type GuestSuggestion, type PlayerCard, type Position } from '../api/types'
 import { invalidateAssignment, invalidateEvent } from '../lib/invalidate'
 import { confirm, toast } from '../store/feedback'
 import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
@@ -111,14 +111,19 @@ export function EventCreatePage() {
     setLoadedFrom(fmtEvent(lastEvent))
   }
 
-  const payload = () => ({
+  const payload = (): EventCreateInput => ({
     title: f.title || undefined, event_date: f.event_date, start_time: f.start_time || undefined, end_time: f.end_time || undefined,
     venue: f.venue || undefined,
     rsvp_deadline: f.rsvp_date ? new Date(`${f.rsvp_date}T${f.rsvp_time || '22:00'}`).toISOString() : undefined,
     memo: f.memo || undefined,
   })
+  // 수정할 때 비운 칸은 null 로 보내 지운다 — undefined 는 JSON 에서 빠져 서버가 '변경 없음' 으로 받는다 (docs/09 2-8)
+  const patchPayload = (): EventUpdateInput => {
+    const c = payload()
+    return { ...c, title: c.title ?? null, start_time: c.start_time ?? null, end_time: c.end_time ?? null, venue: c.venue ?? null, rsvp_deadline: c.rsvp_deadline ?? null, memo: c.memo ?? null }
+  }
   const m = useMutation({
-    mutationFn: () => (editId !== null ? eventsApi.update(editId, payload()) : eventsApi.create(id, payload())),
+    mutationFn: () => (editId !== null ? eventsApi.update(editId, patchPayload()) : eventsApi.create(id, payload())),
     // 등록은 새 화면으로 바꿔치기, 수정은 들어온 일정 화면으로 한 칸 되감는다 — 뒤로가 수정 화면이나 같은 일정으로 가지 않게
     onSuccess: (ev) => {
       invalidateEvent(qc, ev.id, ev.team_id)
@@ -537,7 +542,9 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
   const [height, setHeight] = useState<string>(editing?.player.height_cm ? String(editing.player.height_cm) : '')
   const [pref, setPref] = useState<Position | null>(editing?.player.primary_position ?? null)
   const [playable, setPlayable] = useState<Position[]>(editing?.player.playable_positions ?? [])
-  const [lock, setLock] = useState<boolean>(editing ? editing.team_lock_request_player_id !== null : true)
+  // 팀원이 친구를 부르면 같은 팀 희망이 기본. 매니저가 등록할 때는 기본으로 끈다 — 매니저가 데려온 사람이 아니라 대신 넣어 주는 경우가
+  // 대부분이라, 켜 두면 배정 화면 '모두 승인' 에서 매니저 + 게스트 여럿이 한 묶음이 된다 (게스트를 한 팀에 몰지 않는 배정 원칙과 반대, docs/09 2-6)
+  const [lock, setLock] = useState<boolean>(editing ? editing.team_lock_request_player_id !== null : !showGrade)
   const [similar, setSimilar] = useState<PlayerCard[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   // 자동완성에서 고른 지난 게스트 — 그 기록에 이어 붙인다. "다른 사람이에요" 를 누르면 같은 이름이어도 새 게스트로

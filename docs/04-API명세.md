@@ -95,7 +95,7 @@
 | POST | `/teams` | 팀 생성 | 201 |
 | POST | `/teams/join` | 팀 코드로 가입 — 스스로 나간 팀은 다시 들어올 수 있고, 매니저가 제외한 팀이면 코드 재발급 전까지 403 `REMOVED_FROM_TEAM`(재발급하면 새 코드로 돌아올 수 있다) | 200 · 403 · 404 · 409 |
 | GET | `/teams/{team_id}` | 팀 상세 조회 | 200 · 403 |
-| PATCH | `/teams/{team_id}` | 팀 정보 수정 | 200 · 403 |
+| PATCH | `/teams/{team_id}` | 팀 정보 수정 — 소개 · 홈 코트는 `null` 이면 지우고, 팀명 `null` 은 무시 | 200 · 403 |
 | POST | `/teams/{team_id}/code:regenerate` | 팀 코드 재발급 — 옛 코드는 즉시 무효, 제외된(REMOVED) 팀원은 LEFT 로 풀려 새 코드로 돌아올 수 있다 | 200 · 403 |
 | GET | `/teams/{team_id}/players` | 팀원 목록 조회 | 200 |
 | PATCH | `/teams/{team_id}/players/{player_id}/role` | 매니저 권한 부여/회수 | 200 · 403 |
@@ -130,7 +130,7 @@
 | POST | `/teams/{team_id}/events` | 일정 등록 — 종료 시각이 시작 시각 이하면 자정을 넘기는 일정(다음 날로 해석) | 201 |
 | GET | `/teams/{team_id}/events` | 일정 목록 조회 | 200 |
 | GET | `/events/{event_id}` | 일정 상세 조회 | 200 |
-| PATCH | `/events/{event_id}` | 일정 수정 | 200 |
+| PATCH | `/events/{event_id}` | 일정 수정 — 보낸 칸만 바뀌고 `null` 은 지운다(날짜는 `null` 이면 그대로) | 200 |
 | DELETE | `/events/{event_id}` | 일정 삭제 (참석·배정·투표 함께 삭제, 경기 기록이 있으면 400) | 204 |
 | POST | `/events/{event_id}/rsvp:close` | 응답 미리 마감 | 200 |
 | PUT | `/events/{event_id}/attendance` | 내 참석 응답 | 200 |

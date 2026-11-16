@@ -1205,7 +1205,7 @@ MVP에서는 **카카오 먼저** 만드는 편이 낫습니다. 이메일 경�
 | 1 | 서비스명 · 목적 · 페인포인트 · 액터 · 기능 요구사항 | ✅ HOOPLY, `docs/01` |
 | 2 | 화면 설계 · ERD · API 명세 · 배정 알고리즘 검증 | ✅ `docs/02` · `03` · `04`, 시뮬레이션(`scripts/simulate_rating.py`) |
 | 3 | 애플리케이션 개발 (9.8절 순서) | ✅ 운영 중 — https://hooply-green.vercel.app |
-| 4 | 테스트 · 디버깅 | ✅ pytest 265개 · Vitest 103개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
+| 4 | 테스트 · 디버깅 | ✅ pytest 267개 · Vitest 104개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
 | 5 | AI 설명 · 전술 (14장) | ✅ `docs/07` v1.9, AI 검증 `docs/eval_result.md` |
 | 6 | 데모 · 포트폴리오 | ✅ `docs/05` 데모 시나리오, 데모 데이터 매주 자동 갱신 |
 

@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, errorMessage as errMsg } from '../api/client'
 import { teamsApi } from '../api/teams'
+import { authApi } from '../api/auth'
 import { eventsApi } from '../api/events'
 import { EventRow, GuestClaimCards, useMe } from './home'
 import { announceShare, copyText, shareText } from '../lib/kakao'
@@ -119,6 +120,16 @@ export function TeamJoinPage() {
     mutationFn: () => teamsApi.join(code.trim().toUpperCase()),
     // 'me' 접두어 — 내 팀 목록 · 시작 안내 단계 · 기본 팀이 적힌 내 정보를 함께 새로 받는다
     onSuccess: (team) => { qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['profile'] }); nav(`/teams/${team.id}/self-rank`, { replace: true, state: { from: `/teams/${team.id}` } }) },
+    // 이미 가입한 팀의 초대 링크를 다시 눌렀으면 막다른 안내 대신 그 팀 화면으로 (설계 5.4절, docs/09 3-12).
+    // 오류에 팀 번호가 없어서 내 팀 목록에서 코드로 찾는다. 못 찾으면 아래 Alert 가 서버 문구를 그대로 보여 준다
+    onError: async (e) => {
+      if (!(e instanceof ApiError) || e.code !== 'ALREADY_MEMBER') return
+      const mine = await qc.fetchQuery({ queryKey: ['me', 'teams'], queryFn: authApi.myTeams }).catch(() => null)
+      const team = mine?.items.find((t) => t.team_code === code.trim().toUpperCase())
+      if (!team) return
+      toast(`이미 가입한 팀이에요. ${team.team_name} 화면으로 갈게요.`)
+      nav(`/teams/${team.team_id}`, { replace: true })
+    },
     meta: { inlineError: true },  // 아래 Alert 가 서버 문구(제외된 팀 재가입 403 등)를 그대로 보여 준다
   })
   const err = m.error instanceof ApiError ? m.error : null
@@ -423,7 +434,8 @@ function MembersManager({ team: t }: { team: TeamDetail }) {
   const [editTeam, setEditTeam] = useState(false)
   const [tf, setTf] = useState({ name: '', description: '', home_court: '' })
   const saveTeam = useMutation({
-    mutationFn: () => teamsApi.update(id, { name: tf.name.trim(), description: tf.description.trim() || undefined, home_court: tf.home_court.trim() || undefined }),
+    // 비운 소개 · 홈 코트는 null 로 보내 지운다 (undefined 는 '변경 없음' — docs/09 2-8)
+    mutationFn: () => teamsApi.update(id, { name: tf.name.trim(), description: tf.description.trim() || null, home_court: tf.home_court.trim() || null }),
     onSuccess: () => { toast('팀 정보를 저장했어요.'); setEditTeam(false); refresh() },
     meta: { inlineError: true },
   })
