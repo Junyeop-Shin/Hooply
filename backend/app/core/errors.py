@@ -177,7 +177,10 @@ QuarterExists = _error(409, "QUARTER_EXISTS", "이미 기록한 쿼터예요.")
 # 한 run 안에서 후보안을 두 번 확정 — POST /assignments/candidates/{id}:adopt
 AlreadyAdopted = _error(409, "ALREADY_ADOPTED", "이미 확정한 팀 배정이 있어요.")
 # 그 카카오 회원번호가 이미 다른 users 에 연결됨 — POST /auth/kakao/link
-IdentityAlreadyLinked = _error(409, "IDENTITY_ALREADY_LINKED", "다른 계정에 이미 연결된 카카오 계정이에요.")
+IdentityAlreadyLinked = _error(
+    409, "IDENTITY_ALREADY_LINKED",
+    "이 카카오는 다른 HOOPLY 계정에 연결돼 있어요. 그 계정에 기록이 없다면 카카오로 로그인해 탈퇴한 뒤 다시 연결해 주세요.",
+)
 # merged_into_player_id 가 이미 채워진 게스트를 또 병합 — POST /players/{id}:merge
 AlreadyMerged = _error(409, "ALREADY_MERGED", "이미 기록을 이어 준 게스트예요.")
 # 같은 행을 두 요청이 동시에 만들거나 바꿈 (DB 유니크 위반 23505) — 아래 install_error_handlers 가 IntegrityError 에서 바꾼다.

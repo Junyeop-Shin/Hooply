@@ -63,14 +63,14 @@
 | POST | `/auth/signup` | 이메일 회원가입 | 201 · 409 |
 | POST | `/auth/login` | 이메일 로그인 | 200 · 401 |
 | GET | `/auth/kakao/login-url` | 카카오 인가 URL 생성 | 200 · 401 |
-| GET | `/auth/kakao/callback` | 카카오 콜백 (가입/로그인) | 200 · 401 |
+| GET | `/auth/kakao/callback` | 카카오 콜백 (가입/로그인) — `is_new` 면 화면이 팀에 보일 이름을 묻고, 이메일 계정이 있으면 빈 계정 탈퇴 → 카카오 연결로 안내 | 200 · 401 |
 | POST | `/auth/kakao/link` | 기존 계정에 카카오 연결 | 200 · 401 · 409 |
 | POST | `/auth/refresh` | 토큰 갱신 | 200 · 401 |
 | POST | `/auth/logout` | refresh 토큰 폐기 (토큰이 무효해도 204) | 204 |
 | POST | `/auth/password/forgot` | 비밀번호 재설정 요청 (메일은 응답 뒤 백그라운드로, 이메일당 한 시간 5통을 넘으면 보내지 않고 그대로 202) | 202 |
 | POST | `/auth/password/reset` | 비밀번호 재설정 (모든 기기의 로그인을 끊는다) | 200 · 400 |
 | GET | `/me` | 내 정보 조회 | 200 |
-| PATCH | `/me` | 내 프로필 수정 | 200 |
+| PATCH | `/me` | 내 프로필 수정 — 이름 · 닉네임을 바꾸면 내가 속한 모든 팀의 표시 이름도 바뀐다(닉네임, 없으면 이름). `name: null` 은 무시 | 200 |
 | POST | `/me/password` | 비밀번호 변경 (현재 비밀번호 확인) — 새 `TokenPair` 를 돌려주고 다른 기기의 토큰은 무효 | 200 · 400 · 401 |
 | DELETE | `/me` | 계정 삭제 (비식별화, 팀 LEFT, 유일한 매니저면 422) | 204 · 422 |
 | POST | `/me/avatar` | 프로필 사진 등록 · 교체 | 200 · 400 |

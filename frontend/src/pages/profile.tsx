@@ -142,8 +142,8 @@ function AccountCard({ user: u }: { user: UserDetail }) {
           <Field label="이름" autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={50} error={fieldErrors.name ?? (f.name.trim() ? undefined : '이름은 비울 수 없어요.')} required />
           <Field label="닉네임 (선택)" autoComplete="nickname" value={f.nickname} onChange={(e) => setF({ ...f, nickname: e.target.value })} maxLength={50} hint="팀원에게 보이는 이름이에요. 비우면 이름을 써요." error={fieldErrors.nickname} />
           <Field label="키 (cm)" type="text" inputMode="numeric" value={f.height} onChange={(e) => setF({ ...f, height: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="178" hint="골밑 적성 계산에만 쓰이고 다른 팀원에게 보이지 않아요." error={heightError ?? fieldErrors.height_cm} />
-          {/* 팀원 목록의 이름(players.display_name)은 가입할 때 정해지고 PATCH /me 로는 바뀌지 않는다 */}
-          <p className="text-xs text-muted">이미 들어간 팀의 팀원 목록에 보이는 이름은 그대로예요. 새로 가입하는 팀부터 바뀐 이름을 써요.</p>
+          {/* 팀에 보이는 이름(players.display_name)은 '닉네임, 없으면 이름' — 바꾸면 내가 속한 모든 팀에 바로 반영된다 (docs/09 3-3) */}
+          <p className="text-xs text-muted">팀원 목록 · 배정표에는 닉네임이, 없으면 이름이 보여요. 바꾸면 내가 속한 모든 팀에 바로 반영돼요.</p>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={() => setEditing(false)}>취소</Button>
             <Button type="submit" full loading={save.isPending} disabled={!f.name.trim() || !!heightError}>저장</Button>

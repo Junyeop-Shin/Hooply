@@ -100,3 +100,40 @@ def test_kakao_login_keeps_uploaded_avatar(client):
     state3 = client.get(f"{API}/auth/kakao/login-url").json()["state"]
     tok3 = client.get(f"{API}/auth/kakao/callback?code=code-a&state={state3}").json()["access_token"]
     assert client.get(f"{API}/me", headers={"Authorization": f"Bearer {tok3}"}).json()["profile_image_url"] == "https://k.kakaocdn.net/a.jpg"
+
+
+# 검증: 카카오로 잘못 만든 빈 계정을 지우면 카카오 연결이 풀려, 이메일 계정에 같은 카카오를 연결할 수 있다 (docs/09 3-2 화면의 "이메일 계정이 있어요")
+def test_duplicate_kakao_account_can_be_deleted_then_linked(client, signup):
+    h_mail = signup("mail2@example.com", name="이상민")
+    state = client.get(f"{API}/auth/kakao/login-url").json()["state"]
+    dup = client.get(f"{API}/auth/kakao/callback?code=code-a&state={state}").json()
+    assert dup["is_new"] is True
+    r = client.post(f"{API}/auth/kakao/link", json={"code": "code-a", "state": client.get(f"{API}/auth/kakao/login-url").json()["state"]}, headers=h_mail)
+    assert r.status_code == 409 and "탈퇴" in r.json()["message"]  # 해결 방법을 알려 준다
+    assert client.delete(f"{API}/me", headers={"Authorization": f"Bearer {dup['access_token']}"}).status_code == 204
+    r = client.post(f"{API}/auth/kakao/link", json={"code": "code-a", "state": client.get(f"{API}/auth/kakao/login-url").json()["state"]}, headers=h_mail)
+    assert r.status_code == 200, r.text
+    r2 = client.get(f"{API}/auth/kakao/callback?code=code-a&state={client.get(f'{API}/auth/kakao/login-url').json()['state']}")
+    assert r2.json()["is_new"] is False
+
+
+# 검증: 이름 · 닉네임을 바꾸면 이미 들어간 팀의 표시 이름도 바뀐다 (닉네임, 없으면 이름 — docs/09 3-3). 이름은 비울 수 없다
+def test_name_change_updates_team_display_name(client, signup):
+    m = signup("mgr3@example.com", name="매니저")
+    tid = client.post(f"{API}/teams", json={"name": "수요 픽업"}, headers=m).json()["id"]
+    state = client.get(f"{API}/auth/kakao/login-url").json()["state"]
+    tok = client.get(f"{API}/auth/kakao/callback?code=code-a&state={state}").json()["access_token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    code = client.get(f"{API}/teams/{tid}", headers=m).json()["team_code"]
+    assert client.post(f"{API}/teams/join", json={"team_code": code}, headers=h).status_code == 200
+
+    def shown():
+        return {p["display_name"] for p in client.get(f"{API}/teams/{tid}/players", headers=m).json()["items"]}
+
+    assert "허재" in shown()  # 카톡 닉네임
+    assert client.patch(f"{API}/me", json={"name": "허재원", "nickname": None}, headers=h).status_code == 200
+    assert "허재원" in shown() and "허재" not in shown()
+    assert client.patch(f"{API}/me", json={"nickname": "농구대통령"}, headers=h).status_code == 200
+    assert "농구대통령" in shown()
+    assert client.patch(f"{API}/me", json={"name": None}, headers=h).status_code == 200  # 무시
+    assert client.get(f"{API}/me", headers=h).json()["name"] == "허재원"

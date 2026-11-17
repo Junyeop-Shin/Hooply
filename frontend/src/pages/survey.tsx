@@ -17,6 +17,7 @@ import { SELF_RANK_LABEL, type SelfRankLevel, type SurveyAnswerIn, type SurveyQu
 import { useMe } from './home'
 import { Alert, Button, LoadError, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
+import { takeReturnTo } from '../lib/return-to'
 
 type Answer = { optionIds: number[]; numeric?: number }
 
@@ -96,7 +97,7 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
       try { sessionStorage.removeItem(surveyDraftKey(templateId)) } catch { /* ignore */ }
       qc.invalidateQueries({ queryKey: ['me'] })
       qc.invalidateQueries({ queryKey: ['profile'] })
-      nav('/', { replace: true })
+      nav(takeReturnTo() ?? '/', { replace: true })  // 초대 링크로 가입했으면 그 링크(팀 코드가 채워진 가입 화면)로 — 흐름 A
     },
     onError: (e) => setError(errorMessageWithDetails(e, '설문을 저장하지 못했어요. 다시 시도해 주세요.')),
   })

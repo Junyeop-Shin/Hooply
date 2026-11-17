@@ -261,8 +261,8 @@ def update_me(db: DB, user: CurrentUser, body: UserUpdate):
 
     - **권한:** 로그인 사용자.
     - **처리:** 본문에 포함된 필드만(`exclude_unset`) `users` 행에 덮어쓰고 커밋한다.
-      이메일·비밀번호·권한은 이 경로로 바꿀 수 없다. 팀별 `players.display_name`은 갱신하지
-      않는다 (가입 시점의 닉네임이 유지됨).
+      이메일·비밀번호·권한은 이 경로로 바꿀 수 없다. 이름 · 닉네임을 바꾸면 내가 속한 모든 팀의 표시 이름
+      (`players.display_name` = 닉네임, 없으면 이름)도 같이 바꾼다 — 예전에는 가입 때 이름이 영영 남았다(docs/09 3-3).
     - **오류:** `400 VALIDATION_ERROR` — 범위 위반 (키 120~250cm 등), 카카오 CDN · 이 서비스의 사진 주소가 아닌
       `profile_image_url`.
       `401 TOKEN_EXPIRED`.
@@ -280,7 +280,15 @@ def update_me(db: DB, user: CurrentUser, body: UserUpdate):
         if ok is None:
             raise E.PlayerNotInTeam("내가 속한 팀만 기본 팀으로 정할 수 있어요.")
     for k, v in data.items():
+        if k == "name" and v is None:
+            continue  # 이름은 비울 수 없다 (None = 변경 없음)
         setattr(user, k, v)
+    if "name" in data or "nickname" in data:
+        from sqlalchemy import update
+
+        from app.models import Player
+
+        db.execute(update(Player).where(Player.user_id == user.id).values(display_name=(user.nickname or user.name)[:50]))
     db.commit()
     return user
 

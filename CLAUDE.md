@@ -236,7 +236,7 @@ Table of Contents
 
 | ID | 요구사항 | 액터 | 기능 | 화면 | 주요 API |
 | --- | --- | --- | --- | --- | --- |
-| FR-01 | 이메일 또는 카카오로 가입·로그인한다 | 비회원 | F19 | S-01, S-02 | `POST /auth/signup`, `POST /auth/login`, `GET /auth/kakao/login-url`, `GET /auth/kakao/callback` |
+| FR-01 | 이메일 또는 카카오로 가입·로그인한다. 로그인 전에 연 주소(초대 · 투표 링크)는 로그인 뒤 그대로 열린다(새 가입자는 설문 뒤). 카카오로 처음 오면 팀에 보일 이름을 정하고, 이메일 계정이 이미 있으면 빈 계정을 지우고 카카오 연결로 안내한다 | 비회원 | F19 | S-01, S-02 | `POST /auth/signup`, `POST /auth/login`, `GET /auth/kakao/login-url`, `GET /auth/kakao/callback` |
 | FR-02 | 비밀번호는 bcrypt 해시로 저장한다 | SYSTEM | — | — | — |
 | FR-03 | 가입 직후 설문에 응답하면 실력·포지션 프로필이 생긴다 | PLAYER | F1 | S-03 | `GET /surveys/onboarding`, `POST /surveys/onboarding/responses` |
 | FR-04 | 팀을 만들면 코드가 발급되고 생성자는 팀장이 된다 | PLAYER | F2 | S-05 | `POST /teams` |
@@ -1205,7 +1205,7 @@ MVP에서는 **카카오 먼저** 만드는 편이 낫습니다. 이메일 경�
 | 1 | 서비스명 · 목적 · 페인포인트 · 액터 · 기능 요구사항 | ✅ HOOPLY, `docs/01` |
 | 2 | 화면 설계 · ERD · API 명세 · 배정 알고리즘 검증 | ✅ `docs/02` · `03` · `04`, 시뮬레이션(`scripts/simulate_rating.py`) |
 | 3 | 애플리케이션 개발 (9.8절 순서) | ✅ 운영 중 — https://hooply-green.vercel.app |
-| 4 | 테스트 · 디버깅 | ✅ pytest 271개 · Vitest 104개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
+| 4 | 테스트 · 디버깅 | ✅ pytest 273개 · Vitest 110개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
 | 5 | AI 설명 · 전술 (14장) | ✅ `docs/07` v1.9, AI 검증 `docs/eval_result.md` |
 | 6 | 데모 · 포트폴리오 | ✅ `docs/05` 데모 시나리오, 데모 데이터 매주 자동 갱신 |
 

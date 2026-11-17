@@ -4,7 +4,7 @@
  * 내려받을 이유가 없다. 전환 중에는 Spinner 를 보여 준다.
  */
 import { Suspense, lazy } from 'react'
-import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { useIsLoggedIn } from './store/auth'
 import { Spinner } from './components/ui'
 // 첫 화면(로그인·홈)은 어차피 바로 필요하므로 함께 받는다
@@ -12,6 +12,7 @@ import { KakaoCallbackPage, LoginPage, SignupPage } from './pages/auth'
 import { HomePage } from './pages/home'
 import { TutorialSpotlight } from './components/tutorial'
 import { isChunkLoadError, reloadForNewVersion } from './lib/stale-chunk'
+import { saveReturnTo } from './lib/return-to'
 
 // 배포 전에 열어 둔 탭이 예전 조각 파일을 부르면 실패한다 → 한 번 새로고침해 새 버전을 받는다(새로고침하는 동안은 Spinner)
 const page = <T extends Record<string, unknown>, K extends keyof T>(load: () => Promise<T>, name: K) =>
@@ -48,8 +49,13 @@ const TacticBoardPage = page(() => import('./pages/tactics'), 'TacticBoardPage')
 const PlayEditorPage = page(() => import('./pages/play-editor'), 'PlayEditorPage')
 
 function RequireAuth() {
+  const loggedIn = useIsLoggedIn()
+  const loc = useLocation()
   // 시작 안내 중이면 체크리스트에서 들어온 화면의 해야 할 칸을 밝혀 준다
-  return useIsLoggedIn() ? <><Outlet /><TutorialSpotlight /></> : <Navigate to="/login" replace />
+  if (loggedIn) return <><Outlet /><TutorialSpotlight /></>
+  // 로그인 전에 연 주소(초대 · 투표 링크)를 맡겨 두고 로그인 뒤 그리로 — 카카오를 다녀와도 남게 localStorage (docs/09 3-1)
+  saveReturnTo(loc.pathname + loc.search)
+  return <Navigate to="/login" replace />
 }
 function GuestOnly() {
   return useIsLoggedIn() ? <Navigate to="/" replace /> : <Outlet />
