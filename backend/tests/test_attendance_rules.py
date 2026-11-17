@@ -71,3 +71,28 @@ def test_reopen_blocked_after_adoption(client, club):
     assert r.status_code == 400 and "확정" in r.json()["message"]
     r = client.patch(f"{API}/events/{eid}", json={"rsvp_deadline": "2099-12-19T13:00:00Z"}, headers=m)
     assert r.status_code == 200 and r.json()["status"] == "CLOSED"
+
+
+# 검증: 마감을 정하지 않은 일정도 끝나면 팀원 응답 · 게스트 등록이 닫힌다(매니저 대리는 된다). 끝난 일정은 다시 받을 수 없다
+def test_rsvp_closes_when_event_ends_without_deadline(client, club, monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.services import event_service
+
+    monkeypatch.setattr(event_service, "_now", lambda: datetime.now(UTC))  # conftest 의 고정을 풀고 실제 시계로
+    m, tid, player = club["manager"], club["team_id"], club["members"][1]
+    ended = client.post(f"{API}/teams/{tid}/events", json={"event_date": "2026-09-13", "start_time": "10:00", "end_time": "12:00"}, headers=m).json()
+    assert ended["rsvp_deadline"] is None and ended["status"] == "OPEN" and ended["rsvp_open"] is False
+    r = client.put(f"{API}/events/{ended['id']}/attendance", json={"status": "ATTEND"}, headers=player)
+    assert r.status_code == 422 and r.json()["code"] == "RSVP_CLOSED"
+    r = client.post(f"{API}/events/{ended['id']}/guests", json={"display_name": "끝난뒤게스트"}, headers=player)
+    assert r.status_code == 422 and r.json()["code"] == "RSVP_CLOSED"
+    pid = next(iter(_att(client, ended["id"], m)))
+    assert client.put(f"{API}/events/{ended['id']}/attendances/{pid}", json={"status": "ATTEND"}, headers=m).status_code == 200
+    assert client.post(f"{API}/events/{ended['id']}/rsvp:close", headers=m).status_code == 200
+    r = client.post(f"{API}/events/{ended['id']}/rsvp:reopen", headers=m)
+    assert r.status_code == 400 and "끝난" in r.json()["message"]
+
+    upcoming = client.post(f"{API}/teams/{tid}/events", json={"event_date": "2099-01-04"}, headers=m).json()
+    assert upcoming["rsvp_open"] is True
+    assert client.put(f"{API}/events/{upcoming['id']}/attendance", json={"status": "ATTEND"}, headers=player).status_code == 200

@@ -117,6 +117,8 @@ def reopen_rsvp(db: Session, event: Event) -> Event:
         raise errors.ValidationError("응답을 마감한 일정만 다시 받을 수 있어요.")
     if assignment_service.adopted_candidate(db, event) is not None:
         raise errors.ValidationError("팀을 확정한 일정은 응답을 다시 받을 수 없어요. 참석이 바뀌면 참석 관리에서 대신 바꿔 주세요.")
+    if has_ended(event):
+        raise errors.ValidationError("끝난 일정은 응답을 다시 받을 수 없어요. 참석이 바뀌면 참석 관리에서 대신 바꿔 주세요.")
     if _deadline_passed(event):
         raise errors.ValidationError("응답 마감 시각이 지났어요. 일정 고치기에서 마감을 늦추면 다시 받을 수 있어요.")
     event.status = EventStatus.OPEN
@@ -219,10 +221,27 @@ def ends_at(event: Event) -> datetime:
     return datetime.combine(d, t, tzinfo=ZoneInfo(get_settings().timezone))
 
 
+def _now() -> datetime:
+    """'일정이 끝났나' 를 볼 때의 지금. 테스트가 편의상 지난 날짜 일정을 만들어 응답하므로 conftest 가 이 함수만 고정한다."""
+    return datetime.now(UTC)
+
+
+def has_ended(event: Event) -> bool:
+    """일정이 끝났는지 — 종료 시각(없으면 그날 23:59, 자정을 넘기면 다음 날)이 지났으면 True."""
+    return ends_at(event) <= _now()
+
+
 def rsvp_open(event: Event) -> bool:
+    """팀원이 본인 참석 응답을 바꿀 수 있는가 — 응답 중(OPEN)이고, 마감 시각 전이고, 일정이 아직 안 끝났을 때.
+
+    끝난 일정은 마감을 정하지 않았어도 응답을 닫는다 (docs/09 — 마감 없는 일정이 끝난 뒤에도 응답 · 미리 마감 버튼이 살아 있었다).
+    매니저 대리 응답(set_attendance)은 이와 상관없이 계속 된다.
+    """
     if event.status != EventStatus.OPEN:
         return False
-    return event.rsvp_deadline is None or event.rsvp_deadline > datetime.now(UTC)
+    if event.rsvp_deadline is not None and event.rsvp_deadline <= datetime.now(UTC):
+        return False
+    return not has_ended(event)
 
 
 def _bulk_stats(db: Session, event_ids: list[int], me: Player | None) -> dict[int, dict]:
@@ -322,10 +341,13 @@ def _get_row(db: Session, event_id: int, player_id: int) -> EventAttendance | No
     )
 
 
-def respond(db: Session, event: Event, me: Player, status: AttendanceStatus, note: str | None) -> EventAttendance:
+def respond(
+    db: Session, event: Event, me: Player, status: AttendanceStatus, note: str | None, *, history: bool = False,
+) -> EventAttendance:
+    """본인 참석 응답. `history=True` 는 지난 모임을 그대로 재현할 때(데모 데이터)만 — 응답 마감 검사를 건너뛴다."""
     if me.id is None:
         raise errors.NotAMember("비소속 관리자는 본인 응답을 남길 수 없어요. 참가자 대리 응답을 쓰세요.")
-    if not rsvp_open(event):
+    if not history and not rsvp_open(event):
         raise errors.RsvpClosed()
     row = _get_row(db, event.id, me.id) or EventAttendance(event_id=event.id, player_id=me.id)
     row.status = status
@@ -471,12 +493,15 @@ def attendance_list(db: Session, event: Event, me: Player, viewer: User, status_
 # ---------------------------------------------------------------------------
 
 
-def register_guest(db: Session, event: Event, me: Player, by: User, body: EventGuestCreate):
-    """게스트를 이 회차 참석자에 추가. 반환: (AttendanceView, None) 또는 (None, similar[]) 확인 요청."""
+def register_guest(db: Session, event: Event, me: Player, by: User, body: EventGuestCreate, *, history: bool = False):
+    """게스트를 이 회차 참석자에 추가. 반환: (AttendanceView, None) 또는 (None, similar[]) 확인 요청.
+
+    `history=True` 는 지난 모임 재현(데모 데이터)용 — 응답 마감 뒤 팀원 등록 금지를 건너뛴다.
+    """
     if event.status == EventStatus.CANCELED:
         raise errors.ValidationError("취소된 일정에는 게스트를 등록할 수 없어요.")
     is_manager = me.role == TeamRole.MANAGER or guest_service.is_manager(db, by, event.team_id)
-    if not rsvp_open(event) and not is_manager:
+    if not history and not rsvp_open(event) and not is_manager:
         # 응답 마감 · 팀 확정 뒤 참석 변경은 매니저만 (사용자 결정, docs/09) — 확정한 팀이 매니저 모르게 바뀌지 않게
         raise errors.RsvpClosed("응답이 마감돼서 매니저만 게스트를 추가할 수 있어요. 매니저에게 알려 주세요.")
     if body.preferred_position and body.preferred_position not in body.playable_positions:

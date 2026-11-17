@@ -308,7 +308,7 @@ def main() -> None:
                     preferred_position=spec["preferred"], playable_positions=spec["playable"],
                     team_lock_request=spec["lock"], existing_player_id=guest_ids.get(name),
                 )
-                view, _ = event_service.register_guest(db, ev, players[idx], users[idx], body)
+                view, _ = event_service.register_guest(db, ev, players[idx], users[idx], body, history=True)
                 guest_ids[name] = view.player.id
                 true_skill.setdefault(view.player.id, TRUE_BY_GRADE.get(spec["skill_grade"], 0.0))
 
@@ -399,7 +399,7 @@ def main() -> None:
                 ),
             )
             for i in attend_idx:
-                event_service.respond(db, ev, players[i], AttendanceStatus.ATTEND, None)
+                event_service.respond(db, ev, players[i], AttendanceStatus.ATTEND, None, history=True)
             invite_guests(ev, GUESTS_BY_WEEK.get(weeks_ago, []))
             r, _ = assignment_service.run(db, ev, manager, AssignmentRunRequest(team_count=2, constraints=constraints_of(weeks_ago)))
             # 회차마다 채택하는 전략을 바꿔 둔다 (실력 우선 / 친화도 우선 / 종합)
@@ -436,13 +436,13 @@ def main() -> None:
             attend_idx = attendees_of(weeks_ahead + PAST_WEEKS)
             if responded:
                 for i in attend_idx:
-                    event_service.respond(db, ev, players[i], AttendanceStatus.ATTEND, None)
+                    event_service.respond(db, ev, players[i], AttendanceStatus.ATTEND, None, history=True)
                 for i in [j for j in range(len(ROSTER)) if j not in attend_idx][:3]:
-                    event_service.respond(db, ev, players[i], AttendanceStatus.ABSENT, "출장")
+                    event_service.respond(db, ev, players[i], AttendanceStatus.ABSENT, "출장", history=True)
             else:
                 # 11명만 참석 응답 — 나머지는 미응답(RSVP 확인용). 10명을 넘으므로 그 주가 '이번 주' 가 되어도 배정할 수 있다
                 for i in attend_idx[:11]:
-                    event_service.respond(db, ev, players[i], AttendanceStatus.ATTEND, None)
+                    event_service.respond(db, ev, players[i], AttendanceStatus.ATTEND, None, history=True)
             invite_guests(ev, guests)
 
         upcoming(0, responded=True, guests=["허웅", "이승현"])
@@ -475,7 +475,7 @@ def main() -> None:
             wed = sunday + timedelta(days=3 + 7 * weeks_ahead)
             ev2 = event_service.create_event(db, team2, users[2], EventCreate(title="수요 픽업", event_date=wed, start_time=time(20, 0), end_time=time(22, 0), venue="잠실 학생체육관"))
             for u in users[:5]:
-                event_service.respond(db, ev2, caller_player(db, u, team2.id), AttendanceStatus.ATTEND, None)
+                event_service.respond(db, ev2, caller_player(db, u, team2.id), AttendanceStatus.ATTEND, None, history=True)
         db.commit()
 
         # 8) 시작 안내 — 위 데모 계정은 이미 앱을 쓰는 사람이라 팝업·체크리스트 없이 기능별 첫 안내만 본다 (DONE).

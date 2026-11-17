@@ -36,6 +36,20 @@ def approval_off():
 
 
 @pytest.fixture(autouse=True)
+def rsvp_clock(monkeypatch):
+    """끝난 일정은 응답이 닫힌다(event_service.has_ended). 테스트는 편의상 지난 날짜(2026-09~)로 일정을 만들고
+    팀원이 직접 응답 · 게스트 등록을 하므로, '일정이 끝났나' 를 볼 때의 지금만 2026-09-01 로 고정한다.
+    (응답 마감 시각 · 투표 열림 등 다른 시각 판단은 실제 시계 그대로.) 규칙 자체는 test_attendance_rules 가
+    이 고정을 풀고 실제 시계로 확인한다."""
+    from datetime import UTC, datetime
+
+    from app.services import event_service
+
+    monkeypatch.setattr(event_service, "_now", lambda: datetime(2026, 9, 1, tzinfo=UTC))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def clean_db():
     """모든 테스트가 끝난 뒤 전 테이블을 비운다 (autouse → 명시 안 해도 적용).
 
