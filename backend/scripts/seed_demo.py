@@ -500,7 +500,7 @@ def main() -> None:
         print(f"승인 대기 팀: {TEAM3_NAME} (m08 오세근 생성) — 승인 전이라 일정 기능이 잠겨 있어요")
         print(f"매니저 로그인: {MANAGER_EMAIL} / {PASSWORD}")
         print(f"팀원 로그인: m01@demo.com ~ m19@demo.com / {PASSWORD}  (m19 주희정은 설문 전 상태)")
-        print("게스트 기록 본인 확인: m20@demo.com (허웅) 로그인 → 홈의 '본인이 맞나요?' 카드 · 매니저 팀원 관리에는 '기록 이어받기 제안'")
+        print("게스트 기록 본인 확인: m20@demo.com (허웅) 로그인 → 홈의 '본인이 맞나요?' 카드 · 매니저 팀원 관리에는 '게스트 기록 잇기'")
         print(f"시작 안내 확인: {TUTORIAL_PLAYER_EMAIL} (팀 코드 {team.team_code} 로 가입) · {TUTORIAL_MANAGER_EMAIL} (팀 만들기) / {PASSWORD}")
         if admin:
             print(f"관리자 콘솔: /admin  (로그인 {ADMIN_EMAIL} / {PASSWORD})")

@@ -524,6 +524,30 @@ def on_member_joined(db: Session, player: Player) -> None:
 # ---------------------------------------------------------------------------
 
 
+def check_unique_positions(positions) -> None:
+    """같은 포지션을 두 번 고르면 400 (`PUT /me/positions` · 매니저의 회원 포지션 수정)."""
+    seen = set()
+    for p in positions:
+        if p.position in seen:
+            raise errors.ValidationError(f"{p.position} 포지션을 두 번 골랐어요.")
+        seen.add(p.position)
+
+
+def replace_positions(db: Session, player: Player, positions) -> None:
+    """참가자의 포지션을 목록으로 통째로 바꾼다. 목록 순서가 곧 선호 순서다(`preference_rank` 를 안 보내면 1, 2, 3…). 커밋은 호출자."""
+    for old in list(player.positions):
+        db.delete(old)
+    db.flush()  # 같은 flush 안에서는 INSERT 가 DELETE 보다 먼저 나가 UNIQUE(player_id, position) 에 걸린다
+    player.positions = [
+        PlayerPosition(
+            player_id=player.id, position=p.position, can_play=p.can_play,
+            preference_rank=p.preference_rank if p.preference_rank is not None else i + 1,
+            self_rating=p.self_rating,
+        )
+        for i, p in enumerate(positions)
+    ]
+
+
 def my_profile(db: Session, user: User) -> MyProfile:
     resp = db.scalar(select(SurveyResponse).where(SurveyResponse.user_id == user.id))
     players = db.scalars(

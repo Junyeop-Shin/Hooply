@@ -167,16 +167,60 @@ def join_team(db: Session, user: User, team_code: str) -> Team:
         existing.role = TeamRole.PLAYER  # 권한은 승계하지 않음 (제외된 매니저의 자동 복귀 방지)
         existing.role_granted_by = None
         db.flush()
+        _ensure_manager(db, team, existing)
         from app.services import survey_service
 
         survey_service.on_member_joined(db, existing)
     else:
         try:
-            _add_member(db, team, user, role=TeamRole.PLAYER)
+            _ensure_manager(db, team, _add_member(db, team, user, role=TeamRole.PLAYER))
         except IntegrityError:  # 검사와 저장 사이에 같은 사람이 먼저 가입했다 (uq_players_team_user)
             db.rollback()
             raise errors.AlreadyMember() from None
     refresh_team_status(db, team)
+    db.commit()
+    return team
+
+
+def _ensure_manager(db: Session, team: Team, joined: Player) -> None:
+    """매니저가 한 명도 없는 팀에 들어오면 그 사람이 매니저가 된다 — 혼자 남은 팀장이 나갔다 다시 들어오면
+    PLAYER 로 돌아와 아무도 일정 · 배정을 못 하던 문제 (docs/09 3-14). 팀장이 팀에 없으면 팀장도 넘겨받는다."""
+    has_manager = db.scalar(
+        select(Player.id).where(Player.team_id == team.id, Player.status == PlayerStatus.ACTIVE, Player.role == TeamRole.MANAGER, Player.id != joined.id).limit(1)
+    )
+    if has_manager is not None:
+        return
+    joined.role = TeamRole.MANAGER
+    owner_active = db.scalar(
+        select(Player.id).where(Player.team_id == team.id, Player.user_id == team.owner_user_id, Player.status == PlayerStatus.ACTIVE).limit(1)
+    )
+    if owner_active is None:
+        team.owner_user_id = joined.user_id
+    db.flush()
+
+
+def unremove(db: Session, team: Team, player: Player) -> Player:
+    """제외(REMOVED)를 한 사람만 푼다 → LEFT. 지금 팀 코드로 다시 들어올 수 있다 (docs/09 3-7).
+    팀 코드 재발급(모두 풀림 · 초대 링크 무효)과 따로 쓴다. 바로 팀원으로 되돌리지는 않는다 — 본인이 다시 들어온다."""
+    if player.team_id != team.id or player.status != PlayerStatus.REMOVED:
+        raise errors.ValidationError("제외한 사람만 풀 수 있어요.")
+    player.status = PlayerStatus.LEFT
+    db.commit()
+    return player
+
+
+def transfer_owner(db: Session, team: Team, me: Player, target: Player) -> Team:
+    """팀장을 고른 팀원에게 넘긴다 (docs/09 3-14). 받는 사람은 매니저가 되고, 넘긴 사람은 매니저로 남는다."""
+    if me.user_id != team.owner_user_id:
+        raise errors.ForbiddenNotOwner("팀장만 팀장을 넘길 수 있어요.")
+    if target.team_id != team.id or target.status != PlayerStatus.ACTIVE or target.kind != PlayerKind.MEMBER or target.user_id is None:
+        raise errors.ValidationError("이 팀의 회원에게만 넘길 수 있어요.")
+    if target.id == me.id:
+        raise errors.ValidationError("이미 팀장이에요.")
+    if target.role != TeamRole.MANAGER:
+        target.role = TeamRole.MANAGER
+        target.role_granted_by = me.user_id
+    team.owner_user_id = target.user_id
     db.commit()
     return team
 

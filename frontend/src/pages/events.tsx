@@ -19,24 +19,11 @@ import { BottomAction, Content, Screen, TopBar, useFinish, useGoBack } from '../
 import { EventTactics } from '../components/tactics'
 import { AdoptedSection } from '../components/adopted'
 import { useDebounced } from '../lib/typewriter'
+import { addMinutes, endsNextDay, spanMinutes, weeksUntilUpcoming } from '../lib/event-time'
 
 
 
 /* ---------- S-09 일정 등록 ---------- */
-
-/** "20:00" → 1200(분). 값이 없거나 형식이 다르면 null */
-function toMinutes(hhmm: string): number | null {
-  const [h, m] = (hhmm ?? '').split(':').map(Number)
-  return Number.isNaN(h) || Number.isNaN(m) ? null : h * 60 + m
-}
-
-/** "20:00" 에 분을 더한다. 자정을 넘으면 23:59 로 멈춘다 (일정은 하루 안에서 끝나는 것으로 다룬다) */
-function addMinutes(hhmm: string, minutes: number): string {
-  const base = toMinutes(hhmm)
-  if (base === null) return hhmm
-  const total = Math.min(base + minutes, 24 * 60 - 1)
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
-}
 
 const DEFAULT_DURATION_MIN = 120
 
@@ -64,8 +51,8 @@ export function EventCreatePage() {
       title: e.title ?? '', event_date: e.event_date, start_time: e.start_time?.slice(0, 5) ?? '', end_time: e.end_time?.slice(0, 5) ?? '',
       venue: e.venue ?? '', rsvp_date: dl ? localISODate(dl) : '', rsvp_time: dl ? `${pad(dl.getHours())}:${pad(dl.getMinutes())}` : '', memo: e.memo ?? '',
     })
-    const s = toMinutes(e.start_time?.slice(0, 5) ?? ''), en = toMinutes(e.end_time?.slice(0, 5) ?? '')
-    if (s !== null && en !== null && en > s) setDurationMin(en - s)  // 고치는 일정의 길이를 기억한다
+    const span = spanMinutes(e.start_time?.slice(0, 5) ?? '', e.end_time?.slice(0, 5) ?? '')
+    if (span !== null) setDurationMin(span)  // 고치는 일정의 길이를 기억한다 (자정을 넘는 일정도)
     setPrefilled(true)
   }, [existing.data, prefilled])
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((prev) => ({ ...prev, [k]: e.target.value }))
@@ -75,8 +62,8 @@ export function EventCreatePage() {
   }
   const setEnd = (e: { target: { value: string } }) => {
     const v = e.target.value
-    const gap = toMinutes(v) !== null && toMinutes(f.start_time) !== null ? toMinutes(v)! - toMinutes(f.start_time)! : null
-    if (gap !== null && gap > 0) setDurationMin(gap)
+    const gap = spanMinutes(f.start_time, v)
+    if (gap !== null) setDurationMin(gap)
     setF((prev) => ({ ...prev, end_time: v }))
   }
   // 마감 날짜만 고르면 시각은 밤 10시로 채워 둔다 (비워 두면 마감이 안 걸린다)
@@ -85,13 +72,15 @@ export function EventCreatePage() {
     setF((prev) => ({ ...prev, rsvp_date: v, rsvp_time: v && !prev.rsvp_time ? '22:00' : prev.rsvp_time }))
   }
 
-  // 지난 일정 불러오기: 제목·시작/종료·장소·메모는 그대로, 날짜와 응답 마감은 그 일정 기준 +7일. 입력만 채우고 저장은 하지 않는다
+  // 지난 일정 불러오기: 제목·시작/종료·장소·메모는 그대로, 날짜와 응답 마감은 같은 요일로 오늘 이후가 될 때까지 일주일씩 뒤로.
+  // 입력만 채우고 저장은 하지 않는다
   const recent = useQuery({ queryKey: ['events', 'team', id, 'all', 50], queryFn: () => eventsApi.list(id, { size: 50 }), enabled: editId === null && id > 0 })
   const lastEvent = (recent.data?.items ?? []).filter((e) => e.status !== 'CANCELED').sort((a, b) => b.event_date.localeCompare(a.event_date) || b.id - a.id)[0]
-  const [loadedFrom, setLoadedFrom] = useState<string | null>(null)
+  const [loadedFrom, setLoadedFrom] = useState<{ label: string; weeks: number } | null>(null)
   const loadFromLast = () => {
     if (!lastEvent) return
-    const plus7 = (d: Date) => new Date(d.getTime() + 7 * 86_400_000)
+    const weeks = weeksUntilUpcoming(lastEvent.event_date, localISODate(new Date()))
+    const plus7 = (d: Date) => new Date(d.getTime() + weeks * 7 * 86_400_000)
     const deadline = lastEvent.rsvp_deadline ? plus7(new Date(lastEvent.rsvp_deadline)) : null
     const pad = (n: number) => String(n).padStart(2, '0')
     const start = lastEvent.start_time?.slice(0, 5) ?? ''
@@ -106,9 +95,8 @@ export function EventCreatePage() {
       rsvp_time: deadline ? `${pad(deadline.getHours())}:${pad(deadline.getMinutes())}` : '',
       memo: lastEvent.memo ?? '',
     })
-    const gap = start && end ? (toMinutes(end)! - toMinutes(start)!) : null
-    setDurationMin(gap && gap > 0 ? gap : DEFAULT_DURATION_MIN)  // 불러온 일정의 진행 시간을 유지한다
-    setLoadedFrom(fmtEvent(lastEvent))
+    setDurationMin(spanMinutes(start, end) ?? DEFAULT_DURATION_MIN)  // 불러온 일정의 진행 시간을 유지한다
+    setLoadedFrom({ label: fmtEvent(lastEvent), weeks })
   }
 
   const payload = (): EventCreateInput => ({
@@ -139,13 +127,15 @@ export function EventCreatePage() {
       <TopBar title={editId !== null ? '일정 고치기' : '일정 등록'} back={editId !== null ? `/events/${editId}` : `/teams/${id}`} />
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); m.mutate() }} className="flex flex-1 flex-col">
         <Content>
-          {editId !== null && <Alert kind="info">응답은 그대로 남아요. 날짜나 시간을 바꿨다면 팀원에게 알려 주세요.</Alert>}
-          {loadedFrom && <Alert kind="info">{loadedFrom} 일정으로 채웠어요. 날짜와 응답 마감은 일주일 뒤예요.</Alert>}
+          {editId !== null && (existing.data?.status === 'DONE'
+            ? <Alert kind="info">경기 기록이 있는 일정이에요. 날짜를 바꾸면 실력 지표를 바뀐 날짜 순서대로 다시 계산해요.</Alert>
+            : <Alert kind="info">응답은 그대로 남아요. 날짜나 시간을 바꿨다면 팀원에게 알려 주세요.</Alert>)}
+          {loadedFrom && <Alert kind="info">{loadedFrom.label} 일정으로 채웠어요. 날짜와 응답 마감은 {loadedFrom.weeks === 1 ? '일주일' : `${loadedFrom.weeks}주`} 뒤예요.</Alert>}
           {editId === null && lastEvent && !loadedFrom && (
             <Card className="space-y-3 border-brand-line bg-brand-soft">
               <div>
                 <p className="text-sm font-bold text-ink">지난 일정과 같게 채우기</p>
-                <p className="text-xs text-muted">날짜와 응답 마감은 일주일 뒤로 채워요. 채운 뒤 고칠 수 있어요.</p>
+                <p className="text-xs text-muted">날짜와 응답 마감은 같은 요일로, 오늘 이후가 되게 채워요. 채운 뒤 고칠 수 있어요.</p>
               </div>
               <div className="space-y-1 rounded-xl bg-surface px-3 py-2.5 text-sm">
                 {lastEvent.title && <p className="font-semibold text-ink">{lastEvent.title}</p>}
@@ -160,7 +150,7 @@ export function EventCreatePage() {
           <div data-tutorial="FIRST_EVENT"><Field label="날짜" type="date" value={f.event_date} onChange={set('event_date')} required /></div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="시작" type="time" value={f.start_time} onChange={setStart} />
-            <Field label="종료" type="time" value={f.end_time} onChange={setEnd} />
+            <Field label="종료" type="time" value={f.end_time} onChange={setEnd} hint={endsNextDay(f.start_time, f.end_time) ? '다음 날 끝나요' : undefined} />
           </div>
           <Field label="장소" value={f.venue} onChange={set('venue')} placeholder="체육관 이름" />
           <div className="grid grid-cols-2 gap-3">
@@ -396,15 +386,18 @@ export function EventDetailPage() {
   return (
     <Screen>
       {/* 경기 기록이 있는(DONE) 일정은 실력 지표의 근거라 지울 수 없다. 배정을 확정한 일정(CLOSED)은 지울 수 있다 */}
-      <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && (e.status === 'OPEN' || e.status === 'CLOSED') && (
+      <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && e.status !== 'CANCELED' && (
         <span className="-mr-1 flex text-sm">
           <button className="min-h-11 min-w-11 px-2 font-semibold text-bar-ink" onClick={() => nav(`/events/${id}/edit`)}>고치기</button>
-          <button
-            className="min-h-11 min-w-11 px-2 font-semibold text-bar-sub disabled:opacity-50" disabled={remove.isPending}
-            onClick={async () => { if (await confirm({ title: '일정을 지울까요?', body: '참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.', confirmLabel: '일정 지우기', danger: true })) remove.mutate() }}
-          >
-            지우기
-          </button>
+          {/* 경기 기록이 있는 일정은 서버가 지우지 않는다 — 고치기만 (쿼터를 먼저 지우면 다시 보인다) */}
+          {e.status !== 'DONE' && (
+            <button
+              className="min-h-11 min-w-11 px-2 font-semibold text-bar-sub disabled:opacity-50" disabled={remove.isPending}
+              onClick={async () => { if (await confirm({ title: '일정을 지울까요?', body: '참석 응답과 팀 배정도 함께 지워지고 되돌릴 수 없어요.', confirmLabel: '일정 지우기', danger: true })) remove.mutate() }}
+            >
+              지우기
+            </button>
+          )}
         </span>
       )} />
       <div className="bg-bar px-4 pb-4 text-bar-ink">
@@ -412,7 +405,7 @@ export function EventDetailPage() {
         {e.title && <p className="text-lg font-bold">{fmtEvent(e)}</p>}
         <p className="text-sm text-bar-sub">{e.venue ?? '장소 미정'}{e.memo ? ` · ${e.memo}` : ''}</p>
         <div className="mt-2 flex items-center gap-2 text-sm">
-          <Badge tone={e.status === 'OPEN' ? 'success' : 'neutral'}>{{ OPEN: past ? '종료' : '응답 받는 중', CLOSED: past ? '종료' : '응답 마감', DONE: '기록 완료', CANCELED: '취소됨' }[e.status]}</Badge>
+          <Badge tone={e.rsvp_open ? 'success' : 'neutral'}>{{ OPEN: past ? '종료' : e.rsvp_open ? '응답 받는 중' : '응답 마감', CLOSED: past ? '종료' : '응답 마감', DONE: '기록 완료', CANCELED: '취소됨' }[e.status]}</Badge>
           <span className="text-bar-sub">참석 {e.attend_count}명</span>
           {e.rsvp_deadline && <span className="ml-auto text-xs text-bar-sub">마감 {fmtDeadline(e.rsvp_deadline)}</span>}
         </div>
@@ -485,6 +478,7 @@ export function EventDetailPage() {
           onClose={() => setSheet(null)}
           onDone={() => { setSheet(null); refresh() }}
           showGrade={isManager}
+          memberNames={(att.data?.items ?? []).filter((a) => a.player.kind === 'MEMBER').map((a) => a.player.display_name)}
         />
       )}
     </Screen>
@@ -557,8 +551,15 @@ function AttendeeRow({ a, isMe, onEdit, onRemove, onSetStatus, showGrade }: { a:
 /** "2026-11-08" → "11/8" */
 const shortDate = (iso: string) => { const [, mo, d] = iso.split('-').map(Number); return `${mo}/${d}` }
 
-function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId: number; editing: AttendanceView | null; onClose: () => void; onDone: () => void; showGrade: boolean }) {
+/** 이름 비교용 — 공백 · 대소문자 무시 */
+const normName = (n: string) => n.replace(/\s+/g, '').toLowerCase()
+
+function GuestSheet({ eventId, editing, onClose, onDone, showGrade, memberNames }: {
+  eventId: number; editing: AttendanceView | null; onClose: () => void; onDone: () => void; showGrade: boolean; memberNames: string[]
+}) {
   const [name, setName] = useState(editing?.player.display_name ?? '')
+  // 팀원과 이름이 같으면 명단 · 팀 카드 · 쿼터 칸에서 둘이 헷갈린다 — 구분할 이름을 권한다 (docs/09 2-14)
+  const clash = name.trim() ? memberNames.find((m) => normName(m) === normName(name)) : undefined
   const [gradeValue, setGradeState] = useState<number | null>(null)
   const [gradeTouched, setGradeTouched] = useState(false)  // 고칠 때 · 다시 초대할 때는 등급을 건드렸을 때만 보낸다 (null = 미지정으로 되돌리기)
   const setGrade = (g: number | null) => { setGradeState(g); setGradeTouched(true) }
@@ -650,6 +651,12 @@ function GuestSheet({ eventId, editing, onClose, onDone, showGrade }: { eventId:
                 label="이름" value={name} onChange={(e) => onName(e.target.value)} placeholder="게스트 이름을 입력해 주세요" maxLength={50} autoFocus
                 autoComplete="off" role="combobox" aria-autocomplete="list" aria-expanded={options.length > 0} aria-controls="guest-suggest"
               />
+              {clash && !readOnly && (
+                <div className="mt-1.5 flex items-center gap-2 rounded-xl bg-warn-soft px-3 py-1.5 text-xs text-warn-ink">
+                  <span className="min-w-0 flex-1">팀원 {clash}님과 이름이 같아 명단에서 헷갈려요.</span>
+                  <button type="button" className="-my-1 min-h-11 shrink-0 font-semibold underline underline-offset-2" onClick={() => onName(`${name.trim()}(게)`)}>{name.trim()}(게)로 바꾸기</button>
+                </div>
+              )}
               {options.length > 0 && (
                 <ul id="guest-suggest" role="listbox" aria-label="전에 왔던 게스트" className="mt-1 overflow-hidden rounded-xl border border-line bg-surface">
                   {options.map((sg) => (

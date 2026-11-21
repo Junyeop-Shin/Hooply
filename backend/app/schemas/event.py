@@ -78,7 +78,7 @@ class EventView(ORMModel):
     quarter_count: int = Field(default=0, description="기록된 쿼터 수. 0 이면 아직 기록 전")
     my_squad_name: str | None = Field(default=None, description="확정된 배정에서 내 팀 이름 (없으면 None)")
     my_assigned_position: str | None = Field(default=None, description="확정된 배정에서 내 포지션")
-    survey_open: bool = Field(default=False, description="피어 투표가 열렸는지 (일정 종료 시각 경과)")
+    survey_open: bool = Field(default=False, description="피어 투표가 열렸는지 (일정 종료 시각 경과 또는 경기 기록 저장)")
     my_survey_submitted: bool = Field(default=False, description="호출자가 이 회차 피어 투표를 제출했는지")
     survey_responded: int = Field(default=0, description="피어 투표 제출 수")
     survey_total: int = Field(default=0, description="투표 대상 인원 = 참석한 회원 수 (게스트 제외)")

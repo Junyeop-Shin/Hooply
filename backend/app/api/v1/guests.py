@@ -12,6 +12,8 @@
 - POST  /teams/{team_id}/guests                   게스트 레코드 등록 (구현됨)
 - GET   /teams/{team_id}/guests                   기존 게스트 검색 (구현됨)
 - GET   /teams/{team_id}/guests/merge-candidates  이름이 같은 게스트–회원 쌍 (구현됨, MANAGER)
+- POST  /teams/{team_id}/guests/merge-candidates:dismiss  "다른 사람이에요" 로 후보 숨기기 (구현됨, MANAGER)
+- GET   /teams/{team_id}/guests/merged            기록을 이어 준 게스트–회원 쌍 (구현됨, MANAGER)
 - PATCH /players/{player_id}                      게스트 이름·등급·포지션 수정 (구현됨)
 - POST  /players/{guest_player_id}:merge          게스트 → 회원 병합 (구현됨, MANAGER)
 - POST  /players/{player_id}:unmerge              병합 되돌리기 (구현됨, MANAGER)
@@ -22,12 +24,12 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.api.deps import DB, CurrentUser, TeamManager, TeamMember, get_team_or_404
 from app.api.v1._docs import errors
 from app.core import errors as E
-from app.models import Team
+from app.models import Player, Team
 from app.models.enums import TeamRole
 from app.schemas.common import ItemList, PlayerCard
 from app.schemas.team import (
@@ -36,6 +38,7 @@ from app.schemas.team import (
     GuestCreate,
     GuestSimilar,
     MergeCandidate,
+    MergeDismiss,
     MergeRequest,
     PlayerUpdate,
 )
@@ -115,6 +118,45 @@ def merge_candidates(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_
     return ItemList(items=[MergeCandidate(guest=to_card(g, include_grade=True), member=to_card(m, include_grade=True)) for g, m in pairs])
 
 
+@router.post(
+    "/teams/{team_id}/guests/merge-candidates:dismiss", status_code=204,
+    responses=errors(_403="FORBIDDEN_ROLE", _422="MERGE_KIND_MISMATCH"), summary="병합 후보 숨기기 (다른 사람이에요)",
+)
+def dismiss_merge_candidate(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_or_404)], body: MergeDismiss):
+    """이름만 같은 다른 사람인 (게스트, 회원) 짝을 병합 후보에서 숨긴다.
+
+    - **권한:** 팀 매니저 또는 ADMIN.
+    - **처리:** 회원이 본인 확인을 거절한 것과 같은 기록(`guest_claims` DECLINED)을 남긴다 — 그 회원의 홈
+      "본인이 맞나요?" 카드도 사라진다. 나중에 같은 사람으로 밝혀지면 "다른 이름의 게스트 기록 이어 주기"로 이을 수 있다.
+    - **오류:** `422 MERGE_KIND_MISMATCH` — 게스트 · 이 팀 회원이 아님, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-13, docs/09 3-5.
+    """
+    guest = guest_service.require_guest(db, body.guest_player_id)
+    member = db.get(Player, body.member_player_id)
+    if guest.team_id != team.id or member is None:
+        raise E.NotFound("게스트나 팀원을 찾을 수 없어요.")
+    guest_service.dismiss_candidate(db, guest, member)
+    return Response(status_code=204)
+
+
+@router.get(
+    "/teams/{team_id}/guests/merged", response_model=ItemList[MergeCandidate],
+    responses=errors(_403="FORBIDDEN_ROLE"), summary="기록을 이어 준 게스트",
+)
+def merged_guests(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_or_404)]):
+    """기록을 이어 준(병합한) 게스트와 그 회원의 쌍. 팀원 관리 화면이 "되돌리기"(`:unmerge`)를 붙여 보여 준다.
+
+    - **권한:** 팀 매니저 또는 ADMIN.
+    - **처리:** `players(kind=GUEST, merged_into_player_id IS NOT NULL)` 와 이어 받은 회원. 매니저가 이었든 본인 확인으로 이었든 같다.
+    - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-13, 13.2절 3항, docs/09 3-4.
+    """
+    pairs = guest_service.merged_guests(db, team.id)
+    return ItemList(items=[MergeCandidate(guest=to_card(g, include_grade=True), member=to_card(m, include_grade=True)) for g, m in pairs])
+
+
 @router.patch(
     "/players/{player_id}", response_model=PlayerCard,
     responses=errors(_403="FORBIDDEN_NOT_OWNER"), summary="게스트 정보 수정",
@@ -177,7 +219,8 @@ def unmerge_guest(db: DB, user: CurrentUser, player_id: int):
     """잘못된 병합을 취소해 게스트 레코드를 독립 상태로 되돌린다.
 
     - **권한:** 해당 팀의 매니저 또는 ADMIN.
-    - **처리:** `merged_into_player_id`를 NULL, `status`를 ACTIVE로 되돌린다. 포인터 방식이라 한 번의 갱신.
+    - **처리:** `merged_into_player_id`를 NULL, `status`를 ACTIVE로 되돌리고 실력을 다시 계산한다. 포인터 방식이라 한 번의 갱신.
+      되돌린 짝은 "다른 사람" 으로 남겨(`guest_claims` DECLINED) 병합 후보 · 본인 확인에 다시 뜨지 않는다.
     - **오류:** `404 NOT_FOUND` — 병합 상태가 아님. `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.
     - **설계서:** 7.3절, 6.2절 병합 절차, 13.2절 3항.

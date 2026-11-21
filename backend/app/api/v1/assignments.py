@@ -80,7 +80,8 @@ def run_assignment(db: DB, me: EventManager, user: CurrentUser, event: Annotated
       (모든 분할을 목적함수로 평가), 3팀은 지역 탐색(탐욕 초기해 + 맞바꾸기 · 옮기기 · 흔들기) → ④ 각 팀에 1번·5번 가능자가 있는 해만 남김(없으면 완화+경고) →
       ⑤ 전략별 최솟값을 후보안으로 저장(후보안끼리 편성이 겹치지 않게) → ⑥ 포지션 슬롯 배정과 설명 생성.
       `lock_groups` 에는 묶기 제안(`assignment/suggestions`)에서 승인한 `[게스트, 등록자]` 쌍을 넣는다.
-      같은 회차에서 다시 실행하면 새 run 이 쌓이고 이전 결과는 이력으로 남는다.
+      같은 회차에서 다시 실행하면 확정하지 않은 지난 실행(직접 옮긴 것 포함)은 지워지고, 확정한 실행만 새 안을 확정할 때까지 남는다.
+      경고(`warnings[]`)는 실행 기록에 저장돼 결과를 다시 열어도(`GET /assignments/runs/{id}`) 같이 온다.
     - **오류:** `422 NOT_ENOUGH_PLAYERS / LOCK_GROUP_TOO_LARGE / CONSTRAINT_CONFLICT / SEPARATE_INFEASIBLE /
       LOCK_PARTITION_INFEASIBLE / SQUAD_OVERFLOW / PLAYER_NOT_IN_TEAM` — `details[]`에 문제 그룹·선수.
       `422 ASSIGNMENT_LOCKED` — 쿼터 기록이 있는 일정 (기록이 그날 편성을 근거로 하므로 먼저 지워야 한다).
@@ -110,13 +111,15 @@ def validate_constraints(db: DB, me: EventManager, event: Annotated[Event, Depen
 
 @router.get("/events/{event_id}/assignments", response_model=ItemList[AssignmentRunView], summary="배정 실행 이력")
 def list_runs(db: DB, me: EventManager, event: Annotated[Event, Depends(get_event_or_404)]):
-    """이 회차의 배정 실행을 최신순으로 돌려준다 (재배정 이력 보존).
+    """이 회차의 배정 실행을 최신순으로 돌려준다 — 확정한 실행과, 그 뒤에 짜 보고 아직 확정하지 않은 실행(있으면 하나).
+
+    S-12 는 여기서 확정 안 한 실행을 찾아 "확정 안 한 배정안 이어 보기"를 띄운다.
 
     - **권한:** 팀 매니저 또는 ADMIN.
     - **처리:** `assignment_runs(event_id)` 와 각 run 의 후보안·제약.
     - **오류:** `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
     - **상태:** `구현됨`.
-    - **설계서:** 6.3절 "events → assignment_runs 1:N (재배정 시 이력 누적)".
+    - **설계서:** 6.3절 "events → assignment_runs 1:N", docs/09 2-4.
     """
     return ItemList(items=assignment_service.list_runs(db, event))
 

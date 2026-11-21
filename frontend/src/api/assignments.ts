@@ -15,6 +15,8 @@ export const rankingsApi = {
   latest: (teamId: number) => api<RankingView>(`/teams/${teamId}/rankings/latest`),
   create: (teamId: number, player_ids: number[]) =>
     api<RankingView>(`/teams/${teamId}/rankings`, { method: 'POST', body: { player_ids } }),
+  /** 저장한 순서 버전들(최신순) — "지난 순서 불러오기" */
+  history: (teamId: number) => api<{ items: RankingView[] }>(`/teams/${teamId}/rankings`),
 }
 
 export const assignmentsApi = {

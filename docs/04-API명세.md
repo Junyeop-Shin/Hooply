@@ -52,7 +52,7 @@
 | AiExplanation, AiMessage, AiTactics | AI 설명 (체인 A · B · C, 체인 D 는 RoleSuggestion) |
 | BadgeView, MonthlyMarginView, MonthlyMarginEntry, TutorialView, TutorialStep, TutorialUpdate | 기록 탭 배지 · 월간 코트 마진 · 시작 안내 |
 
-## 4. 엔드포인트 요약 (113개, `/health` 포함)
+## 4. 엔드포인트 요약 (118개, `/health` 포함)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -98,7 +98,10 @@
 | PATCH | `/teams/{team_id}` | 팀 정보 수정 — 소개 · 홈 코트는 `null` 이면 지우고, 팀명 `null` 은 무시 | 200 · 403 |
 | POST | `/teams/{team_id}/code:regenerate` | 팀 코드 재발급 — 옛 코드는 즉시 무효, 제외된(REMOVED) 팀원은 LEFT 로 풀려 새 코드로 돌아올 수 있다 | 200 · 403 |
 | GET | `/teams/{team_id}/players` | 팀원 목록 조회 | 200 |
-| PATCH | `/teams/{team_id}/players/{player_id}/role` | 매니저 권한 부여/회수 | 200 · 403 |
+| PATCH | `/teams/{team_id}/players/{player_id}/role` | 매니저 권한 부여/회수 · 스스로 그만두기 | 200 · 403 |
+| PUT | `/teams/{team_id}/players/{player_id}/positions` | 회원 포지션 수정 (매니저, 이 팀만) | 200 · 400 · 403 · 404 |
+| POST | `/teams/{team_id}/players/{player_id}:unremove` | 제외 풀기 | 200 · 400 · 403 · 404 |
+| POST | `/teams/{team_id}:transfer-owner` | 팀장 넘기기 | 200 · 400 · 403 · 404 |
 | DELETE | `/teams/{team_id}/players/{player_id}` | 팀원 제외 — 매니저는 팀장(또는 ADMIN)만 제외, 팀장은 누구도 제외할 수 없음(`FORBIDDEN_NOT_OWNER`), 마지막 매니저면 422 | 204 · 403 · 422 |
 | POST | `/teams/{team_id}:leave` | 팀 나가기 (유일한 매니저면 422) | 204 · 422 |
 
@@ -109,6 +112,8 @@
 | POST | `/teams/{team_id}/guests` | 게스트 레코드 등록 | 201 · 200 |
 | GET | `/teams/{team_id}/guests` | 기존 게스트 검색 | 200 |
 | GET | `/teams/{team_id}/guests/merge-candidates` | 게스트–회원 병합 후보 | 200 · 403 |
+| POST | `/teams/{team_id}/guests/merge-candidates:dismiss` | 병합 후보 숨기기 (다른 사람이에요) | 204 · 403 · 404 · 422 |
+| GET | `/teams/{team_id}/guests/merged` | 기록을 이어 준 게스트 | 200 · 403 |
 | PATCH | `/players/{player_id}` | 게스트 정보 수정 | 200 · 403 |
 | POST | `/players/{guest_player_id}:merge` | 게스트를 회원 계정에 병합 | 200 · 403 · 409 |
 | GET | `/me/guest-claims` | 내 것일 수 있는 게스트 기록 | 200 |
@@ -243,7 +248,7 @@
 | S-17 프로필 사진 | POST /me/avatar, DELETE /me/avatar, GET /users/{id}/avatar |
 | S-04/S-07 게스트 기록 확인 | GET /me/guest-claims, POST /players/{id}:claim |
 | S-05/06/07 팀 | POST /teams, POST /teams/join, GET /teams/{id}, GET /teams/{id}/players, GET /teams/{id}/events, GET /events/{id}/assignment/adopted |
-| S-08 팀 관리 · S-19 정렬 · S-20 지표 · S-21 리더보드 | PATCH /teams/{id}, POST …/code:regenerate, PATCH …/players/{pid}/role, DELETE …/players/{pid}, GET …/guests/merge-candidates, POST /players/{id}:merge, GET/POST /teams/{id}/rankings, GET /players/{id}/stats, GET /teams/{id}/stats/leaderboard |
+| S-08 팀 관리 · S-19 정렬 · S-20 지표 · S-21 리더보드 | PATCH /teams/{id}, POST …/code:regenerate, PATCH …/players/{pid}/role, PUT …/players/{pid}/positions, DELETE …/players/{pid}, POST …/players/{pid}:unremove, POST /teams/{id}:transfer-owner, GET …/guests/merge-candidates, POST …/merge-candidates:dismiss, GET …/guests/merged, POST /players/{id}:merge, :unmerge, GET/POST /teams/{id}/rankings, GET /players/{id}/stats, GET /teams/{id}/stats/leaderboard |
 | S-09/10/11 일정·참석·게스트 | POST /teams/{id}/events, GET/PATCH/DELETE /events/{id}, POST /events/{id}/rsvp:close, PUT /events/{id}/attendance, PUT /events/{id}/attendances/{pid}, GET /events/{id}/attendances, POST/PATCH/DELETE /events/{id}/guests…, GET /events/{id}/guests/presets |
 | S-12/13/14 배정 | POST /assignments/candidates/{id}/ai-explanation, GET /events/{id}/assignment/adopted/ai-message, GET /events/{id}/assignment/suggestions, POST /events/{id}/assignments:validate, POST /events/{id}/assignments, GET /events/{id}/assignments/last-constraints, GET /assignments/runs/{id}, PATCH /assignments/candidates/{id}, POST …:reset, POST …:adopt, GET /events/{id}/assignment/adopted |
 | S-15 쿼터 · S-22 지난 기록 | GET/PUT/POST /events/{id}/quarters, PATCH/DELETE /quarters/{id} (+ 일정·참석·게스트 API) |

@@ -4,7 +4,7 @@
 /** S-04 홈 (역할별) · S-17 내 프로필 · 내 팀 목록. */
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { ApiError, errorMessage } from '../api/client'
 import { confirm, toast } from '../store/feedback'
@@ -12,13 +12,14 @@ import { toAvatarDataUrl } from '../lib/image'
 import { peerApi } from '../api/peer'
 import { MarginTrend, QuarterList } from '../components/stats'
 import { surveyApi } from '../api/survey'
-import { POSITIONS, SELF_RANK_LABEL, type Position, type UserDetail } from '../api/types'
+import { SELF_RANK_LABEL, type Position, type UserDetail } from '../api/types'
 import { useAuthStore } from '../store/auth'
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, LoadError, SectionTitle, Spinner } from '../components/ui'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { startKakao } from './auth'
 
 import { useMe } from './home'
+import { PositionPicker } from '../components/position-picker'
 
 export function ProfilePage() {
   const me = useMe()
@@ -44,14 +45,16 @@ export function ProfilePage() {
 
             <section>
               <SectionTitle>포지션</SectionTitle>
-              {u.onboarding_completed && p ? (
-                <PositionEditor key={p.playable_positions.join(',')} current={p.playable_positions} />
-              ) : (
-                <Card className="flex items-center justify-between gap-3">
-                  <div><p className="font-semibold text-ink">설문을 마쳐 주세요</p><p className="text-xs text-muted">실력 · 포지션 프로필이 아직 없어요.</p></div>
-                  <Button onClick={() => nav('/survey')}>설문하기</Button>
-                </Card>
-              )}
+              <div className="space-y-2">
+                {/* 설문을 건너뛴 사람도 포지션은 고칠 수 있다 — 비어 있으면 1번 · 5번 확보 계산이 틀어진다 (docs/09 3-8) */}
+                {p && <PositionEditor key={p.playable_positions.join(',')} current={p.playable_positions} />}
+                {!u.onboarding_completed && (
+                  <Card className="flex items-center justify-between gap-3">
+                    <div><p className="font-semibold text-ink">설문을 마쳐 주세요</p><p className="text-xs text-muted">실력 프로필이 아직 없어요.</p></div>
+                    <Button onClick={() => nav('/survey')}>설문하기</Button>
+                  </Card>
+                )}
+              </div>
             </section>
 
             {teams.length > 1 && (
@@ -74,9 +77,10 @@ export function ProfilePage() {
                     <p className="text-sm font-semibold text-ink">내 실력 등급</p>
                     <p className="text-xs text-muted">
                       {current.skill_grade
-                        ? '나만 볼 수 있어요. 경기 기록이 쌓이면 달라져요.'
+                        ? '이 팀 회원들 사이의 위치예요(상위 10% A · 20% B · 40% C · 20% D · 10% E). 설문 · 매니저가 정한 순서에서 출발해 경기 기록이 쌓일수록 경기 결과 쪽으로 옮겨 가요. 나만 볼 수 있어요.'
                         : '설문과 경기 기록이 쌓이면 등급이 생겨요.'}
                     </p>
+                    <Link to="/help#privacy" className="mt-0.5 inline-flex min-h-11 items-center text-xs font-semibold text-brand-ink underline underline-offset-2">등급은 어떻게 정해지나요?</Link>
                   </div>
                 </Card>
                 <Card className="flex items-center gap-3">
@@ -219,7 +223,10 @@ function AccountSection({ user, onLoggedOut }: { user: UserDetail; onLoggedOut: 
           )}
         </Card>
       ) : (
-        <Card><p className="text-sm text-muted">카카오로만 로그인하는 계정이에요. 이메일 비밀번호를 만들려면 로그인 화면의 '비밀번호 찾기'를 써 주세요.</p></Card>
+        // 비밀번호 재설정은 이메일로 계정을 찾는다 — 이메일이 없는 카카오 계정에게는 그 길을 권하지 않는다 (docs/09 3-15)
+        <Card><p className="text-sm text-muted">{user.email
+          ? `카카오로만 로그인하는 계정이에요. 이메일(${user.email})로도 로그인하려면 로그인 화면의 '비밀번호 찾기'로 비밀번호를 만들어 주세요.`
+          : '카카오로만 로그인하는 계정이에요. 카카오에서 이메일을 받지 않아 이메일 로그인은 만들 수 없어요. 카카오로 로그인해 주세요.'}</p></Card>
       )}
       <Button variant="ghost" full className="border border-line" onClick={onLoggedOut}>로그아웃</Button>
       <button
@@ -261,19 +268,7 @@ function PositionEditor({ current }: { current: Position[] }) {
   return (
     <Card className="space-y-3">
       <p className="text-sm text-muted">할 수 있는 포지션을 <b>선호하는 순서대로</b> 눌러 주세요. 다시 누르면 빠져요.</p>
-      <div className="flex gap-1.5">
-        {POSITIONS.map((pos) => {
-          const idx = order.indexOf(pos)
-          return (
-            <button key={pos} type="button" onClick={() => setOrder(idx >= 0 ? order.filter((x) => x !== pos) : [...order, pos])}
-              aria-pressed={idx >= 0}
-              className={`relative min-h-11 flex-1 rounded-lg border text-sm font-bold ${idx >= 0 ? 'border-inverse bg-inverse text-on-inverse' : 'border-line bg-surface text-ink'}`}>
-              {idx >= 0 && <span className="absolute -left-1 -top-1.5 flex size-5 items-center justify-center rounded-full bg-brand text-[11px] text-on-brand">{idx + 1}</span>}
-              {pos}
-            </button>
-          )
-        })}
-      </div>
+      <PositionPicker value={order} onChange={setOrder} />
       <div className="flex gap-2">
         <Button variant="ghost" onClick={() => setEditing(false)}>취소</Button>
         <Button full loading={save.isPending} disabled={order.length === 0} onClick={() => save.mutate()}>저장</Button>

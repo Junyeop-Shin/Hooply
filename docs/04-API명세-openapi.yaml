@@ -679,6 +679,100 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/players/{player_id}/positions:
+    put:
+      summary: 회원 포지션 수정 (매니저)
+      tags:
+      - 팀 · 참가자
+      parameters:
+      - name: player_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PositionsUpdate'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerCard'
+        '403':
+          description: FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/players/{player_id}:unremove:
+    post:
+      summary: 제외 풀기
+      tags:
+      - 팀 · 참가자
+      parameters:
+      - name: player_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerCard'
+        '403':
+          description: FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}:transfer-owner:
+    post:
+      summary: 팀장 넘기기
+      tags:
+      - 팀 · 참가자
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnerTransfer'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamDetail'
+        '403':
+          description: FORBIDDEN_ROLE / FORBIDDEN_NOT_OWNER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /teams/{team_id}:leave:
     post:
       summary: 팀 나가기
@@ -786,6 +880,62 @@ paths:
   /teams/{team_id}/guests/merge-candidates:
     get:
       summary: 게스트–회원 병합 후보
+      tags:
+      - 게스트 관리
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList_MergeCandidate_'
+        '403':
+          description: FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/guests/merge-candidates:dismiss:
+    post:
+      summary: 병합 후보 숨기기 (다른 사람이에요)
+      tags:
+      - 게스트 관리
+      parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeDismiss'
+      responses:
+        '204':
+          description: 성공
+        '403':
+          description: FORBIDDEN_ROLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: MERGE_KIND_MISMATCH
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /teams/{team_id}/guests/merged:
+    get:
+      summary: 기록을 이어 준 게스트
       tags:
       - 게스트 관리
       parameters:
@@ -4352,6 +4502,16 @@ components:
       required:
       - guest
       - member
+    MergeDismiss:
+      properties:
+        guest_player_id:
+          type: integer
+        member_player_id:
+          type: integer
+      type: object
+      required:
+      - guest_player_id
+      - member_player_id
     MergeRequest:
       properties:
         into_player_id:
@@ -4444,6 +4604,13 @@ components:
       type: object
       required:
       - onboarding_completed
+    OwnerTransfer:
+      properties:
+        player_id:
+          type: integer
+      type: object
+      required:
+      - player_id
     PageMeta:
       properties:
         page:

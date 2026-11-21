@@ -11,11 +11,13 @@ import { announceShare, copyText, shareText } from '../lib/kakao'
 import { confirm, toast } from '../store/feedback'
 import { AdoptedSummary } from '../components/adopted'
 import { surveyApi } from '../api/survey'
-import { localISODate, type PlayerCard, type PlayerCardDetailed, type TeamDetail } from '../api/types'
-import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, LoadError, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
+import { localISODate, type PlayerCard, type PlayerCardDetailed, type Position, type TeamDetail } from '../api/types'
+import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, LoadError, RoleBadge, SectionTitle, Sheet, Spinner, TeamStatusBadge } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useFinish } from '../components/layout'
 import { RecordsTab } from '../components/records'
 import { TacticsTab } from '../components/tactics'
+import { GuestRecordsSection } from '../components/guest-records'
+import { PositionPicker } from '../components/position-picker'
 
 const EVENTS_PAGE = 5
 /** 일정 탭이 서버에서 한 번에 받는 일정 수. 더 있으면(meta.has_next) "지난 일정 더 불러오기" 로 다음 묶음을 받는다 */
@@ -195,6 +197,11 @@ export function TeamDetailPage() {
   // 확정 요약은 가장 가까운 확정 일정 하나만 — 일정마다 배정 결과를 따로 부르지 않게
   const nextAdoptedId = sortedEvents.find((e) => e.adopted_candidate_id && e.event_date >= today)?.id
   const upcomingCount = upcomingList.length
+  // 경기 후 투표 안내는 일주일 안에 끝난 일정 중 가장 최근 하나만 — 지난 일정마다 띠가 쌓이지 않게 (docs/09 3-9).
+  // 지난 기록 추가로 넣은 몇 달 전 경기도 여기서 걸러진다. 투표 화면 자체는 링크로 계속 열 수 있다
+  const voteCutoff = localISODate(new Date(Date.now() - 7 * 86_400_000))
+  const voteEvent = pastList.concat(upcomingList).filter((e) => e.survey_open && e.my_attendance === 'ATTEND' && !e.my_survey_submitted && e.event_date >= voteCutoff)
+    .sort((a, b) => b.event_date.localeCompare(a.event_date) || (b.start_time ?? '').localeCompare(a.start_time ?? ''))[0]
 
   if (team.isLoading) return <Screen><TopBar title="팀" back="/" /><Spinner page /></Screen>
   if (team.isError || !team.data) {
@@ -230,6 +237,13 @@ export function TeamDetailPage() {
             </div>
           </div>
         )}
+        {t.status === 'ACTIVE' && (
+          // 활성 팀에서도 팀원 누구나 친구를 초대할 수 있게 (docs/09 3-16)
+          <div className="mt-2 flex items-center justify-between gap-2 text-sm">
+            <span className="text-bar-sub">팀 코드 <button className="min-h-11 font-mono font-bold tracking-[0.15em] text-bar-ink" onClick={() => copyText(t.team_code, '팀 코드를 복사했어요.')} aria-label={`팀 코드 ${t.team_code} 복사`}>{t.team_code}</button></span>
+            <button className="min-h-11 rounded-lg bg-[#FEE500] px-3 text-xs font-semibold text-[#191919]" onClick={() => shareInvite(t.name, t.team_code)}>카카오톡으로 친구 초대</button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-4 border-b border-line bg-surface" role="tablist" aria-label="팀 화면">
@@ -251,6 +265,11 @@ export function TeamDetailPage() {
         <div role="tabpanel" id="team-panel" aria-labelledby={`team-tab-${tab}`} className="space-y-4">
         {tab === 'events' ? (
           <>
+            {voteEvent && (
+              <button onClick={() => nav(`/events/${voteEvent.id}/vote`)} className="flex min-h-11 w-full items-center justify-between rounded-2xl border border-brand-line bg-brand-soft px-4 py-2.5 text-left text-sm font-semibold text-brand-ink">
+                <span>{Number(voteEvent.event_date.slice(5, 7))}/{Number(voteEvent.event_date.slice(8, 10))} 경기 어땠어요? 같이 뛰고 싶은 사람 뽑기 (30초)</span><span>→</span>
+              </button>
+            )}
             {isManager && (
               <div>
                 {eventBlock && <p className="mb-1.5 px-1 text-xs text-muted">{eventBlock}</p>}
@@ -264,11 +283,6 @@ export function TeamDetailPage() {
               <div className="space-y-2">
                 {sortedEvents.slice(page * EVENTS_PAGE, page * EVENTS_PAGE + EVENTS_PAGE).map((e) => (
                   <div key={e.id}>
-                    {e.survey_open && e.status !== 'CANCELED' && e.my_attendance === 'ATTEND' && !e.my_survey_submitted && (
-                      <button onClick={() => nav(`/events/${e.id}/vote`)} className="mb-1 flex min-h-11 w-full items-center justify-between rounded-2xl border border-brand-line bg-brand-soft px-4 py-2.5 text-left text-sm font-semibold text-brand-ink">
-                        <span>{Number(e.event_date.slice(5, 7))}/{Number(e.event_date.slice(8, 10))} 경기 어땠어요? 같이 뛰고 싶은 사람 뽑기 (30초)</span><span>→</span>
-                      </button>
-                    )}
                     <EventRow e={e} withDetail={!!e.adopted_candidate_id && e.event_date >= today} past={e.event_date < today} />
                     {e.id === nextAdoptedId && <AdoptedSummary eventId={e.id} isManager={isManager} />}
                   </div>
@@ -421,16 +435,39 @@ function MembersManager({ team: t }: { team: TeamDetail }) {
       if (others.length === 0) { toast('매니저가 1명뿐이라 해제할 수 없어요. 먼저 다른 팀원을 매니저로 지정해 주세요.', 'error'); return }
       if (isMe) {
         const next = [...others].sort((a, b) => a.id - b.id)[0]  // 서버와 같은 규칙: 가장 먼저 매니저가 된 사람
-        const ok = await confirm({
+        const ok = await confirm(isOwner ? {
           title: '내 매니저 권한을 해제할까요?',
-          body: `팀장 권한이 ${next.display_name}님에게 넘어가고, 이 팀 관리 화면에 더 이상 들어올 수 없어요. 되돌리려면 ${next.display_name}님이 다시 지정해 줘야 해요.`,
+          body: `팀장 권한이 ${next.display_name}님에게 넘어가고, 이 팀 관리 화면에 더 이상 들어올 수 없어요. 다른 사람에게 넘기려면 그 사람 메뉴의 "팀장 넘기기"를 먼저 써 주세요.`,
           confirmLabel: '해제하기', danger: true,
+        } : {
+          title: '매니저를 그만둘까요?',
+          body: '이 팀 관리 화면에 더 이상 들어올 수 없어요. 다시 매니저가 되려면 팀장이 지정해 줘야 해요.',
+          confirmLabel: '그만두기', danger: true,
         })
         if (!ok) return
       }
     }
     setRole.mutate({ pid: p.id, role: demote ? 'PLAYER' : 'MANAGER' })
   }
+  const transfer = useMutation({
+    mutationFn: (pid: number) => teamsApi.transferOwner(id, pid),
+    onSuccess: () => { toast('팀장을 넘겼어요. 나는 매니저로 남아요.'); setOpen(null); refresh() },
+    onError: (e) => toast(errMsg(e, '팀장을 넘기지 못했어요.'), 'error'),
+  })
+  // 실수로 제외한 사람을 한 명씩 푼다 — 코드 재발급은 모두를 풀고 초대 링크까지 바꾼다 (docs/09 3-7)
+  const removed = useQuery({ queryKey: ['team', id, 'removed'], queryFn: () => teamsApi.removedPlayers(id) })
+  const unremove = useMutation({
+    mutationFn: (pid: number) => teamsApi.unremove(id, pid),
+    onSuccess: (p) => { toast(`${p.display_name}님의 제외를 풀었어요. 지금 팀 코드로 다시 들어올 수 있어요.`); refresh() },
+    onError: (e) => toast(errMsg(e, '제외를 풀지 못했어요.'), 'error'),
+  })
+  const [posFor, setPosFor] = useState<PlayerCard | null>(null)  // 포지션을 고치는 회원
+  const [posOrder, setPosOrder] = useState<Position[]>([])
+  const savePos = useMutation({
+    mutationFn: () => teamsApi.setMemberPositions(id, posFor!.id, posOrder),
+    onSuccess: () => { toast(`${posFor!.display_name}님의 포지션을 고쳤어요.`); setPosFor(null); setOpen(null); refresh() },
+    onError: (e) => toast(errMsg(e, '포지션을 저장하지 못했어요.'), 'error'),
+  })
   const [editTeam, setEditTeam] = useState(false)
   const [tf, setTf] = useState({ name: '', description: '', home_court: '' })
   const saveTeam = useMutation({
@@ -448,12 +485,6 @@ function MembersManager({ team: t }: { team: TeamDetail }) {
     mutationFn: () => teamsApi.regenerateCode(id),
     onSuccess: (r) => { toast(`새 팀 코드는 ${r.team_code}예요. 팀원에게 다시 보내 주세요.`); refresh() },
     onError: (e) => toast(errMsg(e, '새 코드를 받지 못했어요.'), 'error'),
-  })
-  const candidates = useQuery({ queryKey: ['team', id, 'merge-candidates'], queryFn: () => teamsApi.mergeCandidates(id) })
-  const merge = useMutation({
-    mutationFn: ({ guest, into }: { guest: number; into: number }) => teamsApi.mergeGuest(guest, into),
-    onSuccess: () => { toast('기록을 이어 줬어요.'); refresh(); qc.invalidateQueries({ queryKey: ['stats'] }) },
-    onError: (e) => toast(errMsg(e, '기록을 이어 주지 못했어요.'), 'error'),
   })
 
   type SortKey = 'position' | 'skill' | 'attendance'
@@ -523,17 +554,31 @@ function MembersManager({ team: t }: { team: TeamDetail }) {
                         <button className="min-h-11 rounded-xl bg-surface text-xs font-semibold text-ink shadow-sm active:bg-sunken" onClick={() => nav(`/teams/${id}/players/${p.id}`)}>실력 보기</button>
                         {isOwner ? (
                           <button className="min-h-11 rounded-xl bg-surface text-xs font-semibold text-ink shadow-sm active:bg-sunken disabled:opacity-50" disabled={setRole.isPending} onClick={() => changeRole(p, isMe, managers)}>{p.role === 'MANAGER' ? '매니저 해제' : '매니저 지정'}</button>
+                        ) : isMe && p.role === 'MANAGER' ? (
+                          // 위임받은 매니저도 스스로 그만둘 수 있다 (docs/09 3-14)
+                          <button className="min-h-11 rounded-xl bg-surface text-xs font-semibold text-ink shadow-sm active:bg-sunken disabled:opacity-50" disabled={setRole.isPending} onClick={() => changeRole(p, isMe, managers)}>매니저 그만두기</button>
                         ) : (
                           <button className="min-h-11 rounded-xl bg-surface px-1 text-xs font-semibold leading-tight text-muted shadow-sm" onClick={() => toast('매니저 지정 · 해제는 팀장(팀을 만든 사람)만 할 수 있어요.')}>팀장만 바꿀 수 있어요</button>
                         )}
                         <button
                           className="min-h-11 rounded-xl bg-surface px-1 text-xs font-semibold text-danger-ink shadow-sm active:bg-danger-soft disabled:text-faint disabled:opacity-60"
                           disabled={!!removeBlock || remove.isPending}
-                          onClick={async () => { if (await confirm({ title: `${p.display_name}님을 팀에서 제외할까요?`, body: '경기 기록은 남아요. 지금 팀 코드로는 다시 들어올 수 없어요. 팀 코드를 새로 받으면 그 코드로 돌아올 수 있어요.', confirmLabel: '제외하기', danger: true })) remove.mutate(p.id) }}
+                          onClick={async () => { if (await confirm({ title: `${p.display_name}님을 팀에서 제외할까요?`, body: '경기 기록은 남아요. 지금 팀 코드로는 다시 들어올 수 없어요. 실수였다면 아래 "제외한 사람"에서 풀 수 있어요.', confirmLabel: '제외하기', danger: true })) remove.mutate(p.id) }}
                         >
                           팀에서 제외
                         </button>
                         {removeBlock && <p className="col-span-3 text-right text-xs text-muted">{removeBlock}</p>}
+                        <button className="col-span-3 min-h-11 rounded-xl bg-surface text-xs font-semibold text-ink shadow-sm active:bg-sunken" onClick={() => { setPosOrder(p.playable_positions); setPosFor(p) }}>
+                          포지션 고치기{p.playable_positions.length === 0 ? ' (아직 없음)' : ''}
+                        </button>
+                        {isOwner && !isMe && (
+                          <button
+                            className="col-span-3 min-h-11 rounded-xl bg-surface text-xs font-semibold text-ink shadow-sm active:bg-sunken disabled:opacity-50" disabled={transfer.isPending}
+                            onClick={async () => { if (await confirm({ title: `${p.display_name}님에게 팀장을 넘길까요?`, body: `${p.display_name}님이 팀장이 되어 매니저를 지정 · 해제할 수 있어요. 나는 매니저로 남아요. 되돌리려면 ${p.display_name}님이 다시 넘겨 줘야 해요.`, confirmLabel: '팀장 넘기기' })) transfer.mutate(p.id) }}
+                          >
+                            팀장 넘기기
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -543,24 +588,28 @@ function MembersManager({ team: t }: { team: TeamDetail }) {
           )}
         </section>
 
-        {candidates.data && candidates.data.items.length > 0 && (
+        {posFor && (
+          <Sheet label={`${posFor.display_name} 포지션 고치기`} title={`${posFor.display_name}님의 포지션`} onClose={() => setPosFor(null)} tall={false}>
+            <div className="space-y-3">
+              <p className="text-sm text-muted">할 수 있는 포지션을 <b>선호하는 순서대로</b> 눌러 주세요. 이 팀에만 적용되고, 본인이 프로필에서 고치면 그 값으로 바뀌어요.</p>
+              <PositionPicker value={posOrder} onChange={setPosOrder} />
+              <Button full loading={savePos.isPending} disabled={posOrder.length === 0} onClick={() => savePos.mutate()}>저장</Button>
+            </div>
+          </Sheet>
+        )}
+
+        <GuestRecordsSection teamId={id} members={members} />
+
+        {(removed.data?.items.length ?? 0) > 0 && (
           <section>
-            <SectionTitle>기록을 이어 줄 수 있는 게스트</SectionTitle>
-            <Alert kind="info">같은 이름의 게스트 기록이 있어요. 같은 사람이면 기록을 이어 주세요. 이름만 같은 다른 사람일 수 있으니 확인한 뒤 눌러 주세요.</Alert>
-            <div className="mt-2 space-y-2">
-              {candidates.data.items.map((c) => (
-                <Card key={`${c.guest.id}-${c.member.id}`} className="flex items-center gap-3 py-3">
-                  <div className="min-w-0 flex-1 text-sm">
-                    <p className="font-semibold text-ink">게스트 {c.guest.display_name} <span className="text-faint">→</span> 팀원 {c.member.display_name}</p>
-                    <p className="text-xs text-muted">게스트 때 배정 · 경기 · 투표 기록이 이 팀원 기록으로 이어져요. 나중에 되돌릴 수 있어요.</p>
-                  </div>
-                  {/* 누른 줄에만 도는 표시 — 다른 줄은 잠깐 누를 수 없게만 */}
-                  <Button
-                    className="shrink-0 whitespace-nowrap text-sm" disabled={merge.isPending} loading={merge.isPending && merge.variables?.guest === c.guest.id}
-                    onClick={async () => { if (await confirm({ title: '게스트 기록을 이어 줄까요?', body: `게스트 ${c.guest.display_name}의 배정 · 경기 · 투표 기록이 ${c.member.display_name}님 기록으로 이어져요. 나중에 되돌릴 수 있어요.`, confirmLabel: '기록 이어 주기' })) merge.mutate({ guest: c.guest.id, into: c.member.id }) }}
-                  >
-                    기록 이어 주기
-                  </Button>
+            <SectionTitle>제외한 사람 {removed.data!.items.length}</SectionTitle>
+            <p className="mb-2 px-1 text-xs text-muted">지금 팀 코드로 다시 들어올 수 없는 사람이에요. 풀면 지금 코드로 돌아올 수 있어요(팀원으로 바로 넣지는 않아요).</p>
+            <div className="space-y-2">
+              {removed.data!.items.map((p) => (
+                <Card key={p.id} className="flex items-center gap-3 py-3">
+                  <Avatar name={p.display_name} src={p.profile_image_url} size="sm" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{p.display_name}</span>
+                  <Button variant="ghost" className="shrink-0 text-sm" disabled={unremove.isPending} loading={unremove.isPending && unremove.variables === p.id} onClick={() => unremove.mutate(p.id)}>제외 풀기</Button>
                 </Card>
               ))}
             </div>
@@ -620,14 +669,14 @@ function MembersManager({ team: t }: { team: TeamDetail }) {
             <p className="text-xs text-muted">실력 정렬</p>
             <p className="text-sm font-semibold text-ink">팀원 순서를 매기면 처음 실력에 반영돼요</p>
           </div>
-          <Button variant="ghost" className="text-sm" onClick={() => nav(`/teams/${id}/ranking`)}>정렬하기</Button>
+          <Button variant="ghost" className="shrink-0 whitespace-nowrap text-sm" onClick={() => nav(`/teams/${id}/ranking`)}>정렬하기</Button>
         </Card>
         <Card className="flex items-center justify-between">
           <div>
             <p className="text-xs text-muted">지난 기록 추가</p>
             <p className="text-sm font-semibold text-ink">앱을 쓰기 전 경기 기록 남기기</p>
           </div>
-          <Button variant="ghost" className="text-sm" onClick={() => nav(`/teams/${id}/records/new`)}>추가하기</Button>
+          <Button variant="ghost" className="shrink-0 whitespace-nowrap text-sm" onClick={() => nav(`/teams/${id}/records/new`)}>추가하기</Button>
         </Card>
           </div>
         </section>

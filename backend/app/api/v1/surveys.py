@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser, TeamMember, get_team_or_404
 from app.api.v1._docs import errors
-from app.models import Player, PlayerPosition, Team
+from app.models import Player, Team
 from app.models.enums import PlayerStatus
 from app.schemas.survey import (
     MyProfile,
@@ -94,27 +94,11 @@ def update_positions(db: DB, user: CurrentUser, body: PositionsUpdate):
     - **상태:** `구현됨`.
     - **설계서:** 7.3절 (`PUT /me/positions`), 6.2절 `player_positions`, 9.5절 5단계 하드 제약.
     """
-    seen = set()
-    for p in body.positions:
-        if p.position in seen:
-            from app.core import errors as E
-
-            raise E.ValidationError(f"{p.position} 포지션을 두 번 골랐어요.")
-        seen.add(p.position)
+    survey_service.check_unique_positions(body.positions)
     user.position_prefs = [p.position.value for p in body.positions]  # 팀이 없어도 저장되는 원본
     players = db.scalars(select(Player).where(Player.user_id == user.id, Player.status == PlayerStatus.ACTIVE)).all()
     for pl in players:
-        for old in list(pl.positions):
-            db.delete(old)
-        db.flush()  # 같은 flush 안에서는 INSERT 가 DELETE 보다 먼저 나가 UNIQUE(player_id, position) 에 걸린다
-        pl.positions = [
-            PlayerPosition(
-                player_id=pl.id, position=p.position, can_play=p.can_play,
-                preference_rank=p.preference_rank if p.preference_rank is not None else i + 1,
-                self_rating=p.self_rating,
-            )
-            for i, p in enumerate(body.positions)
-        ]
+        survey_service.replace_positions(db, pl, body.positions)
     db.commit()
     return survey_service.my_profile(db, user)
 

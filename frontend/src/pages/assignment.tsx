@@ -54,7 +54,8 @@ export function AssignPage() {
   const [dismissed, setDismissed] = useState<number[]>([])
   const [msg, setMsg] = useState<string | null>(null)
   // 돌아왔을 때 조건 되살리기: 이 탭에서 고치던 조건 > 이 일정의 마지막 실행 조건 (lib/assign-draft)
-  const runs = useQuery({ queryKey: ['events', id, 'runs'], queryFn: () => assignmentsApi.runs(id), retry: false })
+  // 결과 화면에서 자리를 옮기고 돌아올 수 있어 늘 새로 받는다 (아래 "확정 안 한 배정안" 이 옮긴 것을 알아야 한다)
+  const runs = useQuery({ queryKey: ['events', id, 'runs'], queryFn: () => assignmentsApi.runs(id), retry: false, refetchOnMount: 'always' })
   const [hydrated, setHydrated] = useState(false)
 
   const attendees: AttendanceView[] = useMemo(() => att.data?.items.filter((a) => a.status === 'ATTEND') ?? [], [att.data])
@@ -151,6 +152,13 @@ export function AssignPage() {
   const checking = attendees.length > 0 && !checkFailed && (!current || validate.isLoading)  // 0.3초 모으는 중이거나 확인 요청이 가는 중
   const runHint = locked ? '경기 기록이 있어 다시 나눌 수 없어요.' : attendees.length === 0 ? '참석자가 있어야 나눌 수 있어요.' : checking ? '조건 확인 중…' : !feasible ? '위 안내대로 조건을 풀면 나눌 수 있어요.' : null
   const hasConstraints = locks.length > 0 || seps.length > 0 || Object.keys(pins).length > 0
+  // 확정하지 않은 실행은 하나만 남는다(새로 나누면 지워진다) — 그 안으로 돌아가는 길과, 직접 옮긴 안을 지우기 전 확인 (docs/09 2-4)
+  const pendingRun = runs.data?.items.find((r) => !r.candidates.some((c) => c.is_adopted))
+  const pendingEdited = !!pendingRun?.candidates.some((c) => c.squads.some((sq) => sq.manual_override_ids.length > 0))
+  const runAsk = async () => {
+    if (pendingEdited && !(await confirm({ title: '직접 옮긴 배정안이 지워져요', body: '확정하지 않은 배정안에서 옮겨 둔 자리는 새로 나누면 사라져요. 그래도 새로 나눌까요?', confirmLabel: '새로 나누기', danger: true }))) return
+    run.mutate()
+  }
   const loadLastAsk = async () => {
     if (hasConstraints && !(await confirm({ title: '지난 일정 조건으로 바꿀까요?', body: '지금 걸어 둔 묶기 · 갈라놓기 · 미리 배치는 지워져요.', confirmLabel: '불러오기' }))) return
     loadLast.mutate()
@@ -170,6 +178,15 @@ export function AssignPage() {
               <p className="text-xs text-muted">지금 마감하면 참석자가 확정되고 팀원은 응답을 바꿀 수 없어요.</p>
             </div>
             <Button variant="secondary" className="shrink-0 whitespace-nowrap text-sm" loading={closeRsvp.isPending} onClick={async () => { if (await confirm(CLOSE_RSVP_CONFIRM)) closeRsvp.mutate() }}>응답 마감</Button>
+          </Card>
+        )}
+        {pendingRun && !locked && (
+          <Card className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-ink">확정하지 않은 배정안이 있어요</p>
+              <p className="text-xs text-muted">{pendingEdited ? '직접 옮긴 자리까지 그대로 있어요. ' : ''}새로 나누면 이 안은 지워져요.</p>
+            </div>
+            <Button variant="secondary" className="shrink-0 whitespace-nowrap text-sm" onClick={() => nav(`/assignments/runs/${pendingRun.id}`)}>이어 보기</Button>
           </Card>
         )}
         {ev.data.adopted_candidate_id && <Alert kind="warn">이미 확정된 배정이 있어요. 새로 나눈 배정안을 확정하기 전까지는 지금 배정이 그대로 보여요.</Alert>}
@@ -328,7 +345,7 @@ export function AssignPage() {
       </Content>
       <BottomAction>
         {runHint && <p className="mb-2 px-1 text-xs text-muted" role="status">{runHint}</p>}
-        <Button full loading={run.isPending} disabled={!feasible || locked} onClick={() => run.mutate()}>{teams === 3 ? '3팀으로 ' : ''}3가지 배정안 만들기</Button>
+        <Button full loading={run.isPending} disabled={!feasible || locked} onClick={runAsk}>{teams === 3 ? '3팀으로 ' : ''}3가지 배정안 만들기</Button>
       </BottomAction>
     </Screen>
   )

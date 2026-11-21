@@ -58,6 +58,8 @@ describe('EventCreatePage', () => {
   })
 
   it('채우기는 값만 넣고 일정을 만들지 않는다 (날짜·마감은 일주일 뒤)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })  // 오늘 이후가 될 때까지 일주일씩 미루므로 '오늘'을 9/10 으로 고정한다
+    vi.setSystemTime(new Date('2026-09-10T12:00:00'))
     const user = userEvent.setup()
     renderPage()
     await user.click(await screen.findByRole('button', { name: '이 내용으로 채우기' }))
@@ -76,6 +78,7 @@ describe('EventCreatePage', () => {
     await user.type(input('제목 (선택)'), '번개 모임')
     await user.click(screen.getByRole('button', { name: '등록하고 응답 받기' }))
     expect(eventsApi.create).toHaveBeenCalledWith(1, expect.objectContaining({ title: '번개 모임', event_date: '2026-09-13' }))
+    vi.useRealTimers()
   })
 
   it('시작 시각을 바꾸면 종료가 2시간 뒤로 따라온다', async () => {
@@ -109,13 +112,14 @@ describe('EventCreatePage', () => {
     expect(input('종료')).toHaveValue('21:00')  // 채우기 후에도 따라온다
   })
 
-  it('시작이 늦어 종료가 자정을 넘으면 23:59 에서 멈춘다', async () => {
+  it('시작이 늦어 종료가 자정을 넘으면 다음 날로 감고 그렇게 알려 준다 (docs/09 2-13)', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByRole('button', { name: '이 내용으로 채우기' })
     await user.clear(input('시작'))
     await user.type(input('시작'), '23:00')
-    expect(input('종료')).toHaveValue('23:59')
+    expect(input('종료')).toHaveValue('01:00')
+    expect(screen.getByText('다음 날 끝나요')).toBeInTheDocument()
   })
 
   it('마감 날짜를 고르면 마감 시각이 밤 10시로 채워진다', async () => {

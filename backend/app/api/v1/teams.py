@@ -25,7 +25,9 @@ from app.core import errors as E
 from app.models import Player, Team, User
 from app.models.enums import GlobalRole, PlayerKind, PlayerStatus, TeamRole
 from app.schemas.common import ItemList, PlayerCard, PlayerCardDetailed, UserSummary
+from app.schemas.survey import PositionsUpdate
 from app.schemas.team import (
+    OwnerTransfer,
     RoleUpdate,
     TeamCodeView,
     TeamCreate,
@@ -34,7 +36,7 @@ from app.schemas.team import (
     TeamJoinRequest,
     TeamUpdate,
 )
-from app.services import player_service, team_service
+from app.services import player_service, survey_service, team_service
 
 router = APIRouter(tags=["팀 · 참가자"])
 
@@ -207,8 +209,8 @@ def list_players(
 def update_role(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_or_404)], player_id: int, body: RoleUpdate):
     """팀원의 역할을 MANAGER 또는 PLAYER로 바꾼다.
 
-    - **권한:** **팀장**(팀을 만든 사람, `teams.owner_user_id`) 또는 ADMIN. 위임받은 매니저는 역할을 바꿀 수 없다
-      (플레이어 < 매니저 < 팀장 3단계).
+    - **권한:** **팀장**(팀을 만든 사람, `teams.owner_user_id`) 또는 ADMIN. 위임받은 매니저는 남의 역할을 바꿀 수 없고
+      (플레이어 < 매니저 < 팀장 3단계) **스스로 매니저를 그만두는 것**(자기 자신을 PLAYER 로)만 할 수 있다.
     - **처리:** 대상이 이 팀의 참가자인지 확인한다. 게스트에게는 매니저 권한을 줄 수 없다.
       MANAGER → PLAYER 회수 시 팀에 다른 활성 매니저가 남아 있어야 한다. 팀장이 스스로 내려오면 가장 먼저
       매니저가 된 사람(players.id 최소)에게 팀장 권한이 넘어간다. 부여 시 `role_granted_by`에 부여한 사용자를 기록한다.
@@ -223,8 +225,10 @@ def update_role(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_
         raise E.NotFound("이 사람을 찾을 수 없어요.")
     if target.kind == PlayerKind.GUEST:
         raise E.ValidationError("게스트에게는 매니저 권한을 줄 수 없어요.")
-    # 권한 부여·회수는 팀장(팀을 만든 사람, teams.owner_user_id)만. 위임받은 매니저는 다른 사람의 역할을 바꿀 수 없다
-    if me.user_id != team.owner_user_id and (me.id is not None):  # id 가 None 이면 비소속 ADMIN 의 가상 매니저
+    # 권한 부여·회수는 팀장(팀을 만든 사람, teams.owner_user_id)만. 위임받은 매니저는 다른 사람의 역할을 바꿀 수 없다.
+    # 다만 스스로 매니저를 그만두는 것은 누구나 (docs/09 3-14) — 마지막 매니저 검사는 아래에서 똑같이 한다
+    resigning = target.id == me.id and body.role == TeamRole.PLAYER
+    if me.user_id != team.owner_user_id and (me.id is not None) and not resigning:  # id 가 None 이면 비소속 ADMIN 의 가상 매니저
         raise E.ForbiddenRole("팀장(팀을 만든 매니저)만 매니저 권한을 바꿀 수 있어요.")
     if body.role == TeamRole.PLAYER and target.role == TeamRole.MANAGER:
         others = db.scalars(
@@ -242,6 +246,78 @@ def update_role(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_
     target.role_granted_by = me.user_id if body.role == TeamRole.MANAGER else None
     db.commit()
     return player_service.to_card(target, include_grade=True)
+
+
+@router.put(
+    "/teams/{team_id}/players/{player_id}/positions", response_model=PlayerCard,
+    responses=errors(_403="FORBIDDEN_ROLE"), summary="회원 포지션 수정 (매니저)",
+)
+def update_member_positions(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_or_404)], player_id: int, body: PositionsUpdate):
+    """설문을 안 했거나 포지션이 실제와 다른 회원의 포지션을 매니저가 고친다.
+
+    - **권한:** 팀 매니저 또는 ADMIN.
+    - **처리:** **이 팀의** `player_positions` 만 바꾼다 — 그 사람의 다른 팀과 본인 계정의 선호(`users.position_prefs`)는
+      건드리지 않는다. 목록 순서가 선호 순서다. 1번 · 5번 가능 여부는 다음 배정부터 반영된다.
+      본인이 프로필에서 다시 고치면 그 값이 소속 팀 모두에 적용된다.
+    - **오류:** `400 VALIDATION_ERROR` — 중복 포지션 · 게스트(게스트는 게스트 수정으로), `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-07, 9.5절 5단계, docs/09 3-8.
+    """
+    target = db.get(Player, player_id)
+    if target is None or target.team_id != team.id or target.status != PlayerStatus.ACTIVE:
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
+    if target.kind != PlayerKind.MEMBER:
+        raise E.ValidationError("게스트 포지션은 게스트 고치기에서 바꿔 주세요.")
+    survey_service.check_unique_positions(body.positions)
+    survey_service.replace_positions(db, target, body.positions)
+    db.commit()
+    db.refresh(target)
+    return player_service.to_card(target, include_grade=True)
+
+
+@router.post(
+    "/teams/{team_id}/players/{player_id}:unremove", response_model=PlayerCard,
+    responses=errors(_403="FORBIDDEN_ROLE"), summary="제외 풀기",
+)
+def unremove_player(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_or_404)], player_id: int):
+    """실수로 제외한 회원 한 명의 제외를 푼다. 지금 팀 코드로 다시 들어올 수 있다.
+
+    - **권한:** 팀 매니저 또는 ADMIN.
+    - **처리:** `players.status` REMOVED → LEFT (스스로 나간 것과 같은 상태). 바로 팀원으로 되돌리지 않고 본인이 코드로
+      다시 들어온다 — 역할은 PLAYER. 팀 코드 재발급(제외한 모두가 풀리고 초대 링크가 무효)과 따로 쓴다.
+      제외한 사람 목록은 `GET /teams/{id}/players?status=REMOVED`.
+    - **오류:** `400 VALIDATION_ERROR` — 제외 상태가 아님, `404 NOT_FOUND`, `403 FORBIDDEN_ROLE`.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-05 · FR-07, docs/09 3-7.
+    """
+    target = db.get(Player, player_id)
+    if target is None or target.team_id != team.id:
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
+    return player_service.to_card(team_service.unremove(db, team, target))
+
+
+@router.post(
+    "/teams/{team_id}:transfer-owner", response_model=TeamDetail,
+    responses=errors(_403=("FORBIDDEN_ROLE", "FORBIDDEN_NOT_OWNER")), summary="팀장 넘기기",
+)
+def transfer_owner(db: DB, me: TeamManager, team: Annotated[Team, Depends(get_team_or_404)], body: OwnerTransfer):
+    """팀장을 고른 팀원에게 넘긴다.
+
+    - **권한:** 팀장만 (ADMIN 도 팀장이 아니면 안 된다 — 팀장 교체는 팀 안의 일).
+    - **처리:** 받는 사람이 매니저가 아니면 매니저로 올리고 `teams.owner_user_id` 를 바꾼다. 넘긴 사람은 매니저로 남는다
+      (그만두려면 넘긴 뒤 "매니저 그만두기").
+    - **오류:** `403 FORBIDDEN_NOT_OWNER` — 팀장이 아님, `400 VALIDATION_ERROR` — 이 팀의 활성 회원이 아님 · 나 자신,
+      `404 NOT_FOUND`.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-07, 3.1절 팀장, docs/09 3-14.
+    """
+    target = db.get(Player, body.player_id)
+    if target is None or target.team_id != team.id:
+        raise E.NotFound("이 사람을 찾을 수 없어요.")
+    if me.id is None:
+        raise E.ForbiddenNotOwner("팀장만 팀장을 넘길 수 있어요.")
+    team_service.transfer_owner(db, team, me, target)
+    return _detail(db, team, me)
 
 
 @router.post("/teams/{team_id}:leave", status_code=204, responses=errors(_422="CANNOT_DEMOTE_LAST_MANAGER"), summary="팀 나가기")

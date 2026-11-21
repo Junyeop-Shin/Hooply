@@ -180,10 +180,10 @@ Table of Contents
 
 ### 팀장 (OWNER) · 팀 매니저 (MANAGER)
 
-- 팀 정보 수정, 팀 코드 재발급, 팀원 초대(카카오톡) · 제외 (제외된 회원은 지금 코드로는 다시 가입할 수 없다 — 코드를 재발급하면 제외가 풀려 새 코드를 받은 사람만 돌아온다)
-- (팀장) 다른 팀원에게 매니저 권한 부여 / 회수, 매니저 제외
+- 팀 정보 수정, 팀 코드 재발급, 팀원 초대(카카오톡) · 제외 (제외된 회원은 지금 코드로는 다시 가입할 수 없다 — 매니저가 그 사람의 제외를 풀거나, 코드를 재발급하면 새 코드를 받은 사람이 돌아온다)
+- (팀장) 다른 팀원에게 매니저 권한 부여 / 회수, 매니저 제외, 팀장 넘기기. (위임 매니저) 스스로 그만두기
 - 일정 등록 · 수정 · 삭제, 응답 미리 마감, 대리 참석 응답, 지난 기록 추가
-- **팀원 실력 정렬** (F14), 게스트 등급 즉시 수정, 게스트 → 회원 병합
+- **팀원 실력 정렬** (F14), 회원 포지션 수정(이 팀만), 게스트 등급 즉시 수정, 게스트 → 회원 병합 · 되돌리기
 - **팀 배정 실행** — 회차별 제약(묶기 · 갈라놓기 · 미리 배치), 3팀 선택, 3가지 전략 후보안 → 수정 → 확정
 - 배정 결과의 수치 · 설명 · AI 배정 설명, 선수별 실력 근거 열람
 - 쿼터별 경기 기록 입력 · 수정
@@ -240,29 +240,29 @@ Table of Contents
 | FR-02 | 비밀번호는 bcrypt 해시로 저장한다 | SYSTEM | — | — | — |
 | FR-03 | 가입 직후 설문에 응답하면 실력·포지션 프로필이 생긴다 | PLAYER | F1 | S-03 | `GET /surveys/onboarding`, `POST /surveys/onboarding/responses` |
 | FR-04 | 팀을 만들면 코드가 발급되고 생성자는 팀장이 된다 | PLAYER | F2 | S-05 | `POST /teams` |
-| FR-05 | 팀 코드로 가입한다. 초대 링크는 코드를 미리 채운다. 스스로 나간 팀은 코드로 다시 들어올 수 있지만, 매니저가 제외한 팀은 코드가 재발급되기 전까지 들어올 수 없다(`403 REMOVED_FROM_TEAM`). 재발급하면 제외가 풀려 새 코드로는 돌아올 수 있다 | PLAYER | F2 | S-06 | `POST /teams/join` |
+| FR-05 | 팀 코드로 가입한다. 초대 링크는 코드를 미리 채운다. 스스로 나간 팀은 코드로 다시 들어올 수 있지만, 매니저가 제외한 팀은 매니저가 그 사람의 제외를 풀거나 코드를 재발급하기 전까지 들어올 수 없다(`403 REMOVED_FROM_TEAM`). 매니저가 없는 팀에 들어오면 그 사람이 매니저가 된다 | PLAYER | F2 | S-06 | `POST /teams/join`, `POST /teams/{id}/players/{pid}:unremove` |
 | FR-06 | 관리자 승인 후 5명 이상이면 팀이 활성화된다 | SYSTEM, ADMIN | F2, F12 | S-07, 관리자 콘솔 | `POST /admin/teams/{id}:approve` |
-| FR-07 | 팀장은 매니저 권한을 부여·회수하고, 매니저는 팀원을 제외한다. 매니저를 제외하는 것은 팀장만 할 수 있고, 팀장은 누구도 제외할 수 없다(`403 FORBIDDEN_NOT_OWNER`) | OWNER, MANAGER | F3 | S-08 | `PATCH /teams/{id}/players/{pid}/role`, `DELETE /teams/{id}/players/{pid}` |
+| FR-07 | 팀장은 매니저 권한을 부여·회수하고 팀장을 다른 팀원에게 넘길 수 있다. 매니저는 팀원을 제외하고 스스로 매니저를 그만둘 수 있다. 매니저를 제외하는 것은 팀장만 할 수 있고, 팀장은 누구도 제외할 수 없다(`403 FORBIDDEN_NOT_OWNER`) | OWNER, MANAGER | F3 | S-08 | `PATCH /teams/{id}/players/{pid}/role`, `DELETE /teams/{id}/players/{pid}`, `POST /teams/{id}:transfer-owner` |
 | FR-08 | 매니저는 일정을 등록·수정·취소하고 응답을 미리 마감할 수 있다. 미리 마감한 응답은 팀 확정 전 · 마감 시각 전이면 다시 받을 수 있고, 마감을 앞으로 늦춰도 다시 열린다 | MANAGER | F4 | S-09, S-10 | `POST/PATCH/DELETE /events…`, `POST /events/{id}/rsvp:close` · `:reopen` |
 | FR-09 | 플레이어는 마감 전까지 참석/불참을 바꿀 수 있다. 마감 · 확정 뒤에는 매니저만 바꾼다. 마감을 정하지 않았어도 일정이 끝나면(종료 시각, 없으면 그날 23:59) 응답이 닫힌다(매니저 대리 변경은 계속 된다) | PLAYER | F4 | S-10 | `PUT /events/{id}/attendance` |
 | FR-10 | 팀원 누구나 게스트를 이름으로 등록해 회차 참석자에 추가한다. 응답 마감 뒤에는 매니저만(경기 기록 전이면 확정 뒤에도) | PLAYER | F13 | S-10, S-11 | `POST /events/{id}/guests` |
 | FR-11 | 게스트 등록 시 등급(1~5)·키·포지션을 지정할 수 있고 미지정 시 클럽 평균. 등급은 게스트 기록(`players.guest_grade`) 하나에 두고, 다시 부르며 정보를 바꾸는 것은 등록한 사람 · 매니저만 | PLAYER | F13 | S-11 | 같은 API |
 | FR-12 | 동명이인 게스트는 기존 레코드 재사용 여부를 확인한다 | SYSTEM | F13 | S-11 | 200 `similar[]` 응답 |
-| FR-13 | 게스트가 가입하면 기록을 병합·되돌릴 수 있다 | MANAGER | F13 | S-08 | `POST /players/{id}:merge`, `:unmerge` |
+| FR-13 | 게스트가 가입하면 기록을 병합·되돌릴 수 있다. 이름이 달라도 매니저가 이어 줄 수 있고, 이름만 같은 다른 사람은 "다른 사람" 으로 숨긴다 | MANAGER | F13 | S-08 | `POST /players/{id}:merge`, `:unmerge`, `GET /teams/{id}/guests/merged`, `POST …/merge-candidates:dismiss` |
 | FR-13a | 같은 이름의 게스트 기록이 있으면 가입한 본인이 직접 확인해 가져오거나 거절할 수 있다 | PLAYER | F13 | S-04, S-07 | `GET /me/guest-claims`, `POST /players/{id}:claim` |
-| FR-14 | 매니저가 팀원 순위를 매기면 사전 실력값에 반영된다 | MANAGER | F14 | S-19 | `POST /teams/{id}/rankings` |
+| FR-14 | 매니저가 팀원 순위를 매기면 사전 실력값에 반영된다. 지난 정렬 뒤에 들어온 사람은 "아직 순서 없음" 에 따로 두고 넣은 사람만 저장하며, 지난 순서를 불러와 다시 저장할 수 있다 | MANAGER | F14 | S-19 | `POST /teams/{id}/rankings`, `GET /teams/{id}/rankings` |
 | FR-15 | 참석 확정자와 포지션 분포·경고를 한눈에 본다 | MANAGER | F5 | S-11 | `GET /events/{id}/attendances` |
 | FR-16 | 배정을 실행하면 3가지 전략의 후보안을 받는다 | MANAGER | F5 | S-12, S-13 | `POST /events/{id}/assignments` |
 | FR-17 | 회차별로 묶기·갈라놓기·미리 배치를 걸 수 있다 | MANAGER | F15, F16 | S-12 | 같은 API `constraints` |
 | FR-18 | 제약은 다음 회차에 해제되며 직전 회차 것만 불러올 수 있다 | SYSTEM | F15 | S-12 | `GET /events/{id}/assignments/last-constraints` |
 | FR-19 | 실현 불가능한 제약은 실행 전에 차단된다 | SYSTEM | F15 | S-12 | `POST /events/{id}/assignments:validate` |
-| FR-20 | 후보안은 예상 점수 차·균형 점수·포지션 커버리지와 설명을 보여준다 | MANAGER | F6 | S-13 | `GET /assignments/runs/{id}` |
+| FR-20 | 후보안은 예상 점수 차·균형 점수·포지션 커버리지와 설명을 보여준다. 실행 때 나온 경고는 결과를 다시 열어도 남고, 확정하지 않은 배정안은 배정 화면에서 이어 볼 수 있다(직접 옮긴 안을 새로 나누기 전에 묻는다) | MANAGER | F6 | S-12, S-13 | `GET /assignments/runs/{id}`, `GET /events/{id}/assignments` |
 | FR-21 | 선수를 옮기거나 맞교체하면 지표가 즉시 재계산된다. 확정한 안도 경기 기록 전까지 고칠 수 있다 | MANAGER | F7 | S-13 | `PATCH /assignments/candidates/{id}` |
 | FR-22 | 확정하면 참석자에게 결과가 공개된다 (실력 수치 비공개). 같은 실행에서 다른 안을 확정하면 확정이 옮겨 간다 | MANAGER, PLAYER | F7 | S-14 | `POST …:adopt`, `GET /events/{id}/assignment/adopted` |
 | FR-23 | 매니저는 일정 시작 후 쿼터별 스코어(팀당 0~99점)와 출전 5명을 입력한다. 쿼터 기록이 생긴 일정은 배정을 다시 짜거나 바꿀 수 없다(`422 ASSIGNMENT_LOCKED`, 기록을 지우면 다시 가능). 기록 전에는 종료 시각이 지나도 팀을 나눌 수 있다. 출전한 사람은 응답과 상관없이 참석으로 맞추고, 참석인데 한 쿼터도 안 뛴 사람은 저장 뒤 불참으로 바꿀지 묻는다 | MANAGER | F8 | S-15 | `PUT /events/{id}/quarters` |
 | FR-24 | 쿼터 저장 시 마진이 시간 정규화되고 잔차로 실력이 갱신된다 (첫 2회 미반영, 삭제 시 롤백) | SYSTEM | F10 | — | 서버 내부 |
 | FR-25 | 남의 실력은 매니저에게만 수치·등급으로 보인다. 플레이어는 **자기 등급만** 본다 | SYSTEM | F10 | S-08, S-14, S-17 | 응답 마스킹 |
-| FR-26 | 일정 종료 후 참석자는 같이 뛰고 싶은 사람을 우리 팀 2·상대 팀 2까지 고른다 | PLAYER | F9 | S-16 | `GET/POST /events/{id}/post-game-survey` |
+| FR-26 | 일정 종료 후(경기 기록을 먼저 저장하면 그때) 참석자는 같이 뛰고 싶은 사람을 우리 팀 2·상대 팀 2까지 고른다. 팀 화면 안내 띠는 일주일 안에 끝난 가장 최근 일정 하나만 | PLAYER | F9 | S-16 | `GET/POST /events/{id}/post-game-survey` |
 | FR-27 | 매니저는 응답 현황을 보고 독려 메시지를 카카오톡에 공유한다 | MANAGER | F9, F19 | S-10 | `GET …/post-game-survey/share-message` |
 | FR-28 | 상호 지목은 선호 조합으로 친화도 전략에 반영된다 | SYSTEM | F10 | — | 서버 내부 |
 | FR-29 | 플레이어는 참석·출전·쿼터별 마진 기록을 본다 | PLAYER | F11 | S-17 | `GET /players/{id}/stats` |
@@ -375,7 +375,7 @@ S-09 일정 등록 → (팀원 참석 응답 · 게스트 초대) → S-10 참�
 | --- | --- | --- | --- |
 | 잘못된 팀 코드 | 존재하지 않는 코드 | 입력 필드 하단 인라인 에러 | `404 TEAM_CODE_NOT_FOUND` |
 | 중복 가입 | 이미 소속된 팀에 재가입 시도 | 토스트 \+ 팀 상세로 이동 | `409 ALREADY_MEMBER` |
-| 제외된 팀에 재가입 | 매니저가 제외한 사람이 옛 팀 코드 입력 (재발급 전) | "매니저가 제외한 팀이에요. 매니저에게 문의해 주세요." | `403 REMOVED_FROM_TEAM` |
+| 제외된 팀에 재가입 | 매니저가 제외한 사람이 팀 코드 입력 (제외를 풀거나 재발급하기 전) | "매니저가 제외한 팀이에요. 매니저에게 문의해 주세요." | `403 REMOVED_FROM_TEAM` |
 | 카카오 계정에 이메일 없음 | 이메일 동의항목 없음 | 가입은 진행, 이메일 비움. 나중에 비밀번호 재설정으로 이메일 로그인을 더할 수 있음 | `200` \+ `email: null` |
 | 팀 미활성 | 관리자 승인 전이거나 5명 미만 | 일정 등록 잠금 \+ 사유 안내 | `422 TEAM_NOT_ACTIVE` |
 | **게스트 동명이인** | 같은 이름의 게스트가 이미 존재 | 기존 게스트 목록을 먼저 보여 주고 "새 게스트로 추가"를 아래에 | `200` \+ `similar[]` |
@@ -505,7 +505,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 
 # 7\. API 명세
 
-엔드포인트 113개(`/health` 포함). 정본은 FastAPI 가 코드에서 만든 `docs/04-API명세-openapi.yaml` 이고, 요약 표는 `docs/04-API명세.md` 에 있다. 각 함수 docstring 에 권한 · 처리 · 오류 · 설계서 절이 적혀 있다.
+엔드포인트 118개(`/health` 포함). 정본은 FastAPI 가 코드에서 만든 `docs/04-API명세-openapi.yaml` 이고, 요약 표는 `docs/04-API명세.md` 에 있다. 각 함수 docstring 에 권한 · 처리 · 오류 · 설계서 절이 적혀 있다.
 
 ## 7\.1 공통 규약
 
@@ -523,8 +523,8 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 | --- | ---: | --- |
 | 인증 · 프로필 | 17 | `POST /auth/signup` · `/auth/login` · `GET /auth/kakao/login-url` · `/auth/kakao/callback` · `POST /auth/refresh` · `/auth/logout` · `/auth/password/forgot` · `/auth/password/reset` · `GET/PATCH/DELETE /me` · `POST/DELETE /me/avatar` |
 | 온보딩 설문 | 5 | `GET /surveys/onboarding` · `POST /surveys/onboarding/responses` · `GET /me/profile` · `PUT /me/positions` |
-| 팀 · 참가자 | 9 | `POST /teams` · `POST /teams/join` · `GET/PATCH /teams/{id}` · `GET /teams/{id}/players` · `PATCH …/players/{pid}/role` |
-| 게스트 관리 | 8 | `POST /events/{id}/guests` · `GET /teams/{id}/guests` · `POST /players/{id}:merge` · `:unmerge` · `:claim` |
+| 팀 · 참가자 | 12 | `POST /teams` · `POST /teams/join` · `GET/PATCH /teams/{id}` · `GET /teams/{id}/players` · `PATCH …/players/{pid}/role` |
+| 게스트 관리 | 10 | `POST /events/{id}/guests` · `GET /teams/{id}/guests` · `POST /players/{id}:merge` · `:unmerge` · `:claim` |
 | 매니저 실력 정렬 | 3 | `GET /teams/{id}/rankings/latest` · `POST /teams/{id}/rankings` |
 | 일정 · 참석 | 15 | `POST /teams/{id}/events` · `PUT /events/{id}/attendance` · `PUT /events/{id}/attendances/{pid}` · `GET /events/{id}/attendances` · `POST /events/{id}/rsvp:close` · `:reopen` |
 | 팀 배정 | 11 | `POST /events/{id}/assignments` · `:validate` · `GET …/last-constraints` · `PATCH /assignments/candidates/{id}` · `:adopt` · `GET /events/{id}/assignment/adopted` · `POST …/adopted:add` |
@@ -1205,7 +1205,7 @@ MVP에서는 **카카오 먼저** 만드는 편이 낫습니다. 이메일 경�
 | 1 | 서비스명 · 목적 · 페인포인트 · 액터 · 기능 요구사항 | ✅ HOOPLY, `docs/01` |
 | 2 | 화면 설계 · ERD · API 명세 · 배정 알고리즘 검증 | ✅ `docs/02` · `03` · `04`, 시뮬레이션(`scripts/simulate_rating.py`) |
 | 3 | 애플리케이션 개발 (9.8절 순서) | ✅ 운영 중 — https://hooply-green.vercel.app |
-| 4 | 테스트 · 디버깅 | ✅ pytest 273개 · Vitest 110개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
+| 4 | 테스트 · 디버깅 | ✅ pytest 280개 · Vitest 120개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
 | 5 | AI 설명 · 전술 (14장) | ✅ `docs/07` v1.9, AI 검증 `docs/eval_result.md` |
 | 6 | 데모 · 포트폴리오 | ✅ `docs/05` 데모 시나리오, 데모 데이터 매주 자동 갱신 |
 

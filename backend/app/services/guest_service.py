@@ -311,11 +311,15 @@ def merge(db: Session, guest: Player, into_player_id: int) -> Player:
 
 
 def unmerge(db: Session, guest: Player) -> Player:
+    """잘못 이어 준 기록을 되돌린다. 되돌린 짝(게스트, 그 회원)은 "다른 사람" 으로 남겨 병합 후보 · 본인 확인에 다시 뜨지 않게 한다."""
     if guest.merged_into_player_id is None:
         raise errors.NotFound("기록을 이어 준 적이 없는 게스트예요.")
     lock_team_stats(db, guest.team_id)  # 쓰기 전에 (잠금 순서)
+    member = db.get(Player, guest.merged_into_player_id)
     guest.merged_into_player_id = None
     guest.status = PlayerStatus.ACTIVE
+    if member is not None and member.user_id is not None:
+        _mark_not_same(db, guest, member.user_id)
     db.flush()
     from app.services import rating_service
 
@@ -324,8 +328,51 @@ def unmerge(db: Session, guest: Player) -> Player:
     return guest
 
 
+def merged_guests(db: Session, team_id: int) -> list[tuple[Player, Player]]:
+    """기록을 이어 준 (게스트, 회원) 쌍 — 매니저가 잘못 이어 준 것을 되돌릴 수 있게 (docs/09 3-4)."""
+    guests = db.scalars(
+        select(Player)
+        .where(Player.team_id == team_id, Player.kind == PlayerKind.GUEST, Player.merged_into_player_id.is_not(None))
+        .options(*PLAYER_LOAD)
+        .order_by(Player.display_name)
+    ).all()
+    if not guests:
+        return []
+    members = {
+        p.id: p for p in db.scalars(
+            select(Player).where(Player.id.in_({g.merged_into_player_id for g in guests})).options(*PLAYER_LOAD)
+        ).all()
+    }
+    return [(g, members[g.merged_into_player_id]) for g in guests if g.merged_into_player_id in members]
+
+
+def _mark_not_same(db: Session, guest: Player, user_id: int) -> None:
+    """(게스트, 회원 계정) 짝을 "다른 사람" 으로 남긴다 — 본인 확인 거절과 같은 기록(guest_claims DECLINED)이라
+    그 회원의 홈에도, 매니저의 병합 후보에도 다시 뜨지 않는다."""
+    from app.models import GuestClaim
+    from app.models.enums import ClaimStatus
+
+    row = db.scalar(select(GuestClaim).where(GuestClaim.guest_player_id == guest.id, GuestClaim.user_id == user_id))
+    if row is None:
+        db.add(GuestClaim(guest_player_id=guest.id, user_id=user_id, status=ClaimStatus.DECLINED))
+    else:
+        row.status = ClaimStatus.DECLINED
+
+
+def dismiss_candidate(db: Session, guest: Player, member: Player) -> None:
+    """매니저가 병합 후보 짝을 "다른 사람이에요" 로 숨긴다 (docs/09 3-5)."""
+    if guest.kind != PlayerKind.GUEST or member.kind != PlayerKind.MEMBER or member.team_id != guest.team_id or member.user_id is None:
+        raise errors.MergeKindMismatch()
+    _mark_not_same(db, guest, member.user_id)
+    db.commit()
+
+
 def merge_candidates(db: Session, team_id: int) -> list[tuple[Player, Player]]:
-    """이름이 같은 (게스트, 회원) 쌍. 게스트가 회원가입 후 팀에 들어온 경우를 찾는 힌트."""
+    """이름이 같은 (게스트, 회원) 쌍. 게스트가 회원가입 후 팀에 들어온 경우를 찾는 힌트.
+    "다른 사람" 으로 남긴 짝(회원이 본인 확인을 거절했거나, 매니저가 숨겼거나, 이어 준 뒤 되돌린 짝)은 뺀다."""
+    from app.models import GuestClaim
+    from app.models.enums import ClaimStatus
+
     guests = search_guests(db, team_id, None)
     if not guests:
         return []
@@ -339,10 +386,15 @@ def merge_candidates(db: Session, team_id: int) -> list[tuple[Player, Player]]:
     for m in members:
         for key in {_norm_name(m.display_name), _norm_name(m.user.name if m.user else None), _norm_name(m.user.nickname if m.user else None)} - {""}:
             by_name.setdefault(key, []).append(m)
+    declined = set(db.execute(
+        select(GuestClaim.guest_player_id, GuestClaim.user_id)
+        .where(GuestClaim.guest_player_id.in_([g.id for g in guests]), GuestClaim.status == ClaimStatus.DECLINED)
+    ).tuples().all())
     pairs = []
     for g in guests:
         for m in by_name.get(_norm_name(g.display_name), []):
-            pairs.append((g, m))
+            if (g.id, m.user_id) not in declined:
+                pairs.append((g, m))
     return pairs
 
 

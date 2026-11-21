@@ -49,3 +49,46 @@ def test_claim_decline_is_remembered(client, signup):
     # 매니저 병합 경로는 여전히 살아 있다 (게스트는 미병합 상태)
     pl = client.get(f"{API}/teams/{client.get(f'{API}/me/teams', headers=me).json()['items'][0]['team_id']}/players?kind=GUEST", headers=me).json()["items"]
     assert any(p["id"] == gid for p in pl)
+
+
+# 검증: docs/09 3-4 · 3-5 — 이어 준 기록 목록과 되돌리기, 되돌린 짝 · "다른 사람이에요" 는 후보 · 본인 확인에 다시 뜨지 않음,
+# 이름이 다른 게스트도 매니저가 이어 줄 수 있음
+def test_merged_list_unmerge_and_dismiss(client, signup):
+    m, code, gid, _ = _team_with_guest(client, signup)
+    me = signup("hw3@claim.com", name="허웅")
+    client.post(f"{API}/teams/join", json={"team_code": code}, headers=me)
+    tid = client.get(f"{API}/me/teams", headers=me).json()["items"][0]["team_id"]
+    cands = client.get(f"{API}/teams/{tid}/guests/merge-candidates", headers=m).json()["items"]
+    assert len(cands) == 1
+    pid = cands[0]["member"]["id"]
+    # 본인 확인으로 이었다 → 매니저의 "이어 준 기록" 에 보이고, 플레이어는 볼 수 없다
+    client.post(f"{API}/players/{gid}:claim", json={"accept": True}, headers=me)
+    assert client.get(f"{API}/teams/{tid}/guests/merged", headers=me).status_code == 403
+    merged = client.get(f"{API}/teams/{tid}/guests/merged", headers=m).json()["items"]
+    assert [(x["guest"]["id"], x["member"]["id"]) for x in merged] == [(gid, pid)]
+    # 되돌리면 목록에서 빠지고, 같은 짝이 후보 · 본인 확인으로 다시 뜨지 않는다
+    assert client.post(f"{API}/players/{gid}:unmerge", headers=m).status_code == 200
+    assert client.get(f"{API}/teams/{tid}/guests/merged", headers=m).json()["items"] == []
+    assert client.get(f"{API}/teams/{tid}/guests/merge-candidates", headers=m).json()["items"] == []
+    assert client.get(f"{API}/me/guest-claims", headers=me).json()["items"] == []
+    # 이름이 다른 회원에게도 매니저는 이어 줄 수 있다
+    other = signup("other3@claim.com", name="서장훈")
+    client.post(f"{API}/teams/join", json={"team_code": code}, headers=other)
+    other_pid = next(p["id"] for p in client.get(f"{API}/teams/{tid}/players", headers=m).json()["items"] if p["display_name"] == "서장훈")
+    assert client.post(f"{API}/players/{gid}:merge", json={"into_player_id": other_pid}, headers=m).status_code == 200
+
+
+def test_dismiss_candidate_hides_pair_and_claim_card(client, signup):
+    m, code, gid, _ = _team_with_guest(client, signup)
+    me = signup("hw4@claim.com", name="허웅")
+    client.post(f"{API}/teams/join", json={"team_code": code}, headers=me)
+    tid = client.get(f"{API}/me/teams", headers=me).json()["items"][0]["team_id"]
+    pid = client.get(f"{API}/teams/{tid}/guests/merge-candidates", headers=m).json()["items"][0]["member"]["id"]
+    body = {"guest_player_id": gid, "member_player_id": pid}
+    assert client.post(f"{API}/teams/{tid}/guests/merge-candidates:dismiss", json=body, headers=me).status_code == 403
+    assert client.post(f"{API}/teams/{tid}/guests/merge-candidates:dismiss", json=body, headers=m).status_code == 204
+    assert client.get(f"{API}/teams/{tid}/guests/merge-candidates", headers=m).json()["items"] == []
+    assert client.get(f"{API}/me/guest-claims", headers=me).json()["items"] == []
+    # 게스트 자리에 회원을 넣으면 거절
+    r = client.post(f"{API}/teams/{tid}/guests/merge-candidates:dismiss", json={"guest_player_id": pid, "member_player_id": pid}, headers=m)
+    assert r.status_code in (400, 422)

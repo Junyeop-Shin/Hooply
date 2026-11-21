@@ -1035,10 +1035,26 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
         pool = scored
         prep.warnings.append(f"{'양 팀' if body.team_count == 2 else '모든 팀'}에 볼 운반·골밑을 맡을 사람을 모두 둘 수 없어, 이 조건은 빼고 나눴어요")
 
+    used: set[tuple[int, ...]] = set()
+    picks: list[tuple[Strategy, Scored]] = []
+    for strategy in body.strategies:
+        w = STRATEGY_WEIGHTS[strategy]
+        ordered = sorted(pool, key=lambda s: s.total(w))
+        pick = next((s for s in ordered if s.partition not in used), ordered[0])  # 후보안끼리 편성이 달라야 고를 이유가 생긴다
+        used.add(pick.partition)
+        picks.append((strategy, pick))
+    if search == "local_search":  # 인원 경고는 실제로 고른 후보안 기준 (벌어진 안이 하나라도 있으면 그 인원으로)
+        ideal = _squad_sizes(len(roster), body.team_count)
+        uneven = next((s for _st, s in picks if sorted(len(x) for x in s.squads) != sorted(ideal)), None)
+        if uneven is not None:
+            prep.sizes = [len(x) for x in uneven.squads]
+            _warn_uneven(prep, ideal)
+
     _drop_unadopted_runs(db, event)  # 검증을 통과한 뒤에 정리한다 — 실패한 실행 때문에 지난 안을 잃지 않도록
     run_row = AssignmentRun(
         event_id=event.id, executed_by=by.id, team_count=body.team_count,
-        params={"strategies": [s.value for s in body.strategies], "weights": {k.value: v for k, v in STRATEGY_WEIGHTS.items()}, "w_fair": W_FAIR, "w_guest": W_GUEST, "search": search, "partitions_evaluated": evaluated},
+        params={"strategies": [s.value for s in body.strategies], "weights": {k.value: v for k, v in STRATEGY_WEIGHTS.items()}, "w_fair": W_FAIR, "w_guest": W_GUEST, "search": search, "partitions_evaluated": evaluated,
+                "warnings": list(prep.warnings)},  # 실행 응답에만 있으면 결과를 다시 열 때(GET) 사라진다 (docs/09 2-3). 후보안을 고른 뒤라 인원 경고까지 담긴다
         roster_snapshot=[
             {"player_id": r.id, "name": r.player.display_name, "kind": r.player.kind, "skill": round(r.skill, 2), "known": r.known,
              "playable": sorted(p.value for p in r.playable), "primary": r.primary.value if r.primary else None}
@@ -1056,20 +1072,6 @@ def run(db: Session, event: Event, by: User, body: AssignmentRunRequest) -> tupl
     for p in prep.pin_list:
         db.add(AssignmentConstraint(run_id=run_row.id, type=ConstraintType.PIN, player_id=p.player_id, squad_no=p.squad_no))
 
-    used: set[tuple[int, ...]] = set()
-    picks: list[tuple[Strategy, Scored]] = []
-    for strategy in body.strategies:
-        w = STRATEGY_WEIGHTS[strategy]
-        ordered = sorted(pool, key=lambda s: s.total(w))
-        pick = next((s for s in ordered if s.partition not in used), ordered[0])  # 후보안끼리 편성이 달라야 고를 이유가 생긴다
-        used.add(pick.partition)
-        picks.append((strategy, pick))
-    if search == "local_search":  # 인원 경고는 실제로 고른 후보안 기준 (벌어진 안이 하나라도 있으면 그 인원으로)
-        ideal = _squad_sizes(len(roster), body.team_count)
-        uneven = next((s for _st, s in picks if sorted(len(x) for x in s.squads) != sorted(ideal)), None)
-        if uneven is not None:
-            prep.sizes = [len(x) for x in uneven.squads]
-            _warn_uneven(prep, ideal)
     for strategy, pick in picks:
         _persist_candidate(db, run_row, strategy, pick, prep)
     db.commit()
@@ -1194,7 +1196,7 @@ def run_view(db: Session, run_row: AssignmentRun, warnings: list[str] | None = N
     return AssignmentRunView(
         id=run_row.id, event_id=run_row.event_id, team_count=run_row.team_count, created_at=run_row.created_at,
         constraints=constraints_of(run_row), candidates=[candidate_view(db, c, players=players) for c in run_row.candidates],
-        warnings=warnings or [],
+        warnings=warnings if warnings is not None else list((run_row.params or {}).get("warnings", [])),
     )
 
 

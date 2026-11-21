@@ -54,7 +54,7 @@ export function VotePage() {
           {notOpen ? (
             <EmptyState
               title="일정이 끝나면 투표할 수 있어요"
-              desc={ev.data ? `${fmtEvent(ev.data)} 일정이 끝나면 열려요.` : undefined}
+              desc={ev.data ? `${fmtEvent(ev.data)} 일정이 끝나거나, 매니저가 경기 기록을 저장하면 열려요.` : undefined}
               action={<Button variant="ghost" onClick={() => nav(back, { replace: true })}>일정으로 돌아가기</Button>}
             />
           ) : (

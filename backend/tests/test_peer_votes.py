@@ -54,6 +54,22 @@ def test_open_timing_and_candidates(client, club, past_event):
     assert r.status_code == 403 and r.json()["code"] == "NOT_ATTENDEE"
 
 
+# 검증: 종료 시각 전이라도 경기 기록을 저장하면(DONE) 투표가 열린다 (docs/09 2-12)
+def test_vote_opens_when_quarters_saved(client, club):
+    from tests.test_adopted_edit import _lineups
+
+    m, p1 = club["manager"], club["members"][1]
+    eid = _event(client, club, (datetime.now(UTC).astimezone() + timedelta(days=7)).date().isoformat())
+    assert client.get(f"{API}/events/{eid}", headers=p1).json()["survey_open"] is False
+    ids = list(club["pid"].values())[:10]
+    r = client.put(f"{API}/events/{eid}/quarters", json={"quarters": [
+        {"quarter_no": 1, "black_score": 10, "white_score": 8, "duration_min": 8, "lineups": _lineups(ids[:5], ids[5:])},
+    ]}, headers=m)
+    assert r.status_code == 200, r.text
+    assert client.get(f"{API}/events/{eid}", headers=p1).json()["survey_open"] is True
+    assert client.get(f"{API}/events/{eid}/post-game-survey", headers=p1).status_code == 200
+
+
 # 검증: 같은 팀 최대 2 + 상대 팀 최대 2 (배정 없으면 합계 4), 본인 400, BEST_PERFORMER 400, 빈 제출 가능, 재제출 409
 def test_submit_rules(client, club, past_event):
     pid = club["pid"]

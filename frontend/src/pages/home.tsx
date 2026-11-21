@@ -42,16 +42,33 @@ function useUpcoming(teamIds: number[]) {
   }
 }
 
-/** 매니저의 경기 후 할 일 — 내가 매니저인 팀마다 최근 일정을 한 번씩만 받아, 끝났는데 경기 기록이 없는 가장 최근 일정 하나 */
+const SKIP_KEY = 'hooply-unrecorded-skip'
+function readSkipped(): number[] {
+  try { return JSON.parse(localStorage.getItem(SKIP_KEY) ?? '[]') as number[] } catch { return [] }
+}
+
+/**
+ * 매니저의 경기 후 할 일 — 내가 매니저인 팀마다 최근 일정을 한 번씩만 받아, 팀마다 **가장 최근에 끝난 일정**에 기록이 없을 때만.
+ * 그 뒤 일정을 기록했으면 옛 일정을 몇 달씩 붙들고 있지 않는다. "기록 안 함"으로 닫은 일정은 이 기기에서 다시 묻지 않는다 (docs/09 3-11)
+ */
 function useUnrecorded(managerTeamIds: number[]) {
   const results = useQueries({
     queries: managerTeamIds.map((id) => ({ queryKey: ['events', 'team', id, 'recent', 20], queryFn: () => eventsApi.list(id, { size: 20 }) })),
   })
-  return results
-    .flatMap((r) => r.data?.items ?? [])
+  const [skipped, setSkipped] = useState(readSkipped)
+  const skip = (eventId: number) => {
+    const next = [...skipped.filter((x) => x !== eventId), eventId].slice(-50)
+    setSkipped(next)
+    try { localStorage.setItem(SKIP_KEY, JSON.stringify(next)) } catch { /* 저장 못 해도 이번 화면에서는 닫힌다 */ }
+  }
+  const event = results
+    .map((r) => (r.data?.items ?? [])
+      .filter((e) => e.status !== 'CANCELED' && (e.status === 'DONE' || e.survey_open))
+      .sort((a, b) => b.event_date.localeCompare(a.event_date) || (b.start_time ?? '').localeCompare(a.start_time ?? ''))[0])
     // 10명이 안 모인 날은 기록할 수 없으니 묻지 않는다
-    .filter((e) => e.status !== 'CANCELED' && (e.status === 'DONE' || e.survey_open) && e.quarter_count === 0 && e.attend_count >= 10)
-    .sort((a, b) => b.event_date.localeCompare(a.event_date))[0]
+    .filter((e) => e && e.quarter_count === 0 && e.attend_count >= 10 && !skipped.includes(e.id))
+    .sort((a, b) => b!.event_date.localeCompare(a!.event_date))[0]
+  return { event, skip }
 }
 
 export function HomePage() {
@@ -63,7 +80,7 @@ export function HomePage() {
   const nameOf = (id: number) => teamList.find((t) => t.team_id === id)?.team_name
   const isManagerSomewhere = teamList.some((t) => t.role === 'MANAGER')
   const next = upcoming.upcoming[0]
-  const unrecorded = useUnrecorded(teamList.filter((t) => t.role === 'MANAGER').map((t) => t.team_id))
+  const { event: unrecorded, skip: skipUnrecorded } = useUnrecorded(teamList.filter((t) => t.role === 'MANAGER').map((t) => t.team_id))
 
   return (
     <Screen>
@@ -78,10 +95,11 @@ export function HomePage() {
             </Link>
           ) : null}
           {unrecorded && (
-            <Link to={`/events/${unrecorded.id}/quarters`} state={{ from: '/' }} className="mt-3 flex min-h-11 items-center justify-between gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm">
-              <span className="min-w-0 truncate">{Number(unrecorded.event_date.slice(5, 7))}/{Number(unrecorded.event_date.slice(8, 10))} 경기 기록이 아직 없어요</span>
-              <span className="shrink-0 font-bold underline underline-offset-2">기록하기</span>
-            </Link>
+            <div className="mt-3 flex min-h-11 items-center gap-1 rounded-xl bg-white/10 pl-4 pr-1 text-sm">
+              <span className="min-w-0 flex-1 truncate">{Number(unrecorded.event_date.slice(5, 7))}/{Number(unrecorded.event_date.slice(8, 10))} 기록이 없어요</span>
+              <Link to={`/events/${unrecorded.id}/quarters`} state={{ from: '/' }} className="flex min-h-11 shrink-0 items-center px-2 font-bold underline underline-offset-2">기록하기</Link>
+              <button type="button" onClick={() => skipUnrecorded(unrecorded.id)} className="min-h-11 shrink-0 px-2 text-xs text-bar-sub">기록 안 함</button>
+            </div>
           )}
           {me.data && !me.data.onboarding_completed && me.data.tutorial_state !== 'ACTIVE' ? null : next ? (
             <Link to={`/events/${next.id}`} state={{ from: '/' }} className="mt-3 flex items-center justify-between rounded-xl bg-white/10 px-4 py-3">

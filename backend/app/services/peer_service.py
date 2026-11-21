@@ -69,7 +69,8 @@ BEST_WINDOW_DAYS = 90  # peer_vote_score(표시 전용) 집계 기간
 
 
 def opens_at(event: Event) -> datetime:
-    """투표가 열리는 시각 = 일정 종료 시각 (event_service.ends_at — end_time 없으면 그날 23:59, 자정을 넘기면 다음 날)."""
+    """투표가 늦어도 열리는 시각 = 일정 종료 시각 (event_service.ends_at — end_time 없으면 그날 23:59, 자정을 넘기면 다음 날).
+    경기 기록을 먼저 저장하면 그때 열린다 (`is_open`)."""
     from app.services import (
         event_service,  # 순환 import 회피 (event_service 가 이 모듈을 함수 안에서 부른다)
     )
@@ -78,9 +79,11 @@ def opens_at(event: Event) -> datetime:
 
 
 def is_open(event: Event) -> bool:
+    """종료 시각이 지났거나, 그 전이라도 경기 기록을 저장했으면(DONE) 연다 — 일찍 끝나 기록부터 넣은 날
+    체육관을 떠나기 전에 투표할 수 있게 (docs/09 2-12)."""
     if event.status == EventStatus.CANCELED:
         return False
-    return datetime.now(UTC) >= opens_at(event)
+    return event.status == EventStatus.DONE or datetime.now(UTC) >= opens_at(event)
 
 
 def _attending_players(db: Session, event: Event) -> list[Player]:

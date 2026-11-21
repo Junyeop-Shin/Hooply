@@ -147,7 +147,10 @@ def test_assignment_run_candidates(client, club):
 
     # 이력·조회·플레이어 권한
     assert len(client.get(f"{API}/events/{eid}/assignments", headers=m).json()["items"]) == 1
-    assert client.get(f"{API}/assignments/runs/{run['id']}", headers=m).status_code == 200
+    again = client.get(f"{API}/assignments/runs/{run['id']}", headers=m)
+    assert again.status_code == 200
+    # 실행 때 나온 경고는 결과를 다시 열어도 그대로 (docs/09 2-3)
+    assert run["warnings"] and again.json()["warnings"] == run["warnings"]
     assert client.get(f"{API}/assignments/runs/{run['id']}", headers=club["members"][1]).status_code == 403
     assert client.get(f"{API}/events/{eid}/assignment/adopted", headers=club["members"][1]).json()["code"] == "NOT_ADOPTED_YET"
 

@@ -81,6 +81,12 @@ class TeamCodeView(BaseModel):
     team_code: str
 
 
+class OwnerTransfer(BaseModel):
+    """팀장 넘기기 — `POST /teams/{id}:transfer-owner` (팀장 전용, docs/09 3-14)."""
+
+    player_id: int = Field(description="팀장을 받을 이 팀 회원의 player id")
+
+
 class RoleUpdate(BaseModel):
     """팀원 역할 변경 — `PATCH /teams/{id}/players/{pid}/role` (MANAGER 전용, FR-07).
 
@@ -123,6 +129,14 @@ class MergeCandidate(BaseModel):
 
     guest: PlayerCard
     member: PlayerCard
+
+
+class MergeDismiss(BaseModel):
+    """병합 후보 숨기기 — `POST /teams/{id}/guests/merge-candidates:dismiss` (MANAGER, docs/09 3-5).
+    이름만 같은 다른 사람이면 숨긴다. 그 회원의 홈 "본인이 맞나요?" 카드도 함께 사라진다."""
+
+    guest_player_id: int
+    member_player_id: int
 
 
 class GuestSimilar(BaseModel):
