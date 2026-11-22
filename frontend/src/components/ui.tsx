@@ -98,7 +98,7 @@ export function Card({ className, children, onClick, label }: { className?: stri
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
       className={cx(
-        'rounded-2xl border border-line bg-surface p-4 shadow-[0_1px_2px_rgba(20,33,61,0.04)]',
+        'rounded-2xl border border-line bg-surface p-4',  // B안: 흰 면 · 14px 모서리 · 옅은 선, 그림자 없음 (docs/11 규칙 4)
         onClick && 'cursor-pointer active:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
         className,
       )}
@@ -117,15 +117,17 @@ export function Alert({ kind = 'error', children }: { kind?: 'error' | 'info' | 
   return <div role={kind === 'error' ? 'alert' : undefined} className={cx('rounded-xl border px-3.5 py-3 text-sm', styles)}>{children}</div>
 }
 
-export function Badge({ tone = 'neutral', children }: { tone?: 'neutral' | 'court' | 'navy' | 'success' | 'warn'; children: ReactNode }) {
+/** 상태 칩 — 각진 6px (docs/11 규칙 5). `strong` 은 "내가 할 일"(미응답)처럼 눈에 띄어야 하는 것에만 쓴다 */
+export function Badge({ tone = 'neutral', children }: { tone?: 'neutral' | 'court' | 'navy' | 'success' | 'warn' | 'strong'; children: ReactNode }) {
   const styles = {
     neutral: 'bg-sunken text-muted',
     court: 'bg-brand-soft text-brand-ink',
     navy: 'bg-info-soft text-info-ink',
     success: 'bg-ok-soft text-ok-ink',
     warn: 'bg-warn-soft text-warn-ink',
+    strong: 'bg-inverse text-on-inverse',
   }[tone]
-  return <span className={cx('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold', styles)}>{children}</span>
+  return <span className={cx('inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-xs font-bold', styles)}>{children}</span>
 }
 
 export function TeamStatusBadge({ status, approval }: { status: TeamStatus; approval?: ApprovalStatus }) {
@@ -139,7 +141,7 @@ export function TeamStatusBadge({ status, approval }: { status: TeamStatus; appr
 /** 역할 배지 — 글자 수가 달라도 폭을 같게 해서 옆의 실력 배지가 세로로 정렬되게 한다 */
 export function RoleBadge({ role }: { role: TeamRole }) {
   const styles = role === 'MANAGER' ? 'bg-brand-soft text-brand-ink' : 'bg-info-soft text-info-ink'
-  return <span className={cx('inline-flex w-14 items-center justify-center rounded-full py-0.5 text-xs font-semibold', styles)}>{role === 'MANAGER' ? '매니저' : '팀원'}</span>
+  return <span className={cx('inline-flex w-14 items-center justify-center rounded-md py-0.5 text-xs font-bold', styles)}>{role === 'MANAGER' ? '매니저' : '팀원'}</span>
 }
 
 /** 실력 등급 원형 배지. 등급 없음 = 데이터 부족 (5.4절 예외 시나리오) */
@@ -185,7 +187,7 @@ export function Avatar({ name, src, size = 'md' }: { name: string; src?: string 
 export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="mb-2 flex items-center justify-between px-1">
-      <h2 className="text-sm font-bold tracking-wide text-muted">{children}</h2>
+      <h2 className="text-[15px] font-extrabold text-ink">{children}</h2>
       {action}
     </div>
   )

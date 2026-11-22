@@ -417,3 +417,26 @@ def test_exchange_moves_whole_lock_group_and_height(client, club):
     view = client.get(f"{API}/events/{eid}/assignment/adopted", headers=club["members"][1]).json()
     assert view["total_score"] is not None and view["skill_spread"] is not None
     assert all(s["avg_height_cm"] is not None and s["avg_skill"] is None for s in view["squads"])
+
+
+# 검증: docs/10 F-3 — 초대 링크로 온 새 팀원은 설문 전에도 가입 · 응답할 수 있다. 설문도 실력 정렬도 없는 팀원은 게스트처럼
+# 명단 평균으로 계산하고, 그 사실을 실행 전 경고와 배정 설명에 이름과 함께 밝힌다. 매니저가 실력 정렬에 넣으면 그 순서를 쓴다
+def test_member_without_survey_is_averaged_and_disclosed(client, club, signup):
+    m, tid = club["manager"], club["team_id"]
+    code = client.get(f"{API}/teams/{tid}", headers=m).json()["team_code"]
+    newbie = signup("newbie@club.com", name="새팀원")
+    assert client.post(f"{API}/teams/join", json={"team_code": code}, headers=newbie).status_code == 200  # 설문 전에도 가입된다
+    eid, _ = _event_with_attendance(client, club, guests=0)
+    assert client.put(f"{API}/events/{eid}/attendance", json={"status": "ATTEND"}, headers=newbie).status_code == 200  # 응답도 된다
+    body = {"team_count": 2, "strategies": ["SKILL"], "constraints": {"lock_groups": [], "separate_groups": [], "pins": []}}
+
+    run = client.post(f"{API}/events/{eid}/assignments", json=body, headers=m).json()
+    assert any("팀원 1명" in w and "팀 평균" in w for w in run["warnings"]), run["warnings"]
+    explanation = run["candidates"][0]["explanation"]
+    assert "팀원 1명(새팀원)은 설문 · 실력 정렬이 없어 팀 평균으로 계산했어요." in explanation, explanation
+
+    pids = [p["id"] for p in client.get(f"{API}/teams/{tid}/players", headers=m).json()["items"]]
+    assert client.post(f"{API}/teams/{tid}/rankings", json={"player_ids": pids}, headers=m).status_code in (200, 201)
+    run2 = client.post(f"{API}/events/{eid}/assignments", json=body, headers=m).json()
+    assert not any("팀원" in w and "팀 평균" in w for w in run2["warnings"]), run2["warnings"]
+    assert "새팀원" not in run2["candidates"][0]["explanation"]

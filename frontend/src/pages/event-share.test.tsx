@@ -7,11 +7,13 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AttendanceList, AttendanceStatus, AttendanceView, EventView, PlayerCard } from '../api/types'
+import type { AttendanceList, AttendanceStatus, AttendanceView, EventView, PlayerCard, UserDetail } from '../api/types'
 
+vi.mock('../api/auth', async (importOriginal) => ({ ...(await importOriginal<typeof import('../api/auth')>()), authApi: { me: vi.fn() } }))
 vi.mock('../api/events', () => ({ eventsApi: { get: vi.fn(), attendances: vi.fn() } }))
 vi.mock('../lib/kakao', async (importOriginal) => ({ ...(await importOriginal<typeof import('../lib/kakao')>()), shareText: vi.fn(), announceShare: vi.fn() }))
 
+import { authApi } from '../api/auth'
 import { eventsApi } from '../api/events'
 import { announceShare, shareText } from '../lib/kakao'
 import { EventDetailPage } from './events'
@@ -53,6 +55,29 @@ describe('EventDetailPage — 일정 알리기', () => {
     vi.mocked(announceShare).mockReset()
     vi.mocked(eventsApi.get).mockResolvedValue(event())
     vi.mocked(eventsApi.attendances).mockResolvedValue(attendances)
+    vi.mocked(authApi.me).mockResolvedValue({ id: 1, name: '허재', onboarding_completed: true } as UserDetail)
+  })
+
+  // 설문보다 가입 · 응답을 먼저 하게 됐으므로(docs/10 F-3), 응답하는 자리에서 설문을 한 번 권한다
+  it('설문을 안 한 사람에게는 응답 아래에 설문 안내가 보인다', async () => {
+    vi.mocked(authApi.me).mockResolvedValue({ id: 1, name: '민수', onboarding_completed: false } as UserDetail)
+    vi.mocked(eventsApi.get).mockResolvedValue(event({ my_role: 'PLAYER' }))
+    renderPage()
+    expect(await screen.findByRole('link', { name: /실력 설문/ })).toHaveAttribute('href', '/survey')
+  })
+
+  it('설문을 한 사람에게는 설문 안내가 없다', async () => {
+    renderPage()
+    await screen.findByText('미응답 2')
+    expect(screen.queryByRole('link', { name: /실력 설문/ })).toBeNull()
+  })
+
+  it('끝난 일정에는 설문을 안 한 사람에게도 설문 안내가 없다', async () => {
+    vi.mocked(authApi.me).mockResolvedValue({ id: 1, name: '민수', onboarding_completed: false } as UserDetail)
+    vi.mocked(eventsApi.get).mockResolvedValue(event({ my_role: 'PLAYER', status: 'DONE', rsvp_open: false, survey_open: true, quarter_count: 8 }))
+    renderPage()
+    await screen.findByText('미응답 2')
+    expect(screen.queryByRole('link', { name: /실력 설문/ })).toBeNull()
   })
 
   it('매니저가 누르면 날짜 · 응답 현황 · 아직 응답 안 한 팀원 이름과 일정 주소를 보낸다', async () => {

@@ -18,7 +18,8 @@ import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, LoadEr
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { startKakao } from './auth'
 
-import { useMe } from './home'
+import { useMe } from '../lib/me'
+import { forgetReturnTo } from '../lib/return-to'
 import { PositionPicker } from '../components/position-picker'
 
 export function ProfilePage() {
@@ -119,7 +120,7 @@ export function ProfilePage() {
               <span className="text-faint" aria-hidden="true">→</span>
             </Card>
 
-            <AccountSection user={u} onLoggedOut={() => { logout(); nav('/login', { replace: true }) }} />
+            <AccountSection user={u} onLoggedOut={() => { forgetReturnTo(); logout(); nav('/login', { replace: true }) }} />
           </>
         )}
       </Content>

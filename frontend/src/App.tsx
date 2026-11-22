@@ -3,8 +3,8 @@
  * 화면은 라우트 단위로 나눠 받는다(lazy). 로그인 화면 하나를 보려고 배정·쿼터 기록 화면까지
  * 내려받을 이유가 없다. 전환 중에는 Spinner 를 보여 준다.
  */
-import { Suspense, lazy } from 'react'
-import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Suspense, lazy, useEffect, useRef } from 'react'
+import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useIsLoggedIn } from './store/auth'
 import { Spinner } from './components/ui'
 // 첫 화면(로그인·홈)은 어차피 바로 필요하므로 함께 받는다
@@ -12,7 +12,7 @@ import { KakaoCallbackPage, LoginPage, SignupPage } from './pages/auth'
 import { HomePage } from './pages/home'
 import { TutorialSpotlight } from './components/tutorial'
 import { isChunkLoadError, reloadForNewVersion } from './lib/stale-chunk'
-import { saveReturnTo } from './lib/return-to'
+import { saveReturnTo, takeReturnTo } from './lib/return-to'
 
 // 배포 전에 열어 둔 탭이 예전 조각 파일을 부르면 실패한다 → 한 번 새로고침해 새 버전을 받는다(새로고침하는 동안은 Spinner)
 const page = <T extends Record<string, unknown>, K extends keyof T>(load: () => Promise<T>, name: K) =>
@@ -57,8 +57,22 @@ function RequireAuth() {
   saveReturnTo(loc.pathname + loc.search)
   return <Navigate to="/login" replace />
 }
-function GuestOnly() {
-  return useIsLoggedIn() ? <Navigate to="/" replace /> : <Outlet />
+/**
+ * 로그인 · 가입 화면의 가드. 로그인이 끝나면(또는 이미 로그인한 채 이 화면을 열면) 여기서 **한 번만** 보낸다 —
+ * 로그인 전에 맡겨 둔 주소(초대 · 투표 링크)가 있으면 그리로, 없으면 홈.
+ * 화면(LoginPage · SignupPage)이 따로 이동하면 안 된다. React 는 토큰이 바뀐 것을 먼저 그리고 라우터 이동은 전환으로 미루기 때문에
+ * 가드의 이동이 뒤늦게 실행돼 화면의 이동을 덮어쓴다 — 전에는 가드가 늘 홈으로 보내서, 이메일로 로그인하면 초대 링크가 사라졌다 (FR-01)
+ */
+export function GuestOnly() {
+  const loggedIn = useIsLoggedIn()
+  const nav = useNavigate()
+  const dest = useRef<string | null>(null)  // 주소는 한 번 꺼내면 지워진다 — effect 가 다시 돌아도 같은 곳으로 보내게 적어 둔다
+  useEffect(() => {
+    if (!loggedIn) return
+    dest.current ??= takeReturnTo() ?? '/'
+    nav(dest.current, { replace: true })
+  }, [loggedIn, nav])
+  return loggedIn ? null : <Outlet />
 }
 
 export default function App() {

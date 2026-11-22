@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { ApiError, errorMessage } from '../api/client'
 import { useAuthStore } from '../store/auth'
-import { peekReturnTo, takeReturnTo } from '../lib/return-to'
+import { takeReturnTo } from '../lib/return-to'
 import { Alert, Button, Field } from '../components/ui'
 import { Screen } from '../components/layout'
 
@@ -111,7 +111,7 @@ function KakaoWelcome({ initialName }: { initialName: string }) {
     try {
       // 팀에 보이는 이름은 '닉네임 → 이름' 순이라 닉네임을 비워 이 이름이 보이게 한다 (닉네임은 내 정보에서 다시 넣을 수 있다)
       await authApi.updateMe({ name: name.trim(), nickname: null })
-      nav(peekReturnTo() ? '/survey' : '/', { replace: true })  // 초대 링크로 왔으면 설문 → 그 링크(흐름 A), 아니면 홈의 시작 안내
+      nav(takeReturnTo() ?? '/', { replace: true })  // 초대 링크로 왔으면 설문보다 먼저 그 링크로(가입 · 응답이 먼저 — docs/10 F-3), 아니면 홈의 시작 안내
     } catch (ex) { setErr(errorMessage(ex, '이름을 저장하지 못했어요.')); setBusy(null) }
   }
   const undo = async () => {
@@ -146,7 +146,6 @@ function KakaoWelcome({ initialName }: { initialName: string }) {
 }
 
 export function LoginPage() {
-  const nav = useNavigate()
   const notice = (useLocation().state as { notice?: string } | null)?.notice
   const setTokens = useAuthStore((s) => s.login)
   const [email, setEmail] = useState('')
@@ -159,8 +158,9 @@ export function LoginPage() {
     setError(null)
     setLoading(true)
     try {
+      // 이동은 이 화면을 감싼 가드(App 의 GuestOnly)가 한다 — 맡겨 둔 주소(초대 · 투표 링크)가 있으면 그리로, 없으면 홈.
+      // 여기서 직접 이동하면 가드의 이동에 덮어써진다
       setTokens(await authApi.login(email, password))
-      nav(takeReturnTo() ?? '/', { replace: true })  // 초대 · 투표 링크로 왔으면 그 화면으로
     } catch (err) {
       setError(errorMessage(err, '로그인에 실패했어요.'))
     } finally {
@@ -196,7 +196,6 @@ export function LoginPage() {
 }
 
 export function SignupPage() {
-  const nav = useNavigate()
   const setTokens = useAuthStore((s) => s.login)
   const [form, setForm] = useState({ email: '', password: '', name: '', nickname: '', height_cm: '' })
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -217,9 +216,9 @@ export function SignupPage() {
         nickname: form.nickname || undefined,
         height_cm: form.height_cm ? Number(form.height_cm) : undefined,
       })
+      // 이동은 가드(App 의 GuestOnly)가 한다. 초대 링크로 왔으면 설문보다 먼저 그 링크로 — 가입 · 응답을 먼저 하고 설문은
+      // 홈 · 일정 화면의 안내로 나중에 권한다 (docs/10 F-3). 아니면 홈 — 시작 안내 팝업에서 설문·팀 가입으로 안내
       setTokens(pair)
-      // 초대 링크로 왔으면 설문을 먼저 하고 그 링크로(설문이 끝날 때 꺼낸다 — 흐름 A). 아니면 홈 — 시작 안내 팝업에서 설문·팀 가입으로 안내
-      nav(peekReturnTo() ? '/survey' : '/', { replace: true })
     } catch (err) {
       if (err instanceof ApiError && err.code === 'VALIDATION_ERROR') {
         const fe: Record<string, string> = {}

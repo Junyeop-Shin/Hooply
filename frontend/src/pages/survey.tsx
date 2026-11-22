@@ -15,7 +15,7 @@ import { STATIC_QUERY } from '../queryClient'
 import { surveyApi } from '../api/survey'
 import { errorMessage, errorMessageWithDetails } from '../api/client'
 import { SELF_RANK_LABEL, type SelfRankLevel, type SurveyAnswerIn, type SurveyMyResponse, type SurveyQuestion } from '../api/types'
-import { useMe } from './home'
+import { useMe } from '../lib/me'
 import { Alert, Button, EmptyState, LoadError, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 import { takeReturnTo } from '../lib/return-to'
@@ -127,6 +127,20 @@ function SurveyForm({ questions, templateId, previous }: { questions: SurveyQues
   const firstStep = useRef(true)
   useEffect(() => { if (firstStep.current) firstStep.current = false; else heading.current?.focus() }, [step])
 
+  /**
+   * 처음 하는 설문을 마친 뒤. 팀에 먼저 가입하고 설문을 나중에 하는 사람이 있으므로(docs/10 F-3), "이 팀에서 내 위치"를 아직
+   * 안 정한 팀이 있으면 그 문항으로 보낸다 — 설문과 합쳐져 팀을 나누는 데 가장 쓸모 있는 답이다.
+   * 그런 팀이 없으면 맡겨 둔 주소(예전 흐름의 초대 링크)로, 그것도 없으면 설문을 시작한 화면(홈 · 일정)으로 되돌아간다
+   */
+  const afterFirstSurvey = async () => {
+    const link = takeReturnTo()
+    const mine = await qc.fetchQuery({ queryKey: ['profile'], queryFn: surveyApi.myProfile, staleTime: 0 }).catch(() => null)
+    const team = mine?.teams.find((t) => t.self_rank_level === null)
+    if (team) nav(`/teams/${team.team_id}/self-rank`, { replace: true, state: { ...(link ? { from: link } : {}), after: 'survey' } })
+    else if (link) nav(link, { replace: true })
+    else goBack('/')
+  }
+
   const submit = useMutation({
     mutationFn: () => {
       const payload: SurveyAnswerIn[] = questions.map((q) => {
@@ -148,7 +162,7 @@ function SurveyForm({ questions, templateId, previous }: { questions: SurveyQues
         goBack('/me')
         return
       }
-      nav(takeReturnTo() ?? '/', { replace: true })  // 초대 링크로 가입했으면 그 링크(팀 코드가 채워진 가입 화면)로 — 흐름 A
+      void afterFirstSurvey()
     },
     onError: (e) => setError(errorMessageWithDetails(e, '설문을 저장하지 못했어요. 다시 시도해 주세요.')),
   })
@@ -268,6 +282,7 @@ export function SelfRankPage() {
   // 팀 가입 직후(가입 화면이 이 화면으로 바뀌어 state.from 에 팀이 적혀 있다)면 그 팀으로 — 히스토리를 되감으면 홈으로 가 버린다.
   // 프로필 · 팀 화면에서 왔으면 들어온 화면으로 되감는다. 어느 쪽이든 뒤로가 이 화면으로 돌아오지 않는다
   const from = (loc.state as { from?: string } | null)?.from
+  const afterSurvey = (loc.state as { after?: string } | null)?.after === 'survey'  // 설문을 막 마치고 왔다 (가입은 그 전에 했다)
   const done = () => (from ? nav(from, { replace: true }) : goBack(`/teams/${id}`))
   const qc = useQueryClient()
   const profile = useQuery({ queryKey: ['profile'], queryFn: surveyApi.myProfile })
@@ -287,7 +302,7 @@ export function SelfRankPage() {
       {/* 이미 답한 적이 있으면(프로필의 "고치기"로 들어옴) 가입 직후의 진행 막대 · "마지막 질문" 은 보여 주지 않는다 */}
       {!answered && <div className="h-1.5 bg-line"><div className="h-full w-full bg-brand" /></div>}
       <Content>
-        <p className="text-xs font-semibold text-brand-ink">{answered ? '내 위치 고치기' : '팀 가입 완료 · 마지막 질문 하나'}</p>
+        <p className="text-xs font-semibold text-brand-ink">{answered ? '내 위치 고치기' : afterSurvey ? '설문 완료 · 마지막 질문 하나' : '팀 가입 완료 · 마지막 질문 하나'}</p>
         <h2 className="text-xl font-bold text-ink">이 팀에서 내 실력은 어디쯤인가요?</h2>
         <p className="text-sm text-muted">점수가 아니라 이 팀 안에서의 위치예요. 팀을 고르게 나누는 데 가장 중요한 질문이라 팀마다 따로 물어봐요. 나중에 바꿀 수 있어요.</p>
         <div className="space-y-2">

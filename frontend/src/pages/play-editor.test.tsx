@@ -9,7 +9,7 @@ vi.mock('../api/tactics', () => ({
   tacticsApi: {}, tacticStarsApi: {},
   teamPlaysApi: { check: vi.fn().mockResolvedValue({ playable: false, errors: [], roles: null, reasons: null }) },
 }))
-vi.mock('./home', () => ({ useMe: () => ({ data: { id: 1 }, isLoading: false }) }))
+vi.mock('../lib/me', () => ({ useMe: () => ({ data: { id: 1 }, isLoading: false }) }))
 
 import { PlayEditorPage } from './play-editor'
 

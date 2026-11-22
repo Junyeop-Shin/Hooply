@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { errorMessage as errMsg } from '../api/client'
 import { eventsApi } from '../api/events'
 import { peerApi } from '../api/peer'
@@ -13,8 +13,10 @@ import { POSITIONS, localISODate, type AttendanceView, type EventCreateInput, ty
 import { invalidateAssignment, invalidateEvent } from '../lib/invalidate'
 import { confirm, toast } from '../store/feedback'
 import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
-import { fmtDeadline, fmtEvent } from '../lib/format'
+import { dateParts, fmtDeadline, fmtEvent, fmtTime } from '../lib/format'
+import { CourtLines } from '../components/court-lines'
 import { eventShareText, eventShareUrl, sharesNames } from '../lib/event-share'
+import { useMe } from '../lib/me'
 import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, LoadError, Sheet, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useFinish, useGoBack } from '../components/layout'
 import { EventTactics } from '../components/tactics'
@@ -177,6 +179,7 @@ export function EventDetailPage() {
   const qc = useQueryClient()
   const ev = useQuery({ queryKey: ['events', id], queryFn: () => eventsApi.get(id) })
   const att = useQuery({ queryKey: ['events', id, 'attendances'], queryFn: () => eventsApi.attendances(id) })
+  const me = useMe()
   const [sheet, setSheet] = useState<'new' | AttendanceView | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ ABSENT: true })
@@ -237,6 +240,7 @@ export function EventDetailPage() {
   if (ev.isLoading) return <Screen><TopBar title="일정" back="/" /><Spinner page /></Screen>
   if (!ev.data) return <Screen><TopBar title="일정" back="/" /><Content><LoadError message={errMsg(ev.error, '일정을 불러오지 못했어요.')} onRetry={() => ev.refetch()} retrying={ev.isFetching} /></Content></Screen>
   const e = ev.data
+  const when = dateParts(e.event_date)
   const isManager = e.my_role === 'MANAGER'
   const past = e.survey_open || e.status === 'DONE'  // 종료 시각이 지났거나 기록까지 끝난 회차
   const started = e.status !== 'CANCELED' && new Date(`${e.event_date}T${e.start_time ?? '00:00:00'}`) <= new Date()  // 시작 시각 이후에만 쿼터 기록
@@ -336,6 +340,14 @@ export function EventDetailPage() {
           )}
         </Card></div>
 
+        {/* 설문보다 가입 · 응답을 먼저 하게 됐으므로(docs/10 F-3) 응답하는 자리에서 한 번 권한다 — 막지 않는다. 끝난 일정에는 띄우지 않는다 */}
+        {me.data && !me.data.onboarding_completed && !past && e.status !== 'CANCELED' && (
+          <Link to="/survey" className="flex min-h-11 items-center justify-between gap-3 rounded-2xl border border-brand-line bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-ink">
+            <span>실력 설문을 하면 팀을 더 고르게 나눠요<br /><span className="text-xs font-normal">2분이면 끝나요. 안 하면 팀 평균으로 계산해요.</span></span>
+            <span aria-hidden>→</span>
+          </Link>
+        )}
+
         {/* 요약 (S-11) */}
         {s && (
           <Card>
@@ -396,7 +408,8 @@ export function EventDetailPage() {
   return (
     <Screen>
       {/* 경기 기록이 있는(DONE) 일정은 실력 지표의 근거라 지울 수 없다. 배정을 확정한 일정(CLOSED)은 지울 수 있다 */}
-      <TopBar tone="navy" title={e.title ?? fmtEvent(e)} back={`/teams/${e.team_id}`} right={isManager && e.status !== 'CANCELED' && (
+      {/* 날짜는 아래 머리가 크게 보여 주므로, 제목이 없는 일정의 상단 바에는 날짜를 또 적지 않는다 */}
+      <TopBar tone="navy" title={e.title ?? '일정'} back={`/teams/${e.team_id}`} right={isManager && e.status !== 'CANCELED' && (
         <span className="-mr-1 flex text-sm">
           <button className="min-h-11 min-w-11 px-2 font-semibold text-bar-ink" onClick={() => nav(`/events/${id}/edit`)}>고치기</button>
           {/* 경기 기록이 있는 일정은 서버가 지우지 않는다 — 고치기만 (쿼터를 먼저 지우면 다시 보인다) */}
@@ -410,13 +423,19 @@ export function EventDetailPage() {
           )}
         </span>
       )} />
-      <div className="bg-bar px-4 pb-4 text-bar-ink">
-        {/* 제목이 없으면 위 제목 줄이 이미 날짜다 */}
-        {e.title && <p className="text-lg font-bold">{fmtEvent(e)}</p>}
-        <p className="text-sm text-bar-sub">{e.venue ?? '장소 미정'}{e.memo ? ` · ${e.memo}` : ''}</p>
-        <div className="mt-2 flex items-center gap-2 text-sm">
+      {/* 머리(히어로) — 날짜와 참석 인원을 숫자체로 크게 (docs/11 규칙 2 · 3). 스크린리더에는 한글 날짜를 읽어 준다 */}
+      <div className="relative overflow-hidden bg-bar px-4 pb-5 text-bar-ink">
+        <CourtLines className="-right-16 -top-8 w-56" />
+        <p className="relative flex items-baseline gap-2 font-display font-bold leading-none">
+          <span aria-hidden className="text-[44px]">{when.md}</span>
+          <span aria-hidden className="text-2xl font-semibold tracking-[0.1em] text-bar-accent">{when.dow}</span>
+          <span className="sr-only">{when.ko}</span>
+        </p>
+        {fmtTime(e) && <p className="relative mt-1.5 font-display text-2xl font-semibold leading-none tracking-[0.02em]">{fmtTime(e)}</p>}
+        <p className="relative mt-2 text-sm text-bar-sub">{e.venue ?? '장소 미정'}{e.memo ? ` · ${e.memo}` : ''}</p>
+        <div className="relative mt-3 flex items-center gap-3 text-sm">
           <Badge tone={e.rsvp_open ? 'success' : 'neutral'}>{{ OPEN: past ? '종료' : e.rsvp_open ? '응답 받는 중' : '응답 마감', CLOSED: past ? '종료' : '응답 마감', DONE: '기록 완료', CANCELED: '취소됨' }[e.status]}</Badge>
-          <span className="text-bar-sub">참석 {e.attend_count}명</span>
+          <span className="flex items-baseline gap-1 text-bar-sub">참석 <span className="font-display text-[22px] font-bold leading-none text-bar-ink">{e.attend_count}</span>명</span>
           {e.rsvp_deadline && <span className="ml-auto text-xs text-bar-sub">마감 {fmtDeadline(e.rsvp_deadline)}</span>}
         </div>
       </div>

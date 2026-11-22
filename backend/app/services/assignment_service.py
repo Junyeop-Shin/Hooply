@@ -299,6 +299,10 @@ def prepare(roster: list[RosterPlayer], body: AssignmentRunRequest) -> Prepared:
     unknown_guests = [r for r in roster if r.is_guest and not r.known]
     if unknown_guests:
         warnings.append(f"게스트 {len(unknown_guests)}명은 실력 정보가 없어 팀 평균으로 계산해요")
+    # 설문도 실력 정렬도 없는 팀원 — 초대 링크로 막 온 새 팀원은 설문 전에 가입 · 응답할 수 있다 (docs/10 F-3)
+    unknown_members = [r for r in roster if not r.is_guest and not r.known]
+    if unknown_members:
+        warnings.append(f"팀원 {len(unknown_members)}명은 설문 · 실력 정렬이 없어 팀 평균으로 계산해요 (실력 정렬에 넣으면 그 순서를 써요)")
 
     return Prepared(
         roster=rmap, team_count=t, sizes=sizes, supernodes=supernodes, node_of=node_of, pins=pins,
@@ -916,6 +920,9 @@ def explain_manager(sc: Scored, strategy: Strategy, prep: Prepared) -> str:
         lines.append("오늘 인원으로는 어느 팀에 볼 운반이나 골밑을 맡을 사람이 없어요.")
     if prep.pin_list:
         lines.append(f"미리 배치한 {len(prep.pin_list)}명은 지정한 팀에 그대로 뒀어요.")
+    newcomers = [r for s in sc.squads for r in s if not r.is_guest and not r.known]
+    if newcomers:
+        lines.append(f"팀원 {len(newcomers)}명({', '.join(r.player.display_name for r in newcomers)})은 설문 · 실력 정렬이 없어 팀 평균으로 계산했어요.")
     unknown = [r for s in sc.squads for r in s if r.is_guest and not r.known]
     if unknown:
         lines.append(f"게스트 {len(unknown)}명({', '.join(r.player.display_name for r in unknown)})은 실력 정보가 없어 팀 평균으로 계산했어요.")

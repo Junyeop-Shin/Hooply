@@ -2,25 +2,20 @@
 import { useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { authApi, ME_STALE } from '../api/auth'
+import { authApi } from '../api/auth'
 import { eventsApi } from '../api/events'
 import { teamsApi } from '../api/teams'
 import { localISODate, type EventView, type Page } from '../api/types'
 import { errorMessage } from '../api/client'
-import { Badge, Button, Card, EmptyState, LoadError, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
+import { Avatar, Badge, Button, Card, EmptyState, LoadError, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
 import { confirm, toast } from '../store/feedback'
 import { TutorialCard, TutorialPrompt } from '../components/tutorial'
-import { Content, Screen, TabBar, TopBar } from '../components/layout'
-import { fmtEvent } from '../lib/format'
+import { CourtLines } from '../components/court-lines'
+import { Content, Screen, TabBar } from '../components/layout'
+import { dateParts, fmtEvent, fmtTime } from '../lib/format'
 import { invalidateEvent } from '../lib/invalidate'
 import { josa } from '../lib/josa'
-
-export function useMe() {
-  return useQuery({ queryKey: ['me'], queryFn: authApi.me, staleTime: ME_STALE })
-}
-export function useMyTeams() {
-  return useQuery({ queryKey: ['me', 'teams'], queryFn: authApi.myTeams, staleTime: ME_STALE })
-}
+import { useMe, useMyTeams } from '../lib/me'
 
 /** 내 모든 팀의 아직 진행하지 않은 일정 (가까운 순). 지난 일정은 팀 화면 일정 탭에서 본다 */
 function useUpcoming(teamIds: number[]) {
@@ -80,47 +75,68 @@ export function HomePage() {
   const upcoming = useUpcoming(teamList.map((t) => t.team_id))
   const nameOf = (id: number) => teamList.find((t) => t.team_id === id)?.team_name
   const isManagerSomewhere = teamList.some((t) => t.role === 'MANAGER')
-  const next = upcoming.upcoming[0]
+  // 머리에 올릴 일정 — 가장 가까운 일정이되, 응답이 마감됐는데 내가 참석자가 아닌 일정(오늘 경기에 안 가는 사람 · 경기 당일에 막
+  // 가입한 사람)은 건너뛰고 응답을 받는 다음 일정을 올린다. 그런 일정뿐이면 가장 가까운 것을 그대로 둔다
+  const next = upcoming.upcoming.find((e) => e.rsvp_open || e.my_attendance === 'ATTEND') ?? upcoming.upcoming[0]
+  const later = upcoming.upcoming.filter((e) => e.id !== next?.id)
+  const displayName = me.data ? (me.data.nickname ?? me.data.name) : ''
   const { event: unrecorded, skip: skipUnrecorded } = useUnrecorded(teamList.filter((t) => t.role === 'MANAGER').map((t) => t.team_id))
 
   return (
     <Screen>
-      <TopBar tone="navy" title={<span className="flex items-center gap-2"><span className="flex size-6 items-center justify-center rounded-md bg-brand text-[12px] font-black text-on-brand">H</span><span className="tracking-[0.12em]">HOOPLY</span></span>} />
-      <Content>
-        <div className="rounded-2xl bg-bar p-5 text-bar-ink">
-          <p className="text-sm text-bar-sub">안녕하세요,</p>
-          <p className="text-xl font-bold">{me.data ? `${me.data.nickname ?? me.data.name}님` : '…'}</p>
-          {me.data && !me.data.onboarding_completed && me.data.tutorial_state !== 'ACTIVE' ? (  /* 시작 안내 중이면 체크리스트가 대신 안내한다 */
-            <Link to="/survey" className="mt-3 flex min-h-11 items-center justify-between rounded-xl border border-brand-line bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-ink">
-              실력 설문을 아직 안 하셨어요 · 2분이면 끝나요 <span>→</span>
-            </Link>
-          ) : null}
+      {/* 머리(히어로) — 남색 코트 위에 다음 경기를 크게 보여 준다 (docs/11 규칙 3). 홈에는 상단 바를 따로 두지 않는다 */}
+      <header className="relative overflow-hidden bg-bar px-5 pb-5 pt-3 text-bar-ink">
+        <CourtLines className="-right-14 top-16 w-64" />
+        <div className="relative flex items-center justify-between">
+          <h1 className="font-display text-[22px] font-bold tracking-[0.14em]">HOOPLY</h1>
+          {/* 이름은 "프로필"을 피한다 — 하단 메뉴의 "프로필" 링크와 이름으로 구분되게 (이름으로 찾는 E2E · 스크린리더) */}
+          <Link to="/me" aria-label="내 정보" className="-mr-1 flex size-11 items-center justify-center rounded-full">
+            <Avatar name={displayName || '…'} src={me.data?.profile_image_url} />
+          </Link>
+        </div>
+        {/* 다음 일정이 먼저 — 설문을 안 한 사람도 응답부터 할 수 있게 (docs/10 F-3 · X-2). 설문 안내는 그 아래 */}
+        {next ? <NextEvent e={next} teamName={nameOf(next.team_id)} /> : (
+          <div className="relative mt-6">
+            <p className="text-sm text-bar-sub">안녕하세요,</p>
+            <p className="text-xl font-bold">{me.data ? `${displayName}님` : '…'}</p>
+          </div>
+        )}
+        <div className="relative">
           {unrecorded && (
-            <div className="mt-3 flex min-h-11 items-center gap-1 rounded-xl bg-white/10 pl-4 pr-1 text-sm">
+            <div className="mt-4 flex min-h-11 items-center gap-1 rounded-xl bg-white/10 pl-4 pr-1 text-sm">
               <span className="min-w-0 flex-1 truncate">{Number(unrecorded.event_date.slice(5, 7))}/{Number(unrecorded.event_date.slice(8, 10))} 기록이 없어요</span>
               <Link to={`/events/${unrecorded.id}/quarters`} state={{ from: '/' }} className="flex min-h-11 shrink-0 items-center px-2 font-bold underline underline-offset-2">기록하기</Link>
               <button type="button" onClick={() => skipUnrecorded(unrecorded.id)} className="min-h-11 shrink-0 px-2 text-xs text-bar-sub">기록 안 함</button>
             </div>
           )}
-          {me.data && !me.data.onboarding_completed && me.data.tutorial_state !== 'ACTIVE' ? null : next ? <NextEvent e={next} teamName={nameOf(next.team_id)} /> : null}
+          {me.data && !me.data.onboarding_completed && me.data.tutorial_state !== 'ACTIVE' ? (  /* 시작 안내 중이면 체크리스트가 대신 안내한다 */
+            <Link to="/survey" className="mt-3 flex min-h-11 items-center justify-between rounded-xl border border-brand-line bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-ink">
+              실력 설문을 아직 안 하셨어요 · 2분이면 끝나요 <span>→</span>
+            </Link>
+          ) : null}
         </div>
-
+      </header>
+      <Content>
         {me.data && <TutorialCard me={me.data} />}
         {me.data && <TutorialPrompt me={me.data} />}
 
         <GuestClaimCards />
 
-        <section>
-          <SectionTitle>다가오는 일정</SectionTitle>
-          {upcoming.error && <div className="mb-2"><LoadError message={errorMessage(upcoming.error, '일정을 불러오지 못했어요.')} onRetry={upcoming.retry} retrying={upcoming.retrying} /></div>}
-          {upcoming.isLoading || teams.isLoading ? <Spinner /> : upcoming.upcoming.length ? (
-            <div className="space-y-2">
-              {upcoming.upcoming.map((e) => <EventRow key={e.id} e={e} teamName={nameOf(e.team_id)} />)}
-            </div>
-          ) : upcoming.error || teams.isError ? null : (
-            <EmptyState title="예정된 일정이 없어요" desc={isManagerSomewhere ? '팀 화면에서 일정을 등록해 주세요.' : '매니저가 일정을 올리면 여기에 보여요.'} />
-          )}
-        </section>
+        {/* 가장 가까운 일정은 위의 머리가 보여 주므로 목록은 그다음 일정부터. 일정이 하나뿐이면 이 구역을 비워 두지 않고 숨긴다 */}
+        {(later.length > 0 || !next) && (
+          <section>
+            <SectionTitle>다가오는 일정</SectionTitle>
+            {upcoming.error && <div className="mb-2"><LoadError message={errorMessage(upcoming.error, '일정을 불러오지 못했어요.')} onRetry={upcoming.retry} retrying={upcoming.retrying} /></div>}
+            {upcoming.isLoading || teams.isLoading ? <Spinner /> : later.length ? (
+              <div className="space-y-2">
+                {later.map((e) => <EventRow key={e.id} e={e} teamName={teamList.length > 1 ? nameOf(e.team_id) : undefined} />)}
+              </div>
+            ) : upcoming.error || teams.isError ? null : (
+              <EmptyState title="예정된 일정이 없어요" desc={isManagerSomewhere ? '팀 화면에서 일정을 등록해 주세요.' : '매니저가 일정을 올리면 여기에 보여요.'} />
+            )}
+          </section>
+        )}
+        {next && later.length === 0 && upcoming.error && <LoadError message={errorMessage(upcoming.error, '일정을 불러오지 못했어요.')} onRetry={upcoming.retry} retrying={upcoming.retrying} />}
 
         <section>
           <SectionTitle>내 팀</SectionTitle>
@@ -183,37 +199,37 @@ function useQuickRsvp(e: EventView) {
   })
 }
 
-/** 홈 위쪽의 "다음 일정". 응답을 받는 중이면 일정 화면까지 가지 않고 여기서 참석 · 불참을 고른다 — 고른 쪽이 눌린 채로 남아 다시 바꿀 수 있다 */
+/**
+ * 홈 머리의 "다음 경기" (docs/11 규칙 2 · 3) — 남은 날(D-7)과 날짜를 숫자체로 크게, 그 아래에 참석 · 불참.
+ * 응답을 받는 중이면 일정 화면까지 가지 않고 여기서 고른다 — 고른 쪽이 눌린 채로 남아 다시 바꿀 수 있다.
+ * 화면에 보이는 영어(NEXT GAME · SUN) 옆에는 스크린리더가 읽을 한글을 함께 둔다
+ */
 function NextEvent({ e, teamName }: { e: EventView; teamName?: string }) {
   const respond = useQuickRsvp(e)
   const mine = e.my_attendance
+  const { md, dow, ko } = dateParts(e.event_date)
+  const start = e.start_time?.slice(0, 5)
   return (
-    <div className="mt-3 rounded-xl bg-white/10">
-      <Link to={`/events/${e.id}`} state={{ from: '/' }} className="flex min-h-11 items-center justify-between px-4 py-3">
-        <div className="min-w-0">
-          <p className="text-[11px] text-bar-sub">다음 일정 {dday(e.event_date)}{teamName ? ` · ${teamName}` : ''}</p>
-          <p className="truncate text-sm font-bold">{fmtEvent(e)}{e.venue ? ` · ${e.venue}` : ''}</p>
-        </div>
-        {e.rsvp_open ? (
-          // 응답은 아래 버튼이 보여 준다. 아직 안 했으면 눈에 띄게, 했으면 "자세히" 화살표만
-          mine === 'ATTEND' || mine === 'ABSENT' ? <span aria-hidden className="ml-2 shrink-0 text-bar-sub">→</span>
-            : <span className="ml-2 shrink-0 rounded-full bg-warn-soft px-2.5 py-1 text-[11px] font-bold text-warn-ink">미응답</span>
-        ) : (
-          <span className={`ml-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${mine === 'ATTEND' ? 'bg-brand text-on-brand' : 'bg-white/10 text-bar-sub'}`}>
-            {mine === 'ATTEND' ? '참석' : mine === 'ABSENT' ? '불참' : '응답 마감'}
-          </span>
-        )}
+    <div className="relative mt-5">
+      <p className="font-display text-[15px] font-semibold tracking-[0.2em] text-bar-accent"><span aria-hidden>NEXT GAME</span><span className="sr-only">다음 일정</span></p>
+      <p className="mt-1 font-display text-[112px] font-bold leading-[0.86]">{dday(e.event_date)}</p>
+      <Link to={`/events/${e.id}`} state={{ from: '/' }} className="mt-3 flex min-h-11 flex-col justify-center gap-1">
+        <span className="font-display text-[32px] font-semibold leading-none tracking-[0.02em]">
+          <span aria-hidden>{md} {dow}{start ? ` · ${start}` : ''}</span><span className="sr-only">{ko}{start ? ` ${start}` : ''}</span>
+        </span>
+        <span className="truncate text-sm text-bar-sub">{[e.venue ?? '장소 미정', teamName].filter(Boolean).join(' · ')}</span>
       </Link>
-      {e.rsvp_open && (
-        <div role="group" aria-label="참석 응답" className="grid grid-cols-2 gap-2 px-3 pb-3">
+      {e.my_squad_name && <p className="mt-1 text-sm font-bold text-bar-accent">배정 확정 · {e.my_squad_name}{e.my_assigned_position ? ` ${e.my_assigned_position}` : ''}</p>}
+      {e.rsvp_open ? (
+        <div role="group" aria-label="참석 응답" className="mt-4 grid grid-cols-2 gap-2">
           {(['ATTEND', 'ABSENT'] as const).map((st) => {
             const on = mine === st
             return (
               <button
                 key={st} type="button" aria-pressed={on}
                 onClick={() => { if (!on) respond.mutate(st) }}
-                className={`min-h-11 rounded-lg border text-sm font-bold transition ${
-                  on ? (st === 'ATTEND' ? 'border-brand bg-brand text-on-brand' : 'border-bar-ink bg-bar-ink text-bar') : 'border-white/30 text-bar-ink'
+                className={`min-h-[52px] rounded-xl border-[1.5px] text-base font-bold transition ${
+                  on ? (st === 'ATTEND' ? 'border-bar-accent bg-bar-accent text-on-bar-accent' : 'border-bar-ink bg-bar-ink text-bar') : 'border-white/50 text-bar-ink'
                 }`}
               >
                 {st === 'ATTEND' ? '참석' : '불참'}
@@ -221,28 +237,39 @@ function NextEvent({ e, teamName }: { e: EventView; teamName?: string }) {
             )
           })}
         </div>
+      ) : (
+        // 응답이 닫힌 일정 — 내 응답만 알린다. 아래의 "참석 N명"(전체 인원)과 헷갈리지 않게 "내 응답"을 붙인다
+        <p className="mt-3"><span className={`inline-flex rounded-md px-2.5 py-1 text-xs font-bold ${mine === 'ATTEND' ? 'bg-bar-accent text-on-bar-accent' : 'bg-white/10 text-bar-sub'}`}>{mine === 'ATTEND' ? '내 응답 · 참석' : mine === 'ABSENT' ? '내 응답 · 불참' : '응답 마감'}</span></p>
       )}
+      <p className="mt-3 text-[13px] text-bar-sub">참석 {e.attend_count}명{e.rsvp_open && mine !== 'ATTEND' && mine !== 'ABSENT' ? ' · 아직 응답 전이에요' : ''}</p>
     </div>
   )
 }
 
+/**
+ * 일정 한 줄 (홈 · 팀 화면). 날짜는 숫자체로 "12.06 / SUN", 아랫줄은 시간 · 장소만 — 날짜를 두 번 적지 않는다 (docs/10 U-4).
+ * 오른쪽은 내 응답 칩과 참석 인원. 아직 응답 안 한 일정은 남색 칩으로 눈에 띄게 (docs/11 규칙 5)
+ */
 export function EventRow({ e, teamName, withDetail, past }: { e: EventView; teamName?: string; withDetail?: boolean; past?: boolean }) {
   const nav = useNavigate()
   const my = e.my_attendance
+  const { md, dow, ko } = dateParts(e.event_date)
+  const open = e.rsvp_open && !past
   return (
-    <Card onClick={() => nav(`/events/${e.id}`, { state: { from: window.location.pathname } })} label={`${e.title ?? fmtEvent(e)} 일정 열기`} className={`flex items-center gap-3 ${withDetail ? 'rounded-b-none' : ''} ${past ? 'opacity-75' : ''}`}>
-      <div className={`flex size-12 flex-col items-center justify-center rounded-xl ${past ? 'bg-sunken text-muted' : 'bg-info-soft text-ink'}`}>
-        <span className="text-[10px] leading-none">{Number(e.event_date.slice(5, 7))}월</span>
-        <span className="text-lg font-black leading-tight">{Number(e.event_date.slice(8, 10))}</span>
+    <Card onClick={() => nav(`/events/${e.id}`, { state: { from: window.location.pathname } })} label={`${e.title ?? fmtEvent(e)} 일정 열기`} className={`flex items-center gap-3.5 ${withDetail ? 'rounded-b-none' : ''} ${past ? 'opacity-75' : ''}`}>
+      <div className="flex w-[58px] shrink-0 flex-col gap-0.5 font-display">
+        <span aria-hidden className={`text-[26px] font-bold leading-none ${past ? 'text-muted' : 'text-ink'}`}>{md}</span>
+        <span aria-hidden className="text-[13px] font-semibold leading-none tracking-[0.12em] text-muted">{dow}</span>
+        <span className="sr-only">{ko}</span>
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-bold text-ink">{e.title ?? fmtEvent(e)}</p>
-        <p className="truncate text-xs text-muted">{teamName ? `${teamName} · ` : ''}{fmtEvent(e)}{e.venue ? ` · ${e.venue}` : ''}</p>
+        <p className="truncate text-[13px] text-muted">{[teamName, fmtTime(e), e.venue].filter(Boolean).join(' · ') || '시간 · 장소 미정'}</p>
         {e.my_squad_name && !withDetail && <p className="text-xs font-semibold text-brand-ink">배정 확정 · {e.my_squad_name}{e.my_assigned_position ? ` ${e.my_assigned_position}` : ''}</p>}
       </div>
-      <div className="flex flex-col items-end gap-1">
-        {e.status === 'CANCELED' ? <Badge>취소됨</Badge> : my === 'ATTEND' ? <Badge tone="success">참석</Badge> : my === 'ABSENT' ? <Badge>불참</Badge> : <Badge tone="warn">미응답</Badge>}
-        <span className="text-[11px] text-muted">참석 {e.attend_count}</span>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        {e.status === 'CANCELED' ? <Badge>취소됨</Badge> : my === 'ATTEND' ? <Badge tone="success">참석</Badge> : my === 'ABSENT' ? <Badge>불참</Badge> : <Badge tone={open ? 'strong' : 'neutral'}>미응답</Badge>}
+        <span className="text-[11px] text-muted">{e.attend_count}명</span>
       </div>
     </Card>
   )

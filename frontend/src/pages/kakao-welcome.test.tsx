@@ -1,6 +1,6 @@
 /**
  * 카카오 로그인 콜백 (docs/09 3-1 · 3-2 · 3-3) — 카카오 응답은 vi.mock 으로 대체한다.
- * - 처음 온 사람: 팀에 보일 이름을 정하고(닉네임은 비워 이 이름이 보이게), 초대 링크로 왔으면 설문으로
+ * - 처음 온 사람: 팀에 보일 이름을 정하고(닉네임은 비워 이 이름이 보이게), 초대 링크로 왔으면 설문보다 먼저 그 링크로 (docs/10 F-3)
  * - "이메일 계정이 있어요": 방금 만든 계정을 지우고 로그인 화면에서 카카오 연결을 안내
  * - 원래 있던 사람: 맡겨 둔 주소(초대 링크)로 바로
  */
@@ -44,7 +44,7 @@ describe('KakaoCallbackPage', () => {
     vi.mocked(authApi.deleteMe).mockResolvedValue(undefined)
   })
 
-  it('처음 온 사람은 팀에 보일 이름을 정하고, 초대 링크로 왔으면 설문으로 간다', async () => {
+  it('처음 온 사람은 팀에 보일 이름을 정하고, 초대 링크로 왔으면 설문보다 먼저 그 링크로 간다', async () => {
     vi.mocked(authApi.kakaoCallback).mockResolvedValue({ ...pair, is_new: true })
     saveReturnTo('/teams/join?code=CTMATE26')
     const user = userEvent.setup()
@@ -55,7 +55,16 @@ describe('KakaoCallbackPage', () => {
     await user.type(field, '김민수')
     await user.click(screen.getByRole('button', { name: '이 이름으로 시작하기' }))
     expect(authApi.updateMe).toHaveBeenCalledWith({ name: '김민수', nickname: null })
-    expect(await screen.findByTestId('where')).toHaveTextContent('/survey')
+    expect(await screen.findByTestId('where')).toHaveTextContent('/teams/join?code=CTMATE26')
+    expect(localStorage.getItem('hooply-return-to')).toBeNull()  // 꺼내 썼으니 다음 로그인에 남지 않는다
+  })
+
+  it('초대 링크 없이 처음 온 사람은 홈으로 간다 (시작 안내가 맞이한다)', async () => {
+    vi.mocked(authApi.kakaoCallback).mockResolvedValue({ ...pair, is_new: true })
+    const user = userEvent.setup()
+    renderCallback()
+    await user.click(await screen.findByRole('button', { name: '이 이름으로 시작하기' }))
+    expect(await screen.findByTestId('where')).toHaveTextContent(/^\/$/)
   })
 
   it('이메일 계정이 있으면 방금 만든 계정을 지우고 로그인 화면에서 카카오 연결을 안내한다', async () => {

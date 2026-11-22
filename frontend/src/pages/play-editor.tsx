@@ -31,7 +31,7 @@ import { josa } from '../lib/josa'
 import { ACTION_LABEL, ROLE_LABEL, renderCounter, stepStates } from '../lib/tactics'
 import { useDebounced } from '../lib/typewriter'
 import { clearPlayDraft, playDraftKey, readPlayDraft, writePlayDraft, type PlayDraftBody } from '../lib/play-draft'
-import { useMe } from './home'
+import { useMe } from '../lib/me'
 
 const BALL_TYPES: PlayActionType[] = ['dribble', 'pass', 'handoff', 'shot']
 const OFF_TYPES: PlayActionType[] = ['move', 'cut', 'screen']

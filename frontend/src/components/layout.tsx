@@ -3,7 +3,8 @@
  * 설계서 5.1절: 주요 액션은 하단 고정, 역할별 진입점은 홈 카드로 분리.
  */
 import { useEffect, type ReactNode } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useMe, useMyTeams } from '../lib/me'
 
 export function Screen({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <div className={`mx-auto flex min-h-full w-full max-w-md flex-col ${className}`}>{children}</div>
@@ -97,38 +98,42 @@ export function BottomAction({ children }: { children: ReactNode }) {
   )
 }
 
-const tabs = [
-  { to: '/', label: '홈', icon: (
-    <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10.5V20h13v-9.5" /><path d="M10 20v-5h4v5" /></svg>
-  ) },
-  { to: '/me', label: '프로필', icon: (
-    <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
-  ) },
-]
+const tabIcon = {
+  home: <svg aria-hidden="true" viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10.5V20h13v-9.5" /><path d="M10 20v-5h4v5" /></svg>,
+  team: <svg aria-hidden="true" viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4" /><path d="M18.5 14.9a6.5 6.5 0 0 1 3 5.1" /></svg>,
+  me: <svg aria-hidden="true" viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>,
+}
 
-/** 하단 탭 — 홈 / 프로필. 활성 탭은 코트 오렌지, 위에 짧은 바 */
+/**
+ * 하단 메뉴 — 홈 / 팀 / 프로필 (docs/11 규칙 6). 남색 바탕에 활성 칸은 오렌지, 위에 짧은 바.
+ * "팀"은 기본 팀(정하지 않았으면 첫 팀)으로 바로 간다 — 전에는 홈을 내려 "내 팀" 카드를 눌러야 했다 (docs/10 X-1).
+ * 팀이 아직 없으면 팀 코드로 가입하는 화면으로 간다. 팀 화면 안쪽(팀 관리 · 리더보드 …)에 있어도 "팀" 칸이 켜진다
+ */
 export function TabBar() {
+  const me = useMe()
+  const teams = useMyTeams()
+  const list = teams.data?.items ?? []
+  const team = list.find((t) => t.team_id === me.data?.primary_team_id) ?? list[0]
+  const { pathname } = useLocation()
+  // 켜짐은 주소로 정한다 — "팀"은 기본 팀이 아닌 팀을 보고 있어도 켜져야 해서, 링크의 목적지와 견주는 NavLink 로는 안 된다
+  const tabs = [
+    { to: '/', label: '홈', on: pathname === '/', icon: tabIcon.home },
+    { to: team ? `/teams/${team.team_id}` : '/teams/join', label: '팀', on: pathname.startsWith('/teams'), icon: tabIcon.team },
+    { to: '/me', label: '프로필', on: pathname === '/me', icon: tabIcon.me },
+  ]
   return (
-    <nav aria-label="주 메뉴" className="safe-bottom sticky bottom-0 z-10 grid grid-cols-2 border-t border-line bg-surface">
+    <nav aria-label="주 메뉴" className="safe-bottom sticky bottom-0 z-10 grid grid-cols-3 border-t border-white/10 bg-bar">
       {tabs.map((t) => (
-        <NavLink
-          key={t.to}
+        <Link
+          key={t.label}
           to={t.to}
-          end={t.to === '/'}
-          className={({ isActive }) =>
-            `relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${
-              isActive ? 'text-brand-ink' : 'text-muted'
-            }`
-          }
+          aria-current={t.on ? 'page' : undefined}
+          className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${t.on ? 'text-bar-accent' : 'text-bar-sub'}`}
         >
-          {({ isActive }) => (
-            <>
-              {isActive && <span className="absolute top-0 h-0.5 w-10 rounded-b-full bg-brand" />}
-              {t.icon}
-              {t.label}
-            </>
-          )}
-        </NavLink>
+          {t.on && <span className="absolute top-0 h-0.5 w-10 rounded-b-full bg-bar-accent" />}
+          {t.icon}
+          {t.label}
+        </Link>
       ))}
     </nav>
   )

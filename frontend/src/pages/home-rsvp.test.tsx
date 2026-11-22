@@ -85,6 +85,41 @@ describe('HomePage — 다음 일정에 바로 응답', () => {
     expect(screen.getByText('응답 마감')).toBeInTheDocument()
   })
 
+  it('설문을 안 한 사람에게도 다음 일정과 응답 버튼이 먼저 보이고, 설문 안내가 함께 보인다 (docs/10 F-3 · X-2)', async () => {
+    vi.mocked(authApi.me).mockResolvedValue({ ...me, onboarding_completed: false })
+    renderHome()
+    expect(await rsvp()).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /실력 설문을 아직 안 하셨어요/ })).toHaveAttribute('href', '/survey')
+  })
+
+  // 경기 당일에 막 가입했거나 오늘은 안 가는 사람에게, 응답이 마감된 오늘 경기는 할 일이 없는 일정이다
+  it('가장 가까운 일정이 마감됐고 내가 참석자가 아니면, 머리에는 응답을 받는 다음 일정을 올린다', async () => {
+    const today = localISODate()
+    vi.mocked(eventsApi.list).mockResolvedValue(page([
+      event({ id: 5, title: '오늘 경기', event_date: today, status: 'CLOSED', rsvp_open: false, my_attendance: null }),
+      event({ id: 7, title: '다음 주 경기' }),
+    ]))
+    vi.mocked(eventsApi.respond).mockResolvedValue({} as AttendanceView)
+    renderHome()
+    const group = await rsvp()
+    await userEvent.click(within(group).getByRole('button', { name: '참석' }))
+    expect(eventsApi.respond).toHaveBeenCalledWith(7, 'ATTEND')
+    expect(screen.getByRole('button', { name: '오늘 경기 일정 열기' })).toBeInTheDocument()  // 마감된 오늘 경기는 아래 목록에 남는다
+    expect(screen.queryByRole('button', { name: '다음 주 경기 일정 열기' })).toBeNull()  // 머리에 올린 일정을 목록에 또 적지 않는다
+  })
+
+  it('오늘 경기에 참석하는 사람에게는 응답이 마감됐어도 오늘 경기를 머리에 올린다', async () => {
+    const today = localISODate()
+    vi.mocked(eventsApi.list).mockResolvedValue(page([
+      event({ id: 5, title: '오늘 경기', event_date: today, status: 'CLOSED', rsvp_open: false, my_attendance: 'ATTEND' }),
+      event({ id: 7, title: '다음 주 경기' }),
+    ]))
+    renderHome()
+    expect(await screen.findByText('내 응답 · 참석')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: '참석 응답' })).toBeNull()
+    expect(screen.getByRole('button', { name: '다음 주 경기 일정 열기' })).toBeInTheDocument()
+  })
+
   it('응답을 못 보내면 원래대로 돌리고 알린다', async () => {
     vi.mocked(eventsApi.respond).mockRejectedValue(new Error('offline'))
     renderHome()

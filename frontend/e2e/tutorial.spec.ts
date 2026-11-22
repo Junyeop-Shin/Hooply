@@ -34,7 +34,7 @@ test('팀원 경로: 팝업 → 코드로 가입하면 다음 단계가 열린�
   await expect(page.getByRole('note', { name: '팀 코드 넣기' })).toBeVisible()
   await page.getByLabel('팀 코드', { exact: true }).fill('CTMATE26')
   await page.getByRole('button', { name: '가입하기' }).click()
-  await expect(page).toHaveURL(/self-rank/)  // 가입하면 바로 내 위치 문항으로 간다
+  await expect(page).toHaveURL(/\/events\/\d+$/)  // 설문 전이라 내 위치 문항을 건너뛰고, 응답을 받는 가장 가까운 일정으로 간다 (docs/10 F-3)
   await page.goto('/')
   // 가입했으니 1단계 완료, 내 위치는 할 수 있게, 참석 응답은 이번 주 일정으로 바로 열린다. 다음 할 일(설문)이 밝아진다
   await expect(page.getByText('1/4 완료')).toBeVisible()

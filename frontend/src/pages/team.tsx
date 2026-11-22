@@ -4,16 +4,18 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, errorMessage as errMsg } from '../api/client'
 import { teamsApi } from '../api/teams'
-import { authApi } from '../api/auth'
+import { authApi, ME_STALE } from '../api/auth'
 import { eventsApi } from '../api/events'
-import { EventRow, GuestClaimCards, useMe } from './home'
+import { EventRow, GuestClaimCards } from './home'
+import { useMe } from '../lib/me'
 import { announceShare, copyText, shareText } from '../lib/kakao'
 import { confirm, toast } from '../store/feedback'
 import { AdoptedSummary } from '../components/adopted'
 import { surveyApi } from '../api/survey'
 import { localISODate, type PlayerCard, type PlayerCardDetailed, type Position, type TeamDetail } from '../api/types'
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Field, GradeDot, LoadError, RoleBadge, SectionTitle, Sheet, Spinner, TeamStatusBadge } from '../components/ui'
-import { BottomAction, Content, Screen, TopBar, useFinish } from '../components/layout'
+import { BottomAction, Content, Screen, TabBar, TopBar, useFinish } from '../components/layout'
+import { CourtLines } from '../components/court-lines'
 import { RecordsTab } from '../components/records'
 import { TacticsTab } from '../components/tactics'
 import { GuestRecordsSection } from '../components/guest-records'
@@ -118,10 +120,28 @@ export function TeamJoinPage() {
   const nav = useNavigate()
   const qc = useQueryClient()
   const [code, setCode] = useState(() => (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().slice(0, 8))  // 초대 링크 ?code= 미리 채움
+  /**
+   * 가입한 뒤 갈 곳 (docs/10 F-3). 설문을 한 사람은 "이 팀에서 내 위치" 문항으로 — 설문과 합쳐 바로 쓰인다.
+   * 설문을 아직 안 한 사람(대개 초대 링크로 막 온 새 팀원)에게는 그 문항이 아직 쓰이지 않으니 건너뛰고, 응답을 받는 가장 가까운
+   * 일정으로 보낸다 — 가입하자마자 참석 · 불참부터 고르게. 그런 일정이 없거나 못 받았으면 팀 화면으로
+   */
+  const afterJoin = async (teamId: number): Promise<string> => {
+    const me = await qc.fetchQuery({ queryKey: ['me'], queryFn: authApi.me, staleTime: ME_STALE }).catch(() => null)
+    if (!me || me.onboarding_completed) return `/teams/${teamId}/self-rank`
+    const today = localISODate()
+    const list = await eventsApi.list(teamId, { size: 50, from: today }).catch(() => null)
+    const next = (list?.items ?? [])
+      .filter((e) => e.rsvp_open && e.status !== 'CANCELED' && e.event_date >= today)
+      .sort((a, b) => a.event_date.localeCompare(b.event_date) || (a.start_time ?? '').localeCompare(b.start_time ?? ''))[0]
+    return next ? `/events/${next.id}` : `/teams/${teamId}`
+  }
   const m = useMutation({
     mutationFn: () => teamsApi.join(code.trim().toUpperCase()),
     // 'me' 접두어 — 내 팀 목록 · 시작 안내 단계 · 기본 팀이 적힌 내 정보를 함께 새로 받는다
-    onSuccess: (team) => { qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['profile'] }); nav(`/teams/${team.id}/self-rank`, { replace: true, state: { from: `/teams/${team.id}` } }) },
+    onSuccess: async (team) => {
+      qc.invalidateQueries({ queryKey: ['me'] }); qc.invalidateQueries({ queryKey: ['profile'] })
+      nav(await afterJoin(team.id), { replace: true, state: { from: `/teams/${team.id}` } })
+    },
     // 이미 가입한 팀의 초대 링크를 다시 눌렀으면 막다른 안내 대신 그 팀 화면으로 (설계 5.4절, docs/09 3-12).
     // 오류에 팀 번호가 없어서 내 팀 목록에서 코드로 찾는다. 못 찾으면 아래 Alert 가 서버 문구를 그대로 보여 준다
     onError: async (e) => {
@@ -219,13 +239,16 @@ export function TeamDetailPage() {
   return (
     <Screen>
       <TopBar tone="navy" title={t.name} back="/" right={isManager && <Link to={`/teams/${id}/members`} className="-mr-1 flex min-h-11 items-center px-2 text-sm font-semibold text-court-300">팀 관리</Link>} />
-      <div className="bg-bar px-4 pb-4 text-bar-ink">
-        <div className="flex items-center gap-2 text-sm text-bar-sub">
-          <span>팀원 {t.member_count}명</span>·<span>{t.home_court ?? '홈 코트 미정'}</span>
-          <span className="ml-auto"><TeamStatusBadge status={t.status} approval={t.approval_status} /></span>
+      {/* 머리(히어로) — 팀원 수를 숫자체로 크게 (docs/11 규칙 2 · 3) */}
+      <div className="relative overflow-hidden bg-bar px-4 pb-4 text-bar-ink">
+        <CourtLines className="-right-16 -top-10 w-56" />
+        <div className="relative flex items-end gap-3 text-sm text-bar-sub">
+          <p className="flex shrink-0 items-baseline gap-1">팀원 <span className="font-display text-[40px] font-bold leading-none text-bar-ink">{t.member_count}</span>명</p>
+          <p className="min-w-0 flex-1 truncate pb-0.5">{t.home_court ?? '홈 코트 미정'}</p>
+          <span className="shrink-0 pb-0.5"><TeamStatusBadge status={t.status} approval={t.approval_status} /></span>
         </div>
         {t.status === 'PENDING' && (
-          <div className="mt-3 rounded-xl bg-white/10 px-3.5 py-3 text-sm">
+          <div className="relative mt-3 rounded-xl bg-white/10 px-3.5 py-3 text-sm">
             <p className="font-semibold">
               {t.approval_status === 'REJECTED' ? '관리자가 팀 승인을 거절했어요. 문의해 주세요.' : t.approval_status === 'PENDING' ? `관리자 승인을 기다리고 있어요${need > 0 ? ` · ${need}명이 더 모여야 해요` : ''}` : `${need}명 더 모이면 일정을 만들 수 있어요`}
             </p>
@@ -241,7 +264,7 @@ export function TeamDetailPage() {
         {t.status === 'ACTIVE' && (
           // 활성 팀에서도 팀원 누구나 친구를 초대할 수 있게 (docs/09 3-16). 이미 굴러가는 팀에서는 초대가 주인공이 아니라
           // 조용한 글자 버튼으로 둔다 — 노란 면은 팀 화면에서 일정보다 먼저 눈에 들어왔다 (docs/10 U-1)
-          <div className="mt-2 flex items-center justify-between gap-2 text-sm">
+          <div className="relative mt-2 flex items-center justify-between gap-2 text-sm">
             <span className="text-bar-sub">팀 코드 <button className="min-h-11 font-mono font-bold tracking-[0.15em] text-bar-ink" onClick={() => copyText(t.team_code, '팀 코드를 복사했어요.')} aria-label={`팀 코드 ${t.team_code} 복사`}>{t.team_code}</button></span>
             <button className="-mr-2 min-h-11 px-2 text-xs font-semibold text-bar-ink underline underline-offset-2" onClick={() => shareInvite(t.name, t.team_code)}>카카오톡으로 초대</button>
           </div>
@@ -250,7 +273,7 @@ export function TeamDetailPage() {
 
       <div className="grid grid-cols-4 border-b border-line bg-surface" role="tablist" aria-label="팀 화면">
         {(['events', 'records', 'tactics', 'members'] as const).map((k) => (
-          <button key={k} type="button" role="tab" id={`team-tab-${k}`} aria-controls="team-panel" aria-selected={tab === k} onClick={() => setTab(k)} className={`min-h-11 text-sm font-semibold ${tab === k ? 'border-b-2 border-court-500 text-brand-ink' : 'text-muted'}`}>
+          <button key={k} type="button" role="tab" id={`team-tab-${k}`} aria-controls="team-panel" aria-selected={tab === k} onClick={() => setTab(k)} className={`min-h-11 text-sm ${tab === k ? 'border-b-[3px] border-brand font-extrabold text-ink' : 'font-semibold text-muted'}`}>
             {k === 'events' ? '일정' : k === 'records' ? '기록' : k === 'tactics' ? '전술' : `팀원 ${t.member_count}`}
           </button>
         ))}
@@ -327,6 +350,8 @@ export function TeamDetailPage() {
         )}
         </div>
       </Content>
+      {/* 하단 메뉴의 "팀"이 이 화면이다 — 여기서도 홈 · 프로필로 바로 갈 수 있게 (docs/11 규칙 6) */}
+      <TabBar />
     </Screen>
   )
 }
