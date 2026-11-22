@@ -52,7 +52,7 @@
 | AiExplanation, AiMessage, AiTactics | AI 설명 (체인 A · B · C, 체인 D 는 RoleSuggestion) |
 | BadgeView, MonthlyMarginView, MonthlyMarginEntry, TutorialView, TutorialStep, TutorialUpdate | 기록 탭 배지 · 월간 코트 마진 · 시작 안내 |
 
-## 4. 엔드포인트 요약 (118개, `/health` 포함)
+## 4. 엔드포인트 요약 (120개, `/health` 포함)
 
 응답 코드 열의 `200/201/204` 는 성공, 나머지는 위 에러 코드 표의 HTTP 상태다. Path 파라미터는 `{…}`, Query 는 각 엔드포인트의 `parameters`(yaml 참조).
 
@@ -84,6 +84,8 @@
 | --- | --- | --- | --- |
 | GET | `/surveys/onboarding` | 온보딩 설문 템플릿 조회 | 200 |
 | POST | `/surveys/onboarding/responses` | 온보딩 설문 응답 제출 | 201 · 400 · 409 |
+| GET | `/surveys/onboarding/responses/me` | 내가 낸 설문 응답 (다시 할 때 채워 넣기) | 200 · 404 |
+| PUT | `/surveys/onboarding/responses` | 온보딩 설문 다시 하기 (30일에 한 번) | 200 · 400 · 404 · 409 |
 | GET | `/me/profile` | 내 실력·포지션 프로필 | 200 |
 | PUT | `/me/positions` | 가능/선호 포지션 수정 | 200 |
 | PUT | `/teams/{team_id}/self-rank` | 이 팀에서 내 실력 위치 응답 | 200 · 403 |
@@ -239,7 +241,7 @@
 | 화면 | 사용 API |
 | --- | --- |
 | S-01/02/24 인증 | POST /auth/signup, POST /auth/login, POST /auth/refresh, GET /auth/kakao/login-url, GET /auth/kakao/callback, POST /auth/kakao/link |
-| S-03 설문 · S-23 내 위치 | GET /surveys/onboarding, POST /surveys/onboarding/responses, PUT /teams/{id}/self-rank |
+| S-03 설문 · S-23 내 위치 | GET /surveys/onboarding, POST /surveys/onboarding/responses, GET …/responses/me, PUT /surveys/onboarding/responses, PUT /teams/{id}/self-rank |
 | S-04 홈 · S-17 프로필 | GET /me, PATCH /me, GET /me/teams, GET /me/profile, PUT /me/positions, GET /players/{id}/stats |
 | S-27 시작 안내 | GET /me, GET/PUT /me/tutorial |
 | S-28 전술 탭 · S-29 전술판 · S-14 이 팀에 맞는 전술 | GET /tactics/presets, GET /teams/{id}/plays, GET /teams/{id}/tactics/stars, PUT/DELETE /teams/{id}/tactics/{play_key}/star, GET /events/{id}/tactics/recommend(S-14만), POST /events/{id}/tactics/ai-recommend, GET/PUT /events/{id}/tactics/{play_key}[/slots], GET /teams/{id}/plays/{play_id}, GET/POST /teams/{id}/tactics/{play_key}/comments, DELETE /teams/{id}/tactic-comments/{id} |

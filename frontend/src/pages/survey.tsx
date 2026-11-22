@@ -4,6 +4,7 @@
  * 단일선택 문항은 고르는 즉시 다음으로 넘어간다. group_label 이 같은 문항(D3A/D3B)은 한 화면에 묶는다.
  * D 섹션 다중선택(가능 포지션)은 고른 순서가 선호 순서이므로 칩에 순번을 표시한다.
  * 이미 제출했으면 홈으로 리다이렉트.
+ * 다시 하기(`/survey?retake=1`, 프로필의 링크 — docs/09 3-10): 지난 답을 채워 두고 달라진 것만 고친다. 30일에 한 번이고 하라고 하지 않는다.
  *
  * SelfRankPage — "이 팀에서 내 실력 위치" (구 E3). 팀 가입 직후 팀별로 한 번 묻고, 프로필에서 다시 고칠 수 있다.
  */
@@ -13,11 +14,12 @@ import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { STATIC_QUERY } from '../queryClient'
 import { surveyApi } from '../api/survey'
 import { errorMessage, errorMessageWithDetails } from '../api/client'
-import { SELF_RANK_LABEL, type SelfRankLevel, type SurveyAnswerIn, type SurveyQuestion } from '../api/types'
+import { SELF_RANK_LABEL, type SelfRankLevel, type SurveyAnswerIn, type SurveyMyResponse, type SurveyQuestion } from '../api/types'
 import { useMe } from './home'
-import { Alert, Button, LoadError, Spinner } from '../components/ui'
+import { Alert, Button, EmptyState, LoadError, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useGoBack } from '../components/layout'
 import { takeReturnTo } from '../lib/return-to'
+import { toast } from '../store/feedback'
 
 type Answer = { optionIds: number[]; numeric?: number }
 
@@ -25,11 +27,11 @@ const SECTION_NAME: Record<string, string> = { A: '기본', B: '공격', C: '수
 const AUTO_ADVANCE_MS = 260
 
 /** 답하던 설문을 이 탭에 보관 — 새로고침하거나 잠깐 다른 화면에 다녀와도 이어서 한다. 제출하면 지운다 */
-const surveyDraftKey = (templateId: number) => `survey-draft-${templateId}`
+const surveyDraftKey = (templateId: number, retake: boolean) => `survey-draft-${templateId}${retake ? '-retake' : ''}`
 type SurveyDraft = { step: number; answers: Record<number, Answer> }
-function readSurveyDraft(templateId: number, steps: number): SurveyDraft | null {
+function readSurveyDraft(key: string, steps: number): SurveyDraft | null {
   try {
-    const raw = sessionStorage.getItem(surveyDraftKey(templateId))
+    const raw = sessionStorage.getItem(key)
     if (!raw) return null
     const d = JSON.parse(raw) as SurveyDraft
     if (typeof d.step !== 'number' || typeof d.answers !== 'object' || d.answers === null) return null
@@ -37,13 +39,51 @@ function readSurveyDraft(templateId: number, steps: number): SurveyDraft | null 
   } catch { return null }
 }
 
+/** 지난 답을 지금 문항에 맞춰 채운다. 설문 버전이 바뀌었거나 없어진 선택지가 섞인 문항은 비워 둔다 */
+function previousAnswers(prev: SurveyMyResponse, templateId: number, questions: SurveyQuestion[]): Record<number, Answer> {
+  if (prev.template_id !== templateId) return {}
+  const byId = new Map(questions.map((q) => [q.id, q]))
+  const out: Record<number, Answer> = {}
+  for (const a of prev.answers) {
+    const q = byId.get(a.question_id)
+    if (!q) continue
+    if (q.answer_type === 'STEPPER') {
+      if (a.numeric_value !== null) out[q.id] = { optionIds: [], numeric: Number(a.numeric_value) }
+      continue
+    }
+    const valid = new Set(q.options.map((o) => o.id))
+    if (a.selected_option_ids.length > 0 && a.selected_option_ids.every((id) => valid.has(id))) out[q.id] = { optionIds: a.selected_option_ids }
+  }
+  return out
+}
+
 export function SurveyPage() {
   const me = useMe()
+  const retake = new URLSearchParams(useLocation().search).get('retake') === '1'
+  const done = me.data?.onboarding_completed === true
   const tpl = useQuery({ queryKey: ['survey', 'template'], queryFn: surveyApi.template, ...STATIC_QUERY })
-  if (me.data?.onboarding_completed) return <Navigate to="/" replace />
-  if (me.isLoading || tpl.isLoading) return <Screen><TopBar title="실력 설문" /><Spinner page /></Screen>
-  if (!tpl.data) return <Screen><TopBar title="실력 설문" back="/" /><Content><LoadError message={errorMessage(tpl.error, '설문을 불러오지 못했어요.')} onRetry={() => tpl.refetch()} retrying={tpl.isFetching} /></Content></Screen>
-  return <SurveyForm questions={tpl.data.questions} templateId={tpl.data.template_id} />
+  // 다시 하기: 지난 답과 다시 할 수 있는 날짜. 늘 새로 받는다 (방금 다시 했으면 날짜가 바뀌었다)
+  const prev = useQuery({ queryKey: ['survey', 'my-response'], queryFn: surveyApi.myResponse, enabled: retake && done, retry: false, staleTime: 0, gcTime: 0 })
+  const title = retake ? '실력 설문 다시 하기' : '실력 설문'
+  const [now] = useState(() => Date.now())  // 화면을 연 시각 — 렌더마다 달라지지 않게
+  if (me.data && retake && !done) return <Navigate to="/survey" replace />  // 아직 한 번도 안 했으면 처음 설문으로
+  if (done && !retake) return <Navigate to="/" replace />
+  if (me.isLoading || tpl.isLoading || (retake && prev.isLoading)) return <Screen><TopBar title={title} /><Spinner page /></Screen>
+  if (!tpl.data) return <Screen><TopBar title={title} back={retake ? '/me' : '/'} /><Content><LoadError message={errorMessage(tpl.error, '설문을 불러오지 못했어요.')} onRetry={() => tpl.refetch()} retrying={tpl.isFetching} /></Content></Screen>
+  if (!retake) return <SurveyForm questions={tpl.data.questions} templateId={tpl.data.template_id} />
+  if (!prev.data) return <Screen><TopBar title={title} back="/me" /><Content><LoadError message={errorMessage(prev.error, '지난 답을 불러오지 못했어요.')} onRetry={() => prev.refetch()} retrying={prev.isFetching} /></Content></Screen>
+  const at = new Date(prev.data.retake_at)
+  if (at.getTime() > now) {
+    return (
+      <Screen>
+        <TopBar title={title} back="/me" />
+        <Content>
+          <EmptyState title="아직 다시 할 수 없어요" desc={`설문은 ${at.getMonth() + 1}월 ${at.getDate()}일부터 다시 할 수 있어요. 포지션은 내 프로필에서 바로 고칠 수 있어요.`} />
+        </Content>
+      </Screen>
+    )
+  }
+  return <SurveyForm questions={tpl.data.questions} templateId={tpl.data.template_id} previous={previousAnswers(prev.data, tpl.data.template_id, tpl.data.questions)} />
 }
 
 /** group_label 이 같은 연속 문항을 한 "화면(step)"으로 묶는다 */
@@ -59,16 +99,20 @@ function groupSteps(questions: SurveyQuestion[]): SurveyQuestion[][] {
 
 const isSingle = (q: SurveyQuestion) => q.answer_type !== 'MULTI_CHIP' && q.answer_type !== 'STEPPER'
 
-function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; templateId: number }) {
+/** `previous` 가 있으면 다시 하기 — 지난 답이 채워진 채 시작하고, 저장은 PUT, 끝나면 프로필로 돌아간다 */
+function SurveyForm({ questions, templateId, previous }: { questions: SurveyQuestion[]; templateId: number; previous?: Record<number, Answer> }) {
   const nav = useNavigate()
+  const goBack = useGoBack()
   const qc = useQueryClient()
+  const retake = previous !== undefined
+  const draftKey = surveyDraftKey(templateId, retake)
   const steps = useMemo(() => groupSteps(questions), [questions])
-  const [initial] = useState(() => readSurveyDraft(templateId, steps.length))
+  const [initial] = useState(() => readSurveyDraft(draftKey, steps.length))
   const [step, setStep] = useState(initial?.step ?? 0)
-  const [answers, setAnswers] = useState<Record<number, Answer>>(initial?.answers ?? {})
+  const [answers, setAnswers] = useState<Record<number, Answer>>(initial?.answers ?? previous ?? {})
   useEffect(() => {
-    try { sessionStorage.setItem(surveyDraftKey(templateId), JSON.stringify({ step, answers })) } catch { /* 저장소 없음 */ }
-  }, [templateId, step, answers])
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ step, answers })) } catch { /* 저장소 없음 */ }
+  }, [draftKey, step, answers])
   const [error, setError] = useState<string | null>(null)
   const timer = useRef<number | null>(null)
 
@@ -91,12 +135,19 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
           ? { question_id: q.id, numeric_value: a?.numeric }
           : { question_id: q.id, selected_option_ids: a?.optionIds ?? [] }
       })
-      return surveyApi.submit(templateId, payload)
+      return retake ? surveyApi.retake(templateId, payload) : surveyApi.submit(templateId, payload)
     },
     onSuccess: () => {
-      try { sessionStorage.removeItem(surveyDraftKey(templateId)) } catch { /* ignore */ }
+      try { sessionStorage.removeItem(draftKey) } catch { /* ignore */ }
       qc.invalidateQueries({ queryKey: ['me'] })
       qc.invalidateQueries({ queryKey: ['profile'] })
+      if (retake) {
+        // 포지션 · 사전값이 바뀌어 팀 화면의 등급 · 포지션과 기록의 실력 근거도 달라진다
+        qc.invalidateQueries({ queryKey: ['team'] }); qc.invalidateQueries({ queryKey: ['stats'] })
+        toast('설문을 다시 저장했어요. 포지션과 실력에 반영했어요.')
+        goBack('/me')
+        return
+      }
       nav(takeReturnTo() ?? '/', { replace: true })  // 초대 링크로 가입했으면 그 링크(팀 코드가 채워진 가입 화면)로 — 흐름 A
     },
     onError: (e) => setError(errorMessageWithDetails(e, '설문을 저장하지 못했어요. 다시 시도해 주세요.')),
@@ -115,7 +166,7 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
 
   return (
     <Screen>
-      <TopBar title="실력 설문" back={step === 0 ? '/' : undefined} />
+      <TopBar title={retake ? '실력 설문 다시 하기' : '실력 설문'} back={step === 0 ? (retake ? '/me' : '/') : undefined} />
       <div className="h-1.5 bg-line">
         <div className="h-full bg-brand transition-all" style={{ width: `${((step + 1) / steps.length) * 100}%` }} />
       </div>
@@ -127,6 +178,7 @@ function SurveyForm({ questions, templateId }: { questions: SurveyQuestion[]; te
         {current.map((q, i) => (
           <QuestionCard key={q.id} q={q} titleRef={i === 0 && !current[0].group_label ? heading : undefined} compact={current.length > 1} answer={answers[q.id]} onChange={(a) => answer(q, a)} />
         ))}
+        {retake && step === 0 && <p className="text-xs text-muted">지난번 답이 채워져 있어요. 달라진 것만 고치고 "다음"으로 넘어가세요.</p>}
         {!last && current.every(isSingle) && <p className="text-xs text-muted">고르면 다음 질문으로 넘어가요.</p>}
         {error && <Alert>{error}</Alert>}
       </Content>

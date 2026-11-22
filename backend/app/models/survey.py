@@ -113,10 +113,10 @@ class SurveyOption(Base):
 
 
 class SurveyResponse(Base):
-    """한 사용자의 설문 제출 1건. **1인 1회** (UNIQUE user_id) — 재제출은 409 ALREADY_SUBMITTED.
+    """한 사용자의 설문 응답. **1인 1행** (UNIQUE user_id) — 처음 제출(POST)의 재제출은 409 ALREADY_SUBMITTED.
 
     제출되면 `users.onboarding_completed` 가 true 로 바뀌고 (FR-03), 소속된 모든 팀의 prior 가
-    다시 계산된다. 수정은 관리자 보정으로만 한다 (스펙 1절).
+    다시 계산된다. 30일이 지나면 본인이 다시 답해 이 행의 답을 덮어쓸 수 있다 (`submitted_at` 이 그 시각으로 바뀐다, docs/09 3-10).
     """
 
     __tablename__ = "survey_responses"

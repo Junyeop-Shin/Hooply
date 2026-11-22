@@ -238,7 +238,7 @@ Table of Contents
 | --- | --- | --- | --- | --- | --- |
 | FR-01 | 이메일 또는 카카오로 가입·로그인한다. 로그인 전에 연 주소(초대 · 투표 링크)는 로그인 뒤 그대로 열린다(새 가입자는 설문 뒤). 카카오로 처음 오면 팀에 보일 이름을 정하고, 이메일 계정이 이미 있으면 빈 계정을 지우고 카카오 연결로 안내한다 | 비회원 | F19 | S-01, S-02 | `POST /auth/signup`, `POST /auth/login`, `GET /auth/kakao/login-url`, `GET /auth/kakao/callback` |
 | FR-02 | 비밀번호는 bcrypt 해시로 저장한다 | SYSTEM | — | — | — |
-| FR-03 | 가입 직후 설문에 응답하면 실력·포지션 프로필이 생긴다 | PLAYER | F1 | S-03 | `GET /surveys/onboarding`, `POST /surveys/onboarding/responses` |
+| FR-03 | 가입 직후 설문에 응답하면 실력·포지션 프로필이 생긴다. 마지막 응답에서 30일이 지나면 원하는 사람은 프로필에서 다시 답할 수 있다(지난 답이 채워져 있고, 요구하지 않는다) | PLAYER | F1 | S-03, S-17 | `GET /surveys/onboarding`, `POST /surveys/onboarding/responses`, `GET …/responses/me`, `PUT /surveys/onboarding/responses` |
 | FR-04 | 팀을 만들면 코드가 발급되고 생성자는 팀장이 된다 | PLAYER | F2 | S-05 | `POST /teams` |
 | FR-05 | 팀 코드로 가입한다. 초대 링크는 코드를 미리 채운다. 스스로 나간 팀은 코드로 다시 들어올 수 있지만, 매니저가 제외한 팀은 매니저가 그 사람의 제외를 풀거나 코드를 재발급하기 전까지 들어올 수 없다(`403 REMOVED_FROM_TEAM`). 매니저가 없는 팀에 들어오면 그 사람이 매니저가 된다 | PLAYER | F2 | S-06 | `POST /teams/join`, `POST /teams/{id}/players/{pid}:unremove` |
 | FR-06 | 관리자 승인 후 5명 이상이면 팀이 활성화된다 | SYSTEM, ADMIN | F2, F12 | S-07, 관리자 콘솔 | `POST /admin/teams/{id}:approve` |
@@ -459,7 +459,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 | teams → manager_rankings → entries → players | 1:N → 1:N → N:1 | team_id, ranking_id (CASCADE), player_id | UNIQUE(ranking_id, player_id), (ranking_id, rank_no), 팀당 활성 버전 1개(부분 유니크, 0025) |
 | teams → guest_invite_presets | 1:N | team_id (CASCADE), created_by, last_player_id (SET NULL) | 초대 목록 불러오기 |
 | survey_templates → questions → options | 1:N → 1:N | template_id, question_id | 버전 관리 |
-| users → survey_responses → answers | 1:1 → 1:N | user_id (CASCADE, UNIQUE), response_id (CASCADE) | 1인 1회 |
+| users → survey_responses → answers | 1:1 → 1:N | user_id (CASCADE, UNIQUE), response_id (CASCADE) | 1인 1행. 30일 뒤 다시 답하면 같은 행의 답을 덮어쓴다 |
 | teams → events | 1:N | team_id (CASCADE) | 상태 OPEN/CLOSED/DONE/CANCELED |
 | events ↔ players (참석) | M:N | event_attendances(event_id CASCADE, player_id) | UNIQUE(event_id, player_id), team_lock_request_player_id |
 | events → assignment_runs → constraints | 1:N → 1:N | event_id (CASCADE), run_id (CASCADE) | LOCK/SEPARATE/PIN |
@@ -505,7 +505,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 
 # 7\. API 명세
 
-엔드포인트 118개(`/health` 포함). 정본은 FastAPI 가 코드에서 만든 `docs/04-API명세-openapi.yaml` 이고, 요약 표는 `docs/04-API명세.md` 에 있다. 각 함수 docstring 에 권한 · 처리 · 오류 · 설계서 절이 적혀 있다.
+엔드포인트 120개(`/health` 포함). 정본은 FastAPI 가 코드에서 만든 `docs/04-API명세-openapi.yaml` 이고, 요약 표는 `docs/04-API명세.md` 에 있다. 각 함수 docstring 에 권한 · 처리 · 오류 · 설계서 절이 적혀 있다.
 
 ## 7\.1 공통 규약
 
@@ -522,7 +522,7 @@ PostgreSQL(운영 Neon 18, 로컬 Docker 16) · SQLAlchemy 2.0 · Alembic 마이
 | 그룹 | 개수 | 대표 엔드포인트 |
 | --- | ---: | --- |
 | 인증 · 프로필 | 17 | `POST /auth/signup` · `/auth/login` · `GET /auth/kakao/login-url` · `/auth/kakao/callback` · `POST /auth/refresh` · `/auth/logout` · `/auth/password/forgot` · `/auth/password/reset` · `GET/PATCH/DELETE /me` · `POST/DELETE /me/avatar` |
-| 온보딩 설문 | 5 | `GET /surveys/onboarding` · `POST /surveys/onboarding/responses` · `GET /me/profile` · `PUT /me/positions` |
+| 온보딩 설문 | 7 | `GET /surveys/onboarding` · `POST /surveys/onboarding/responses` · `PUT …/responses`(다시 하기) · `GET /me/profile` · `PUT /me/positions` |
 | 팀 · 참가자 | 12 | `POST /teams` · `POST /teams/join` · `GET/PATCH /teams/{id}` · `GET /teams/{id}/players` · `PATCH …/players/{pid}/role` |
 | 게스트 관리 | 10 | `POST /events/{id}/guests` · `GET /teams/{id}/guests` · `POST /players/{id}:merge` · `:unmerge` · `:claim` |
 | 매니저 실력 정렬 | 3 | `GET /teams/{id}/rankings/latest` · `POST /teams/{id}/rankings` |
@@ -1205,7 +1205,7 @@ MVP에서는 **카카오 먼저** 만드는 편이 낫습니다. 이메일 경�
 | 1 | 서비스명 · 목적 · 페인포인트 · 액터 · 기능 요구사항 | ✅ HOOPLY, `docs/01` |
 | 2 | 화면 설계 · ERD · API 명세 · 배정 알고리즘 검증 | ✅ `docs/02` · `03` · `04`, 시뮬레이션(`scripts/simulate_rating.py`) |
 | 3 | 애플리케이션 개발 (9.8절 순서) | ✅ 운영 중 — https://hooply-green.vercel.app |
-| 4 | 테스트 · 디버깅 | ✅ pytest 280개 · Vitest 120개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
+| 4 | 테스트 · 디버깅 | ✅ pytest 283개 · Vitest 124개 · Playwright 22개(한 DB 를 같이 쓰므로 차례로), GitHub Actions |
 | 5 | AI 설명 · 전술 (14장) | ✅ `docs/07` v1.9, AI 검증 `docs/eval_result.md` |
 | 6 | 데모 · 포트폴리오 | ✅ `docs/05` 데모 시나리오, 데모 데이터 매주 자동 갱신 |
 
@@ -1237,6 +1237,7 @@ MVP에서는 **카카오 먼저** 만드는 편이 낫습니다. 이메일 경�
 | Q6 | **팀 이름을 고정할 것인가** | ① 블랙/화이트 고정 ② 매니저가 매번 지정 | **①** — 블랙 · 화이트 · 레드(3팀) 고정 |
 | — | 인증 방식 | 카카오 / 이메일 | **둘 다** (11.5절) — 카카오를 주 경로, 이메일은 보조. 비밀번호 재설정 메일까지 |
 | — | 새 팀 스팸 | 누구나 즉시 활성 / 관리자 승인 | **관리자 승인** 후 5명 이상이면 활성 |
+| — | 설문을 다시 하게 할 것인가 | 주기적으로 요구 / 원하는 사람만 | **원하는 사람만** — 프로필의 조용한 링크로, 30일에 한 번. 팀원이 앱을 여는 것부터 부담스러워해서 요구하지 않는다 (docs/09 3-10) |
 | — | AI 의 역할 | AI 가 판단 / 규칙이 판단하고 AI 는 문장 | **규칙이 판단, AI 는 문장만** (14장). 전술 역할도 AI 가 고르게 해 봤지만 규칙보다 나아지지 않아 이유만 쓰게 했다 |
 
 ## 13\.2 개발 중 놓치기 쉬운 것

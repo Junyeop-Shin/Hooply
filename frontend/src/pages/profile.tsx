@@ -29,6 +29,7 @@ export function ProfilePage() {
   const u = me.data
   const p = profile.data
   const [chosen, setChosen] = useState<number | null>(null)
+  const [now] = useState(() => Date.now())  // 화면을 연 시각 — "설문 다시 하기" 를 보일지 정한다
   // 기록이 있는 팀을 먼저, 그 안에서는 기본 팀을 먼저 — 기본 팀에 아직 쿼터가 없으면 빈 화면 대신 기록 있는 팀이 먼저 보인다
   const teams = [...(p?.teams ?? [])].sort((a, b) =>
     (Number(b.quarters_played > 0) - Number(a.quarters_played > 0)) || (Number(b.team_id === u?.primary_team_id) - Number(a.team_id === u?.primary_team_id)))
@@ -53,6 +54,13 @@ export function ProfilePage() {
                     <div><p className="font-semibold text-ink">설문을 마쳐 주세요</p><p className="text-xs text-muted">실력 프로필이 아직 없어요.</p></div>
                     <Button onClick={() => nav('/survey')}>설문하기</Button>
                   </Card>
+                )}
+                {/* 조용한 권유 — 다시 할 수 있을 때(마지막 설문에서 30일 뒤)만 보이고, 안 해도 달라지는 것은 없다 (docs/09 3-10) */}
+                {u.onboarding_completed && p?.survey_retake_at && new Date(p.survey_retake_at).getTime() <= now && (
+                  <p className="px-1 text-xs text-muted">
+                    실력이 달라졌다면 설문을 다시 할 수 있어요.{' '}
+                    <Link to="/survey?retake=1" className="inline-flex min-h-11 items-center font-semibold text-brand-ink underline underline-offset-2">설문 다시 하기</Link>
+                  </p>
                 )}
               </div>
             </section>

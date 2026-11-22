@@ -12,7 +12,7 @@ DB 에서 내려주고 프론트는 `answer_type` 에 따라 위젯을 고른다
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import AnswerType, Position, SelfRankLevel
 from app.schemas.common import ORMModel, SkillGrade
@@ -72,11 +72,31 @@ class SurveyAnswerIn(BaseModel):
 class SurveyResponseIn(BaseModel):
     """설문 제출 — `POST /surveys/onboarding/responses` (로그인 사용자, FR-03).
 
-    12문항(설문 v2) 전부 필수. 이미 제출했으면 409 ALREADY_SUBMITTED (1인 1회).
+    12문항(설문 v2) 전부 필수. 이미 제출했으면 409 ALREADY_SUBMITTED.
+    다시 하기(`PUT /surveys/onboarding/responses`, 30일에 한 번)도 같은 본문을 쓴다.
     """
 
     template_id: int | None = Field(default=None, description="생략 가능. 보내면 활성 템플릿과 일치해야 한다")
     answers: list[SurveyAnswerIn] = Field(min_length=1)
+
+
+class SurveyAnswerView(BaseModel):
+    """내가 낸 답 한 줄 — `SurveyMyResponse.answers` 원소."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    question_id: int
+    selected_option_ids: list[int] = []
+    numeric_value: Decimal | None = None
+
+
+class SurveyMyResponse(BaseModel):
+    """내가 마지막으로 낸 설문 응답 — `GET /surveys/onboarding/responses/me`. 다시 할 때 지난 답을 채워 넣는다."""
+
+    template_id: int = Field(description="답했던 설문 버전. 지금 활성 버전과 다르면 화면은 지난 답을 채우지 않는다")
+    submitted_at: datetime
+    retake_at: datetime = Field(description="이때부터 다시 할 수 있다 (마지막 응답 + 30일)")
+    answers: list[SurveyAnswerView]
 
 
 class TeamProfileSummary(BaseModel):
@@ -98,6 +118,7 @@ class MyProfile(BaseModel):
 
     onboarding_completed: bool
     survey_submitted_at: datetime | None = None
+    survey_retake_at: datetime | None = Field(default=None, description="설문을 다시 할 수 있게 되는 시각 (마지막 응답 + 30일). 설문 전이면 null")
     height_cm: int | None = None
     primary_position: Position | None = None
     playable_positions: list[Position] = []

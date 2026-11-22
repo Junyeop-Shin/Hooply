@@ -187,6 +187,7 @@ export function TeamDetailPage() {
   const profile = useQuery({ queryKey: ['profile'], queryFn: surveyApi.myProfile })
   const myTeamProfile = profile.data?.teams.find((t) => t.team_id === id)
   const today = localISODate()
+  const [openedAt] = useState(() => Date.now())  // 화면을 연 시각 — 렌더마다 달라지지 않게
   const [page, setPage] = useState(0)
   // 아직 진행하지 않은 일정(가까운 순)이 먼저, 그 뒤에 지난 일정(최근 순). 5개씩 페이지
   const fetched = events.data?.pages.flatMap((p) => p.items) ?? []
@@ -199,7 +200,7 @@ export function TeamDetailPage() {
   const upcomingCount = upcomingList.length
   // 경기 후 투표 안내는 일주일 안에 끝난 일정 중 가장 최근 하나만 — 지난 일정마다 띠가 쌓이지 않게 (docs/09 3-9).
   // 지난 기록 추가로 넣은 몇 달 전 경기도 여기서 걸러진다. 투표 화면 자체는 링크로 계속 열 수 있다
-  const voteCutoff = localISODate(new Date(Date.now() - 7 * 86_400_000))
+  const voteCutoff = localISODate(new Date(openedAt - 7 * 86_400_000))
   const voteEvent = pastList.concat(upcomingList).filter((e) => e.survey_open && e.my_attendance === 'ATTEND' && !e.my_survey_submitted && e.event_date >= voteCutoff)
     .sort((a, b) => b.event_date.localeCompare(a.event_date) || (b.start_time ?? '').localeCompare(a.start_time ?? ''))[0]
 

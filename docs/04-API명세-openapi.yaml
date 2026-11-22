@@ -382,6 +382,41 @@ paths:
               schema:
                 $ref: '#/components/schemas/SurveyTemplateView'
   /surveys/onboarding/responses:
+    put:
+      summary: 온보딩 설문 다시 하기
+      tags:
+      - 온보딩 설문
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SurveyResponseIn'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyProfile'
+        '400':
+          description: VALIDATION_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: ALREADY_SUBMITTED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     post:
       summary: 온보딩 설문 응답 제출
       tags:
@@ -407,6 +442,24 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: ALREADY_SUBMITTED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /surveys/onboarding/responses/me:
+    get:
+      summary: 내가 낸 설문 응답
+      tags:
+      - 온보딩 설문
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SurveyMyResponse'
+        '404':
+          description: NOT_FOUND
           content:
             application/json:
               schema:
@@ -4587,6 +4640,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        survey_retake_at:
+          type: string
+          format: date-time
+          nullable: true
         height_cm:
           type: integer
           nullable: true
@@ -5847,6 +5904,41 @@ components:
       type: object
       required:
       - question_id
+    SurveyAnswerView:
+      properties:
+        question_id:
+          type: integer
+        selected_option_ids:
+          items:
+            type: integer
+          type: array
+        numeric_value:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          nullable: true
+      type: object
+      required:
+      - question_id
+    SurveyMyResponse:
+      properties:
+        template_id:
+          type: integer
+        submitted_at:
+          type: string
+          format: date-time
+        retake_at:
+          type: string
+          format: date-time
+        answers:
+          items:
+            $ref: '#/components/schemas/SurveyAnswerView'
+          type: array
+      type: object
+      required:
+      - template_id
+      - submitted_at
+      - retake_at
+      - answers
     SurveyOptionView:
       properties:
         id:

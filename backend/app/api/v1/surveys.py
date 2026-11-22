@@ -5,6 +5,8 @@
 엔드포인트
 - GET  /surveys/onboarding           활성 설문 템플릿 조회 (구현됨)
 - POST /surveys/onboarding/responses 설문 응답 제출 → prior 계산 (구현됨)
+- GET  /surveys/onboarding/responses/me 내가 낸 답 (다시 할 때 채워 넣기) (구현됨)
+- PUT  /surveys/onboarding/responses 설문 다시 하기 — 30일에 한 번, 원하는 사람만 (구현됨)
 - GET  /me/profile                   내 실력·포지션 프로필 (구현됨)
 - PUT  /me/positions                 가능/선호 포지션 수정 (구현됨)
 - PUT  /teams/{team_id}/self-rank    팀 가입 후 "이 동호회에서 내 실력 위치" 응답 (구현됨)
@@ -23,6 +25,7 @@ from app.schemas.survey import (
     MyProfile,
     PositionsUpdate,
     SelfRankIn,
+    SurveyMyResponse,
     SurveyResponseIn,
     SurveyTemplateView,
 )
@@ -52,7 +55,7 @@ def get_onboarding_survey(db: DB):
     responses=errors(_400="VALIDATION_ERROR", _409="ALREADY_SUBMITTED"), summary="온보딩 설문 응답 제출",
 )
 def submit_onboarding_survey(db: DB, user: CurrentUser, body: SurveyResponseIn):
-    """설문 응답을 저장하고 초기 실력·포지션 프로필을 만든다. 1인 1회.
+    """설문 응답을 저장하고 초기 실력·포지션 프로필을 만든다. 처음 한 번 (다시 하기는 PUT).
 
     - **권한:** 로그인 사용자.
     - **처리:** 15개 문항 전부 응답했는지, 유형별 형식(STEPPER는 숫자만, MULTI_CHIP은 1개 이상,
@@ -65,6 +68,46 @@ def submit_onboarding_survey(db: DB, user: CurrentUser, body: SurveyResponseIn):
     - **설계서:** 7.3절, FR-03, F1, 8.4절, 스펙 5절 · 7절, 6.2절 `player_profiles`.
     """
     survey_service.submit(db, user, body)
+    return survey_service.my_profile(db, user)
+
+
+@router.get(
+    "/surveys/onboarding/responses/me", response_model=SurveyMyResponse,
+    responses=errors(_404="NOT_FOUND"), summary="내가 낸 설문 응답",
+)
+def my_survey_response(db: DB, user: CurrentUser):
+    """내가 마지막으로 낸 답과, 다시 할 수 있게 되는 시각을 돌려준다.
+
+    - **권한:** 로그인 사용자 (자기 것만).
+    - **처리:** 설문 다시 하기 화면이 지난 답을 미리 채우는 데 쓴다 — 달라진 것만 고치고 넘어가게.
+    - **오류:** `404 NOT_FOUND` — 아직 설문을 한 적이 없음.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-03, S-03, docs/09 3-10.
+    """
+    resp = survey_service.my_response(db, user)
+    return SurveyMyResponse(
+        template_id=resp.template_id, submitted_at=resp.submitted_at,
+        retake_at=survey_service.retake_at(resp), answers=resp.answers,
+    )
+
+
+@router.put(
+    "/surveys/onboarding/responses", response_model=MyProfile,
+    responses=errors(_400="VALIDATION_ERROR", _404="NOT_FOUND", _409="ALREADY_SUBMITTED"), summary="온보딩 설문 다시 하기",
+)
+def retake_onboarding_survey(db: DB, user: CurrentUser, body: SurveyResponseIn):
+    """실력이 달라졌다고 느끼는 사람이 설문을 다시 한다. 요구하지 않는다 — 안 해도 달라지는 것은 없다.
+
+    - **권한:** 로그인 사용자.
+    - **처리:** 마지막 응답에서 30일이 지났으면 답을 덮어쓰고(응답 행은 하나 그대로) 제출 시각을 지금으로 바꾼다.
+      선호 포지션을 소속 팀 전부에 다시 반영하고 팀별 `prior_overall` 을 재계산한다 — 경기 기록이 있으면 새 사전값에서
+      다시 재생한다. 팀별 "이 팀에서 내 실력 위치"는 설문 문항이 아니므로 그대로 둔다.
+    - **오류:** `409 ALREADY_SUBMITTED` — 아직 30일이 안 지남 (문구에 다시 할 수 있는 날짜).
+      `404 NOT_FOUND` — 처음이면 POST. `400 VALIDATION_ERROR` — 누락·형식.
+    - **상태:** `구현됨`.
+    - **설계서:** FR-03, 8.4절, docs/09 3-10.
+    """
+    survey_service.retake(db, user, body)
     return survey_service.my_profile(db, user)
 
 

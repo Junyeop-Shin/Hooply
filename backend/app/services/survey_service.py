@@ -3,6 +3,7 @@
 핵심 흐름
   1. `submit()`         : 응답 검증·저장 → users.onboarding_completed → 키 반영 → 포지션 반영
                           → 소속된 모든 팀의 prior 재계산
+     `retake()`         : 30일이 지났으면 같은 응답 행의 답을 덮어쓰고 같은 반영을 다시 한다 (강제 없음 — 원하는 사람만)
   2. `recompute_team_priors(team_id)` : 팀 안의 설문 응답자들끼리 z-score 를 내 prior_overall 을 갱신
                           (팀 가입·설문 제출·매니저 정렬 때마다 호출된다 — 상대 위치는 팀이 바뀔 때마다 달라지므로)
 
@@ -16,15 +17,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from statistics import mean, pstdev
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core import errors
+from app.core.config import get_settings
 from app.core.errors import ErrorDetail
 from app.db.session import lock_team_stats
 from app.models import (
@@ -54,6 +57,12 @@ from app.services.player_service import grade_of
 PRIOR_SCALE = 2.0  # z 1.0 = 쿼터당 2점 (9.3절: 개인 실력 표준편차 2점)
 SURVEY_CONFIDENCE = Decimal("0.40")  # 설문만 있는 회원의 skill_confidence (게스트 등급 0.25 보다 높게)
 MIN_SAMPLE_FOR_Z = 5  # 스펙 5절: 표본이 5명 미만이면 z 를 계산하지 않고 0(클럽 평균)으로 둔다
+SURVEY_RETAKE_DAYS = 30  # 설문을 다시 할 수 있는 간격 (docs/09 3-10). 다시 하라고 요구하지 않는다 — 실력이 달라졌다고 느끼는 사람만
+
+
+def _now() -> datetime:
+    """지금 (테스트가 30일 뒤로 돌려 본다)."""
+    return datetime.now(UTC)
 
 # 팀별 자기 위치(구 E3, player_profiles.self_rank_level) → 0~4 점수. 상위일수록 높다
 SELF_RANK_SCORE: dict[SelfRankLevel, int] = {
@@ -146,32 +155,24 @@ def _validate_answers(tpl: SurveyTemplate, answers: list[SurveyAnswerIn]) -> dic
     return seen
 
 
-def submit(db: Session, user: User, body: SurveyResponseIn) -> SurveyResponse:
-    """응답을 저장하고 프로필을 만든다. 1인 1회 — 두 번째 제출은 409 ALREADY_SUBMITTED.
+_ALREADY = "이미 설문을 했어요. 실력이 달라졌다면 내 프로필에서 다시 할 수 있어요."
 
-    부수 효과: survey_responses/answers INSERT, users.onboarding_completed·height_cm UPDATE,
-    소속 팀 전부의 player_positions 교체 + prior 재계산, commit.
-    """
-    if db.scalar(select(SurveyResponse.id).where(SurveyResponse.user_id == user.id)):
-        raise errors.AlreadySubmitted("이미 설문을 제출했어요. 수정은 매니저·관리자 보정으로만 가능해요.")
+
+def retake_at(resp: SurveyResponse) -> datetime:
+    """이 응답을 다시 할 수 있게 되는 시각 = 마지막으로 답한 때 + SURVEY_RETAKE_DAYS."""
+    at = resp.submitted_at if resp.submitted_at.tzinfo else resp.submitted_at.replace(tzinfo=UTC)
+    return at + timedelta(days=SURVEY_RETAKE_DAYS)
+
+
+def _tpl_checked(db: Session, body: SurveyResponseIn) -> tuple[SurveyTemplate, dict[int, SurveyAnswerIn]]:
     tpl = get_active_template(db)
     if body.template_id is not None and body.template_id != tpl.id:
         raise errors.ValidationError("설문이 새로 바뀌었어요. 화면을 새로고침해 주세요.")
-    by_q = _validate_answers(tpl, body.answers)
+    return tpl, _validate_answers(tpl, body.answers)
 
-    resp = SurveyResponse(template_id=tpl.id, user_id=user.id, submitted_at=datetime.now(UTC))
-    for qid, a in by_q.items():
-        resp.answers.append(
-            SurveyAnswer(question_id=qid, selected_option_ids=list(a.selected_option_ids), numeric_value=a.numeric_value)
-        )
-    db.add(resp)
-    try:
-        db.flush()
-    except IntegrityError:  # 두 번 눌러 동시에 제출 — uq_survey_responses_user 가 하나만 남긴다
-        db.rollback()
-        raise errors.AlreadySubmitted("이미 설문을 제출했어요. 수정은 매니저·관리자 보정으로만 가능해요.") from None
-    user.onboarding_completed = True
 
+def _apply_response(db: Session, user: User, tpl: SurveyTemplate, resp: SurveyResponse) -> None:
+    """응답을 프로필에 반영한다 — 선호 포지션(내 계정 · 소속 팀 전부)과 팀별 prior 재계산. commit 은 호출자."""
     feats = extract_features(tpl, resp, height_cm=user.height_cm)
     user.position_prefs = [p.value for p in preference_from_features(feats)]  # 프로필 수정의 원본
 
@@ -182,8 +183,73 @@ def submit(db: Session, user: User, body: SurveyResponseIn) -> SurveyResponse:
     for p in players:
         apply_positions(db, p, feats)
     db.flush()
-    for team_id in {p.team_id for p in players}:
+    for team_id in sorted({p.team_id for p in players}):  # 팀 잠금을 늘 같은 순서로 (두 팀에 속한 두 사람이 동시에 답해도 엇갈리지 않게)
         recompute_team_priors(db, team_id)
+
+
+def submit(db: Session, user: User, body: SurveyResponseIn) -> SurveyResponse:
+    """응답을 저장하고 프로필을 만든다. 처음 한 번 — 이미 답했으면 409 ALREADY_SUBMITTED (다시 하기는 `retake`).
+
+    부수 효과: survey_responses/answers INSERT, users.onboarding_completed·height_cm UPDATE,
+    소속 팀 전부의 player_positions 교체 + prior 재계산, commit.
+    """
+    if db.scalar(select(SurveyResponse.id).where(SurveyResponse.user_id == user.id)):
+        raise errors.AlreadySubmitted(_ALREADY)
+    tpl, by_q = _tpl_checked(db, body)
+
+    resp = SurveyResponse(template_id=tpl.id, user_id=user.id, submitted_at=_now())
+    for qid, a in by_q.items():
+        resp.answers.append(
+            SurveyAnswer(question_id=qid, selected_option_ids=list(a.selected_option_ids), numeric_value=a.numeric_value)
+        )
+    db.add(resp)
+    try:
+        db.flush()
+    except IntegrityError:  # 두 번 눌러 동시에 제출 — uq_survey_responses_user 가 하나만 남긴다
+        db.rollback()
+        raise errors.AlreadySubmitted(_ALREADY) from None
+    user.onboarding_completed = True
+    _apply_response(db, user, tpl, resp)
+    db.commit()
+    return resp
+
+
+def my_response(db: Session, user: User) -> SurveyResponse:
+    """내가 마지막으로 낸 응답 (답 포함). 다시 할 때 지난 답을 채워 넣는 데 쓴다. 없으면 404."""
+    resp = db.scalar(
+        select(SurveyResponse).where(SurveyResponse.user_id == user.id).options(selectinload(SurveyResponse.answers))
+    )
+    if resp is None:
+        raise errors.NotFound("아직 설문을 한 적이 없어요.")
+    return resp
+
+
+def retake(db: Session, user: User, body: SurveyResponseIn) -> SurveyResponse:
+    """설문을 다시 한다 (docs/09 3-10) — 같은 응답 행의 답을 덮어쓰고 포지션 · 팀 prior 를 다시 계산한다.
+
+    30일(SURVEY_RETAKE_DAYS)에 한 번. 등급을 보며 여러 번 고쳐 맞추지 못하게, 그리고 답할 때마다 도는 팀 전체
+    재계산이 잦아지지 않게 간격을 둔다. 응답 행을 먼저 잠가(FOR UPDATE) 두 번 눌러도 한 번만 반영된다.
+    부수 효과: survey_answers 교체, submitted_at · template_id 갱신, player_positions 교체 + prior 재계산, commit.
+    """
+    resp = db.scalar(select(SurveyResponse).where(SurveyResponse.user_id == user.id).with_for_update())
+    if resp is None:
+        raise errors.NotFound("아직 설문을 한 적이 없어요. 먼저 설문을 해 주세요.")
+    if _now() < retake_at(resp):
+        d = retake_at(resp).astimezone(ZoneInfo(get_settings().timezone))
+        raise errors.AlreadySubmitted(f"설문은 {d.month}월 {d.day}일부터 다시 할 수 있어요.")
+    tpl, by_q = _tpl_checked(db, body)
+
+    for old in list(resp.answers):
+        db.delete(old)
+    db.flush()  # DELETE 를 먼저 내보내야 같은 문항을 다시 넣을 때 UNIQUE(response_id, question_id) 에 안 걸린다
+    resp.answers = [
+        SurveyAnswer(question_id=qid, selected_option_ids=list(a.selected_option_ids), numeric_value=a.numeric_value)
+        for qid, a in by_q.items()
+    ]
+    resp.template_id = tpl.id  # 그사이 설문이 새 버전으로 바뀌었으면 새 버전의 답이 된다
+    resp.submitted_at = _now()
+    db.flush()
+    _apply_response(db, user, tpl, resp)
     db.commit()
     return resp
 
@@ -595,6 +661,7 @@ def my_profile(db: Session, user: User) -> MyProfile:
     return MyProfile(
         onboarding_completed=user.onboarding_completed,
         survey_submitted_at=resp.submitted_at if resp else None,
+        survey_retake_at=retake_at(resp) if resp else None,
         height_cm=user.height_cm, primary_position=primary, playable_positions=playable, teams=teams,
     )
 

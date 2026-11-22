@@ -156,6 +156,14 @@ export interface SurveyAnswerIn {
   numeric_value?: number
 }
 
+/** 내가 마지막으로 낸 설문 응답 — GET /surveys/onboarding/responses/me (다시 할 때 채워 넣기) */
+export interface SurveyMyResponse {
+  template_id: number
+  submitted_at: string
+  retake_at: string
+  answers: { question_id: number; selected_option_ids: number[]; numeric_value: string | number | null }[]
+}
+
 export interface TeamProfileSummary {
   team_id: number
   team_name: string
@@ -171,6 +179,8 @@ export interface TeamProfileSummary {
 export interface MyProfile {
   onboarding_completed: boolean
   survey_submitted_at: string | null
+  /** 설문을 다시 할 수 있게 되는 시각 (마지막 응답 + 30일). 설문 전이면 null */
+  survey_retake_at: string | null
   height_cm: number | null
   primary_position: Position | null
   playable_positions: Position[]
