@@ -82,7 +82,7 @@ def login(db: DB, body: LoginRequest, request: Request):
     - **권한:** 비회원 (인증 불필요).
     - **처리:** 삭제되지 않은 계정을 이메일로 찾고, 입력한 비밀번호를 같은 방식으로 해시해
       저장된 해시와 비교한다. 소셜 전용 계정(`password_hash` 없음)은 이 경로로 로그인할 수 없다.
-      성공하면 access 30분 / refresh 14일 JWT를 발급한다.
+      성공하면 access 30분 / refresh 60일 JWT를 발급한다.
     - **오류:** `401 INVALID_CREDENTIALS` — 이메일 또는 비밀번호 불일치 (어느 쪽이 틀렸는지
       구분하지 않는다. 없는 계정도 같은 시간이 걸리도록 가짜 해시로 검증한다).
       `429 RATE_LIMITED` — 같은 IP 로 분당 10회 초과, 또는 같은 IP 에서 같은 이메일로 10분 안에 **실패** 10회.
@@ -176,7 +176,7 @@ def refresh(db: DB, body: RefreshRequest):
       같은 토큰으로 동시에 두 번 갱신하면 하나만 성공하고 나머지는 401.
     - **오류:** `401 TOKEN_EXPIRED` — 토큰 만료·위조·타입 불일치·이미 사용·비밀번호 변경 전 발급, 또는 삭제된 계정.
     - **상태:** `구현됨`.
-    - **설계서:** 7.1절 공통 규약 (access 30분 / refresh 14일), 7.3절 인증.
+    - **설계서:** 7.1절 공통 규약 (access 30분 / refresh 60일), 7.3절 인증.
     """
     return auth_service.refresh(db, body.refresh_token)
 

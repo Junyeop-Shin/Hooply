@@ -1,4 +1,4 @@
-"""11.5절: 비밀번호는 bcrypt 단방향 해시, 토큰은 JWT (access 30분 / refresh 14일).
+"""11.5절: 비밀번호는 bcrypt 단방향 해시, 토큰은 JWT (access 30분 / refresh 60일).
 
 이 모듈에는 DB 나 HTTP 를 모르는 순수 함수만 둔다. 호출하는 쪽:
 
@@ -85,7 +85,7 @@ def create_access_token(user_id: int, version: int = 0) -> str:
 
 
 def create_refresh_token(user_id: int, version: int = 0) -> str:
-    """refresh 토큰 (기본 14일, `Settings.jwt_refresh_days`). `TokenPair.refresh_token`."""
+    """refresh 토큰 (기본 60일, `Settings.jwt_refresh_days`). `TokenPair.refresh_token`."""
     return _create_token(user_id, "refresh", timedelta(days=get_settings().jwt_refresh_days), version)
 
 
@@ -104,8 +104,8 @@ def decode_token(token: str, expected_type: str) -> tuple[int, int] | None:
     `sub` 가 없거나 정수가 아님. 이유를 구분하지 않고 전부 None 으로 뭉개는 것은 의도다 —
     호출부는 어느 경우든 `TOKEN_EXPIRED` 로 응답하면 되고, 공격자에게 힌트를 주지 않는다.
 
-    `expected_type` 대조가 중요한 이유: refresh 토큰은 14일짜리라 유출 시 피해가 크다. 이 검사가
-    없으면 refresh 토큰을 Authorization 헤더에 넣어 access 토큰처럼 14일 동안 API 를 부를 수 있다.
+    `expected_type` 대조가 중요한 이유: refresh 토큰은 60일짜리라 유출 시 피해가 크다. 이 검사가
+    없으면 refresh 토큰을 Authorization 헤더에 넣어 access 토큰처럼 60일 동안 API 를 부를 수 있다.
     반대로 access 토큰으로 refresh 를 시도하는 것도 막는다.
       - deps.get_current_user  → decode_token(token, "access")
       - auth_service.refresh   → decode_token(token, "refresh")

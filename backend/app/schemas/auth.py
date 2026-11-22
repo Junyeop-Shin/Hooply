@@ -61,14 +61,14 @@ class LoginRequest(BaseModel):
 
 
 class TokenPair(BaseModel):
-    """로그인·가입·refresh 성공 응답. 7.1절: access 30분 / refresh 14일.
+    """로그인·가입·refresh 성공 응답. 7.1절: access 30분 / refresh 60일.
 
     프론트는 access 를 `Authorization: Bearer <access_token>` 헤더로 보내고,
     401 TOKEN_EXPIRED 를 받으면 refresh 로 `POST /auth/refresh` 를 호출해 새 쌍을 받는다.
     """
 
     access_token: str = Field(description="API 호출용 JWT. 짧게 산다 (기본 30분)")
-    refresh_token: str = Field(description="access 재발급용 JWT (기본 14일). 헤더에 넣지 말고 refresh 요청 본문에만 쓴다")
+    refresh_token: str = Field(description="access 재발급용 JWT (기본 60일). 헤더에 넣지 말고 refresh 요청 본문에만 쓴다")
     token_type: str = Field(default="bearer", description="항상 'bearer'. OAuth2 관례상 포함")
 
 

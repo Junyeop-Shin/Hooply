@@ -5,13 +5,14 @@ import { Link, useNavigate } from 'react-router-dom'
 import { authApi, ME_STALE } from '../api/auth'
 import { eventsApi } from '../api/events'
 import { teamsApi } from '../api/teams'
-import { localISODate, type EventView } from '../api/types'
+import { localISODate, type EventView, type Page } from '../api/types'
 import { errorMessage } from '../api/client'
 import { Badge, Button, Card, EmptyState, LoadError, RoleBadge, SectionTitle, Spinner, TeamStatusBadge } from '../components/ui'
 import { confirm, toast } from '../store/feedback'
 import { TutorialCard, TutorialPrompt } from '../components/tutorial'
 import { Content, Screen, TabBar, TopBar } from '../components/layout'
 import { fmtEvent } from '../lib/format'
+import { invalidateEvent } from '../lib/invalidate'
 import { josa } from '../lib/josa'
 
 export function useMe() {
@@ -101,17 +102,7 @@ export function HomePage() {
               <button type="button" onClick={() => skipUnrecorded(unrecorded.id)} className="min-h-11 shrink-0 px-2 text-xs text-bar-sub">기록 안 함</button>
             </div>
           )}
-          {me.data && !me.data.onboarding_completed && me.data.tutorial_state !== 'ACTIVE' ? null : next ? (
-            <Link to={`/events/${next.id}`} state={{ from: '/' }} className="mt-3 flex items-center justify-between rounded-xl bg-white/10 px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-[11px] text-bar-sub">다음 일정 {dday(next.event_date)}{nameOf(next.team_id) ? ` · ${nameOf(next.team_id)}` : ''}</p>
-                <p className="truncate text-sm font-bold">{fmtEvent(next)}{next.venue ? ` · ${next.venue}` : ''}</p>
-              </div>
-              <span className={`ml-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${next.my_attendance === 'ATTEND' ? 'bg-brand text-on-brand' : next.my_attendance === 'ABSENT' ? 'bg-white/10 text-bar-sub' : 'bg-warn-soft text-warn-ink'}`}>
-                {next.my_attendance === 'ATTEND' ? '참석' : next.my_attendance === 'ABSENT' ? '불참' : '응답하기'}
-              </span>
-            </Link>
-          ) : null}
+          {me.data && !me.data.onboarding_completed && me.data.tutorial_state !== 'ACTIVE' ? null : next ? <NextEvent e={next} teamName={nameOf(next.team_id)} /> : null}
         </div>
 
         {me.data && <TutorialCard me={me.data} />}
@@ -153,6 +144,85 @@ export function HomePage() {
       </Content>
       <TabBar />
     </Screen>
+  )
+}
+
+/**
+ * 홈에서 바로 응답 (docs/10 F-2) — 일정 화면의 응답과 같은 API · 같은 순서 보장(scope)을 쓴다.
+ * 이 팀의 일정 목록 캐시를 먼저 바꿔 누르는 즉시 바뀐 것처럼 보여 주고, 실패하면 되돌린다.
+ */
+function useQuickRsvp(e: EventView) {
+  const qc = useQueryClient()
+  const lists = ['events', 'team', e.team_id]
+  const key = ['rsvp', e.id]
+  return useMutation({
+    mutationKey: key,
+    mutationFn: (status: 'ATTEND' | 'ABSENT') => eventsApi.respond(e.id, status),
+    scope: { id: `rsvp-${e.id}` },  // 연달아 눌러도 순서대로 보낸다
+    onMutate: async (status) => {
+      await qc.cancelQueries({ queryKey: lists })
+      const prev = qc.getQueriesData<unknown>({ queryKey: lists })
+      // 같은 접두어 아래에 일정 목록이 아닌 캐시(리더보드 기간 · 팀 화면의 이어 받기)도 있어, 일정 목록 모양일 때만 바꾼다
+      qc.setQueriesData<Page<EventView>>({ queryKey: lists }, (old) => !old || !Array.isArray(old.items) ? old : {
+        ...old,
+        items: old.items.map((x) => x.id !== e.id || !('my_attendance' in x) ? x
+          : { ...x, my_attendance: status, attend_count: x.attend_count + (status === 'ATTEND' ? 1 : 0) - (x.my_attendance === 'ATTEND' ? 1 : 0) }),
+      })
+      return { prev }
+    },
+    onError: (err, _status, ctx) => {
+      ctx?.prev.forEach(([k, data]) => qc.setQueryData(k, data))
+      toast(errorMessage(err, '응답하지 못했어요.'), 'error')
+    },
+    // 연달아 누르면 아직 보낼 응답이 남아 있다(자기 자신도 센다) — 마지막 것만 다시 받는다. 시작 안내의 "참석 응답" 단계도 여기서 끝난다
+    onSettled: () => {
+      if (qc.isMutating({ mutationKey: key }) > 1) return
+      invalidateEvent(qc, e.id, e.team_id)
+      qc.invalidateQueries({ queryKey: ['me', 'tutorial'] })
+    },
+  })
+}
+
+/** 홈 위쪽의 "다음 일정". 응답을 받는 중이면 일정 화면까지 가지 않고 여기서 참석 · 불참을 고른다 — 고른 쪽이 눌린 채로 남아 다시 바꿀 수 있다 */
+function NextEvent({ e, teamName }: { e: EventView; teamName?: string }) {
+  const respond = useQuickRsvp(e)
+  const mine = e.my_attendance
+  return (
+    <div className="mt-3 rounded-xl bg-white/10">
+      <Link to={`/events/${e.id}`} state={{ from: '/' }} className="flex min-h-11 items-center justify-between px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-[11px] text-bar-sub">다음 일정 {dday(e.event_date)}{teamName ? ` · ${teamName}` : ''}</p>
+          <p className="truncate text-sm font-bold">{fmtEvent(e)}{e.venue ? ` · ${e.venue}` : ''}</p>
+        </div>
+        {e.rsvp_open ? (
+          // 응답은 아래 버튼이 보여 준다. 아직 안 했으면 눈에 띄게, 했으면 "자세히" 화살표만
+          mine === 'ATTEND' || mine === 'ABSENT' ? <span aria-hidden className="ml-2 shrink-0 text-bar-sub">→</span>
+            : <span className="ml-2 shrink-0 rounded-full bg-warn-soft px-2.5 py-1 text-[11px] font-bold text-warn-ink">미응답</span>
+        ) : (
+          <span className={`ml-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${mine === 'ATTEND' ? 'bg-brand text-on-brand' : 'bg-white/10 text-bar-sub'}`}>
+            {mine === 'ATTEND' ? '참석' : mine === 'ABSENT' ? '불참' : '응답 마감'}
+          </span>
+        )}
+      </Link>
+      {e.rsvp_open && (
+        <div role="group" aria-label="참석 응답" className="grid grid-cols-2 gap-2 px-3 pb-3">
+          {(['ATTEND', 'ABSENT'] as const).map((st) => {
+            const on = mine === st
+            return (
+              <button
+                key={st} type="button" aria-pressed={on}
+                onClick={() => { if (!on) respond.mutate(st) }}
+                className={`min-h-11 rounded-lg border text-sm font-bold transition ${
+                  on ? (st === 'ATTEND' ? 'border-brand bg-brand text-on-brand' : 'border-bar-ink bg-bar-ink text-bar') : 'border-white/30 text-bar-ink'
+                }`}
+              >
+                {st === 'ATTEND' ? '참석' : '불참'}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 

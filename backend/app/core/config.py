@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     # access 토큰 수명(분). API 호출마다 Authorization 헤더로 보내는 짧은 토큰.
     jwt_access_minutes: int = 30  # 7.1절: access 30분
     # refresh 토큰 수명(일). access 가 만료되면 POST /auth/refresh 로 재발급받을 때 쓴다.
-    jwt_refresh_days: int = 14  # 7.1절: refresh 14일
+    jwt_refresh_days: int = 60  # 7.1절: refresh 60일 — 60일 안에 한 번만 열면 로그인이 이어진다 (docs/10 F-4)
 
     # --- 카카오 로그인 (11.5절) ---
     # 카카오 디벨로퍼스 콘솔의 [앱 키] → REST API 키. 인가 URL의 client_id 로 들어간다.

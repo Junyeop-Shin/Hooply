@@ -10,3 +10,13 @@ export function fmtEvent(e: EventView) {
   const time = start ? ` ${start}${end ? `~${end}${nextDay}` : ''}` : ''
   return `${d.getMonth() + 1}/${d.getDate()} (${day})${time}`
 }
+
+/**
+ * 응답 마감 시각을 "9/20 오후 10:00" 으로 (기기 시각 기준).
+ * 형식이 고정이라 직접 만든다 — 브라우저의 지역 표기(Intl)는 처음 부를 때 느리고 기기마다 표기가 조금씩 다르다
+ */
+export function fmtDeadline(iso: string) {
+  const d = new Date(iso)
+  const h = d.getHours()
+  return `${d.getMonth() + 1}/${d.getDate()} ${h < 12 ? '오전' : '오후'} ${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`
+}

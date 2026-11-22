@@ -5,7 +5,7 @@
 ## 1. 공통 규약
 
 - Base URL: `https://hooply-backend.onrender.com/api/v1` (로컬 `http://localhost:8000/api/v1`)
-- 인증: `Authorization: Bearer <access_token>` (JWT, access 30분 / refresh 14일). 토큰에는 계정의 토큰 세대(`users.token_version`)가 실려 있어, 비밀번호를 바꾸거나 재설정하면 그 전에 발급된 토큰은 모든 기기에서 401 이 된다. 가입·로그인·토큰 갱신·로그아웃·비밀번호 찾기/재설정·카카오 로그인 URL/콜백·설문 템플릿 조회·프로필 사진 이미지(`?v=키`)·헬스 체크만 인증 없이 호출.
+- 인증: `Authorization: Bearer <access_token>` (JWT, access 30분 / refresh 60일). 토큰에는 계정의 토큰 세대(`users.token_version`)가 실려 있어, 비밀번호를 바꾸거나 재설정하면 그 전에 발급된 토큰은 모든 기기에서 401 이 된다. 가입·로그인·토큰 갱신·로그아웃·비밀번호 찾기/재설정·카카오 로그인 URL/콜백·설문 템플릿 조회·프로필 사진 이미지(`?v=키`)·헬스 체크만 인증 없이 호출.
 - 본문: `application/json`, 필드명 `snake_case`, 시각은 ISO 8601(TIMESTAMPTZ).
 - 목록: `{ items: [...] }` (ItemList) 또는 `{ items, meta: { page, size, total, has_next } }` (Page).
 - 오류: 모든 4xx/5xx 본문은 `ErrorResponse { code, message, details[]{field, reason} }`. 프론트는 `code` 로 분기하고 `message` 를 그대로 노출한다.

@@ -150,7 +150,7 @@ class UserAvatar(Base):
 class RevokedToken(Base):
     """로그아웃하거나 회전(refresh)으로 버려진 refresh 토큰의 `jti`.
 
-    refresh 토큰은 14일짜리라 로그아웃 뒤에도 유효하면 기기 분실 시 위험하다. 폐기 목록에 있는 jti 로는
+    refresh 토큰은 60일짜리라 로그아웃 뒤에도 유효하면 기기 분실 시 위험하다. 폐기 목록에 있는 jti 로는
     재발급을 거부한다. `expires_at` 이 지난 행은 어차피 서명 만료로 막히므로 지워도 된다.
     """
 

@@ -83,6 +83,11 @@
   --color-bar-ink: #ffffff;
   --color-bar-sub: #c2cde0;
 
+  /* 보조 버튼 — 밝은 화면에서는 상단 바와 같은 남색(테두리도 같은 색이라 안 보인다) */
+  --color-btn2: #14213d;
+  --color-btn2-ink: #ffffff;
+  --color-btn2-line: #14213d;
+
   /* 팀 색 — 블랙 팀은 늘 어둡고 화이트 팀은 늘 밝다. 유니폼 색이라 모드와 무관하다 */
   --color-team-black: #111827;
   --color-team-black-ink: #ffffff;
@@ -139,6 +144,11 @@
     --color-bar: #0e1726;
     --color-bar-ink: #f1f5fa;
     --color-bar-sub: #a3b3cc;
+
+    /* 어두운 화면의 보조 버튼 — 바탕(#0b1220) · 카드(#141d2e)와 구분되는 면에, 둘 다와 3:1 이상인 테두리 */
+    --color-btn2: #26334c;
+    --color-btn2-ink: #f1f5fa;
+    --color-btn2-line: #5c6b85;
 
     --color-team-black: #0a0f18;
     --color-team-white: #dcd9d4;   /* 순백은 눈이 부셔 한 단계 낮춘다. 글자는 그대로 진하다 */

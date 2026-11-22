@@ -16,7 +16,7 @@ APP_DESCRIPTION = """\
 
 ### 공통 규약 (7.1절)
 - **Base URL:** `/api/v1` (아래 경로는 모두 이 접두사 뒤에 붙습니다. `/health`만 예외)
-- **인증:** `Authorization: Bearer <access_token>` — JWT, access 30분 / refresh 14일.
+- **인증:** `Authorization: Bearer <access_token>` — JWT, access 30분 / refresh 60일.
   `POST /auth/login` 또는 `POST /auth/signup`으로 발급받고, 만료되면 `POST /auth/refresh`로 갱신합니다.
   Swagger UI에서는 우측 상단 **Authorize** 버튼에 access 토큰을 넣으면 됩니다.
 - **본문:** `application/json`, 필드명은 `snake_case`.

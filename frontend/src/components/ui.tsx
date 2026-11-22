@@ -17,7 +17,8 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
 const variants: Record<Variant, string> = {
   primary: 'bg-brand text-on-brand hover:brightness-95 active:brightness-90 shadow-sm',
-  secondary: 'bg-bar text-bar-ink hover:opacity-90 active:opacity-80',
+  // 색은 전용 토큰으로 — 어두운 화면에서 상단 바 색을 그대로 쓰면 바탕과 거의 같아 버튼으로 안 보였다 (docs/10 U-2)
+  secondary: 'border border-btn2-line bg-btn2 text-btn2-ink hover:opacity-90 active:opacity-80',
   ghost: 'bg-transparent text-ink-2 hover:bg-sunken',
   danger: 'bg-surface text-danger-ink border border-danger-line hover:bg-danger-soft',
 }

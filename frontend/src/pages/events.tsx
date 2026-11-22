@@ -13,7 +13,8 @@ import { POSITIONS, localISODate, type AttendanceView, type EventCreateInput, ty
 import { invalidateAssignment, invalidateEvent } from '../lib/invalidate'
 import { confirm, toast } from '../store/feedback'
 import { CLOSE_RSVP_CONFIRM } from '../lib/copy'
-import { fmtEvent } from '../lib/format'
+import { fmtDeadline, fmtEvent } from '../lib/format'
+import { eventShareText, eventShareUrl, sharesNames } from '../lib/event-share'
 import { Alert, Avatar, Badge, Button, Card, Field, GradeDot, LoadError, Sheet, Spinner } from '../components/ui'
 import { BottomAction, Content, Screen, TopBar, useFinish, useGoBack } from '../components/layout'
 import { EventTactics } from '../components/tactics'
@@ -167,12 +168,6 @@ export function EventCreatePage() {
   )
 }
 
-/** 응답 마감 시각을 "9/20 오후 10:00" 으로 */
-function fmtDeadline(iso: string) {
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}`
-}
-
 /* ---------- S-10 + S-11 일정 상세 ---------- */
 export function EventDetailPage() {
   const { eventId } = useParams()
@@ -257,6 +252,12 @@ export function EventDetailPage() {
   const canReopen = isManager && e.status === 'CLOSED' && !e.adopted_candidate_id && e.quarter_count === 0
   // 게스트 추가: 팀원은 응답을 받는 동안만, 매니저는 마감 · 확정 뒤에도 경기 기록 전까지 (확정 뒤 참석 변경은 매니저만 — docs/09)
   const canInvite = e.status !== 'CANCELED' && (isManager ? e.quarter_count === 0 : e.rsvp_open && !past)
+  // 일정 알리기 (docs/10 F-1) — 매니저가 응답을 받는 동안 단톡방에 보낸다. 문구는 이 화면이 받은 값으로 만든다 (이름은 팀원만: 게스트는 응답할 일이 없다)
+  const memberRows = (att.data?.items ?? []).filter((i) => i.player.kind === 'MEMBER')
+  const pendingNames = memberRows.filter((i) => i.status === 'PENDING').map((i) => i.player.display_name)
+  const announceText = eventShareText(e, { attend, responded: memberRows.length - pendingNames.length, pending: pendingNames })
+  const canAnnounce = isManager && e.rsvp_open && !past
+  const announce = async () => announceShare(await shareText(announceText, eventShareUrl(id)))
   const openAttendance = () => { setShowAtt(true); requestAnimationFrame(() => attRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })) }
   // 매니저의 다음 할 일 하나 — 화면 아래에 고정한다 (경기 기록이 있으면 보기 · 고치기, 팀을 나누기 전이면 팀 나누기, 시작했으면 기록)
   const toQuarters = () => nav(`/events/${id}/quarters`)
@@ -349,6 +350,15 @@ export function EventDetailPage() {
               ))}
             </div>
             {s.warnings.map((w) => <p key={w} className="mt-2 text-xs text-warn-ink">주의 · {w}</p>)}
+            {canAnnounce && (
+              <div className="mt-3 border-t border-line pt-3">
+                <Button variant="secondary" full className="text-sm" onClick={announce}>카카오톡으로 일정 알리기</Button>
+                {/* 무엇이 나가는지 미리 알린다 — 이름이 실리는 줄 모르고 보내지 않게 */}
+                <p className="mt-1.5 text-center text-xs text-muted">
+                  {sharesNames(announceText) ? `아직 응답 안 한 ${pendingNames.length}명의 이름도 함께 보내요.` : '날짜 · 장소 · 응답 현황과 일정 주소를 보내요.'}
+                </p>
+              </div>
+            )}
           </Card>
         )}
 
@@ -498,12 +508,13 @@ function SurveyProgressCard({ eventId, responded, total, onMsg }: { eventId: num
   const pct = total ? Math.round((responded / total) * 100) : 0
   return (
     <Card>
-      <div className="flex items-center justify-between">
-        <div>
+      {/* 좁은 화면에서 글자가 버튼 밑으로 들어가지 않게: 글자는 줄어들고(낱말 묶음 단위로 줄바꿈) 버튼은 줄어들지 않는다 (docs/10 U-3) */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-sm font-bold text-ink">경기 후 투표 현황</p>
-          <p className="text-xs text-muted">{responded}/{total}명 응답 · 팀원 참석자 기준</p>
+          <p className="text-xs text-muted"><span className="inline-block">{responded}/{total}명 응답</span> <span className="inline-block">(팀원 참석자 기준)</span></p>
         </div>
-        <Button variant="secondary" className="px-3 text-sm" loading={share.isPending} onClick={() => share.mutate()}>독려 메시지 공유</Button>
+        <Button variant="secondary" className="shrink-0 px-3 text-sm" loading={share.isPending} onClick={() => share.mutate()}>독려 메시지 공유</Button>
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sunken"><div className="h-full rounded-full bg-brand transition-all" style={{ width: `${pct}%` }} /></div>
     </Card>

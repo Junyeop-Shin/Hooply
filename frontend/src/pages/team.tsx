@@ -239,10 +239,11 @@ export function TeamDetailPage() {
           </div>
         )}
         {t.status === 'ACTIVE' && (
-          // 활성 팀에서도 팀원 누구나 친구를 초대할 수 있게 (docs/09 3-16)
+          // 활성 팀에서도 팀원 누구나 친구를 초대할 수 있게 (docs/09 3-16). 이미 굴러가는 팀에서는 초대가 주인공이 아니라
+          // 조용한 글자 버튼으로 둔다 — 노란 면은 팀 화면에서 일정보다 먼저 눈에 들어왔다 (docs/10 U-1)
           <div className="mt-2 flex items-center justify-between gap-2 text-sm">
             <span className="text-bar-sub">팀 코드 <button className="min-h-11 font-mono font-bold tracking-[0.15em] text-bar-ink" onClick={() => copyText(t.team_code, '팀 코드를 복사했어요.')} aria-label={`팀 코드 ${t.team_code} 복사`}>{t.team_code}</button></span>
-            <button className="min-h-11 rounded-lg bg-[#FEE500] px-3 text-xs font-semibold text-[#191919]" onClick={() => shareInvite(t.name, t.team_code)}>카카오톡으로 친구 초대</button>
+            <button className="-mr-2 min-h-11 px-2 text-xs font-semibold text-bar-ink underline underline-offset-2" onClick={() => shareInvite(t.name, t.team_code)}>카카오톡으로 초대</button>
           </div>
         )}
       </div>

@@ -48,7 +48,7 @@ def normalize_email(email: str) -> str:
 def issue_tokens(user: User) -> TokenPair:
     """주어진 사용자에게 access/refresh 토큰 한 쌍을 발급한다.
 
-    7.1절 규약대로 access 30분 / refresh 14일 만료이며, 실제 기간은
+    7.1절 규약대로 access 30분 / refresh 60일 만료이며, 실제 기간은
     `Settings.jwt_access_minutes` / `jwt_refresh_days`에서 읽는다. 두 토큰 모두 계정의 현재 세대
     (`users.token_version`)를 싣는다. DB를 건드리지 않는 순수 함수다. signup / login / refresh /
     비밀번호 변경 / 카카오 로그인이 공통으로 호출한다.

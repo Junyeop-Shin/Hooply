@@ -1,6 +1,7 @@
 """계정 보안·관리: 이메일 정규화 · 요청 제한 · 로그아웃(refresh 폐기) · 비밀번호 변경 · 계정 삭제 · 팀 나가기."""
 
 import pytest
+from jose import jwt
 
 from app.core import ratelimit
 from app.core.config import get_settings
@@ -52,6 +53,20 @@ def test_logout_revokes_refresh_and_rotation(client, signup):
     assert client.post(f"{API}/auth/logout", json={"refresh_token": new_pair["refresh_token"]}).status_code == 204
     assert client.post(f"{API}/auth/refresh", json={"refresh_token": new_pair["refresh_token"]}).status_code == 401
     assert client.post(f"{API}/auth/logout", json={"refresh_token": "garbage"}).status_code == 204
+
+
+# 검증: 로그인은 60일 유지된다 — 두 주 넘게 안 들어온 팀원이 링크를 누를 때마다 다시 로그인하지 않게 (docs/10 F-4).
+# 재발급한 refresh 도 그때부터 60일이라, 60일 안에 한 번만 열면 계속 유지된다. access 는 그대로 30분
+def test_login_stays_for_60_days(client, signup):
+    signup("stay@example.com")
+    pair = _login(client, "stay@example.com").json()
+    refresh = jwt.get_unverified_claims(pair["refresh_token"])
+    assert refresh["exp"] - refresh["iat"] == 60 * 24 * 3600
+    access = jwt.get_unverified_claims(pair["access_token"])
+    assert access["exp"] - access["iat"] == 30 * 60
+    rotated = client.post(f"{API}/auth/refresh", json={"refresh_token": pair["refresh_token"]}).json()
+    again = jwt.get_unverified_claims(rotated["refresh_token"])
+    assert again["exp"] - again["iat"] == 60 * 24 * 3600
 
 
 # 검증: 비밀번호 변경은 현재 비밀번호가 맞아야 하고, 바꾼 뒤에는 새 비밀번호로만 로그인된다
